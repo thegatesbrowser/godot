@@ -285,6 +285,7 @@ public:
 	const ShaderCapabilities &get_shader_capabilities() const { return shader_capabilities; };
 	const StorageBufferCapabilities &get_storage_buffer_capabilities() const { return storage_buffer_capabilities; };
 	const VkPhysicalDeviceFeatures &get_physical_device_features() const { return physical_device_features; };
+	const VkPhysicalDeviceMemoryProperties &get_memory_properties() const { return memory_properties; };
 	bool get_pipeline_cache_control_support() const { return pipeline_cache_control_support; };
 
 	VkDevice get_device();
