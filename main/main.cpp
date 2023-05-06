@@ -234,6 +234,11 @@ static String validate_extension_api_file;
 #endif
 bool profile_gpu = false;
 
+// TheGates
+#ifdef THE_GATES_SANDBOX
+static int external_image_fd = -1;
+#endif
+
 // Constants.
 
 static const String NULL_DISPLAY_DRIVER("headless");
@@ -536,6 +541,12 @@ void Main::print_help(const char *p_binary) {
 #endif
 #endif
 	OS::get_singleton()->print("\n");
+
+#ifdef THE_GATES_SANDBOX
+	OS::get_singleton()->print("TheGates options:\n");
+	OS::get_singleton()->print("  --external_image <fd>             Import external image file description.\n");
+	OS::get_singleton()->print("\n");
+#endif
 }
 
 #ifdef TESTS_ENABLED
@@ -1569,6 +1580,18 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				goto error;
 			}
 #endif // TOOLS_ENABLED && MODULE_GDSCRIPT_ENABLED && !GDSCRIPT_NO_LSP
+#ifdef THE_GATES_SANDBOX
+		} else if (I->get() == "--external_image") {
+
+			if (I->next()) {
+				external_image_fd = I->next()->get().to_int();
+
+				N = I->next()->next();
+			} else {
+				OS::get_singleton()->print("Missing --external_image argument, aborting.\n");
+				goto error;
+			}
+#endif
 		} else if (I->get() == "--" || I->get() == "++") {
 			adding_user_args = true;
 		} else {
@@ -2512,6 +2535,15 @@ Error Main::setup2() {
 			Engine::get_singleton()->set_write_movie_path(String());
 		}
 	}
+
+	// External texture
+#ifdef THE_GATES_SANDBOX
+	Error err = rendering_server->get_rendering_device()->import_external_image(external_image_fd);
+	if (err != OK) {
+		ERR_PRINT("Unable to import external image " + itos(external_image_fd));
+		return err;
+	}
+#endif
 
 #ifdef UNIX_ENABLED
 	// Print warning after initializing the renderer but before initializing audio.
