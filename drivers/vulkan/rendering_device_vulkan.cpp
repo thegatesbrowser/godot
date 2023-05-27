@@ -1681,7 +1681,7 @@ RID RenderingDeviceVulkan::external_texture_create(const TextureFormat &p_format
 	VkExternalMemoryImageCreateInfo ext_image_info = {
 		/*sType*/ VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
 		/*pNext*/ nullptr,
-		/*handleTypes*/ ext_handle_type
+		/*handleTypes*/ (VkExternalMemoryHandleTypeFlags)ext_handle_type
 	};
 	VkImageCreateInfo image_create_info;
 	image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -1895,7 +1895,7 @@ RID RenderingDeviceVulkan::external_texture_create(const TextureFormat &p_format
 		export_alloc_info = {
 			/*sType*/ VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
 			/*pNext*/ nullptr,
-			/*handleTypes*/ ext_handle_type
+			/*handleTypes*/ (VkExternalMemoryHandleTypeFlags)ext_handle_type
 		};
 		VmaPoolCreateInfo pool_create_info;
 		pool_create_info.memoryTypeIndex = mem_type_index;
@@ -2079,7 +2079,7 @@ RID RenderingDeviceVulkan::external_texture_import(const TextureFormat &p_format
 	VkExternalMemoryImageCreateInfo ext_image_info = {
 		/*sType*/ VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
 		/*pNext*/ nullptr,
-		/*handleTypes*/ ext_handle_type
+		/*handleTypes*/ (VkExternalMemoryHandleTypeFlags)ext_handle_type
 	};
 	VkImageCreateInfo image_create_info;
 	image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
