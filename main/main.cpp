@@ -124,6 +124,7 @@
 #include "modules/the_gates/external_texture.h"
 #include "modules/the_gates/command_sync.h"
 #include "modules/the_gates/input_sync.h"
+#include "modules/the_gates/sandboxing.h"
 #endif
 
 /* Static members */
@@ -3537,11 +3538,14 @@ bool Main::start() {
 	OS::get_singleton()->benchmark_dump();
 
 #ifdef THE_GATES_SANDBOX
+	Error err;
+
 	// CommandSync
 	command_sync = memnew(CommandSync);
 	command_sync->bind_commands();
 	command_sync->connect();
 
+	// ExternalTexture
 	Array arg;
 #ifdef _WIN32
 	arg.append(FILEHANDLE_PATH + "|" + itos(OS::get_singleton()->get_process_id()));
@@ -3550,7 +3554,6 @@ bool Main::start() {
 #endif
 	command_sync->send_command("send_filehandle", arg);
 
-	// ExternalTexture
 	print_line("ExternalTexture: waiting for filehandle");
 	ext_texture = memnew(ExternalTexture);
 	bool success = ext_texture->recv_filehandle(FILEHANDLE_PATH); // WARNING: BLOCKING COMMAND
@@ -3568,7 +3571,7 @@ bool Main::start() {
 	format.height = static_cast<uint32_t>(size.height);
 	format.depth = 1;
 
-	Error err = ext_texture->import(format, view);
+	err = ext_texture->import(format, view);
 	if (err != OK) {
 		return false;
 	}
@@ -3576,6 +3579,13 @@ bool Main::start() {
 	// InputSync
 	input_sync = memnew(InputSync);
 	input_sync->connect();
+
+	// Sandboxing
+	err = Sandboxing::sandbox();
+	if (err != OK) {
+		return false;
+	}
+	print_line("Seccomp sandboxing succeeded");
 #endif
 
 	return true;
