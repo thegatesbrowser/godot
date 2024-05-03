@@ -39,5 +39,5 @@ def configure(env):
             print("Error: ZeroMQ librarie not found. Aborting.")
             sys.exit(255)
         env.ParseConfig("pkg-config libzmq --cflags --libs --static")
-    
+
     print("Linking ZeroMQ")
