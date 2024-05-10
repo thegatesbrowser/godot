@@ -6,7 +6,7 @@
 #include "thirdparty/zmqpp/socket.hpp"
 
 #ifdef _WIN32
-static const String COMMAND_SYNC_ADDRESS("ipc://command_sync");
+static const String COMMAND_SYNC_ADDRESS("ipc://sandbox/command_sync");
 #else
 static const String COMMAND_SYNC_ADDRESS("ipc:///tmp/command_sync");
 #endif
