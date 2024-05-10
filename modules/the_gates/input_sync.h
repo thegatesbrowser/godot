@@ -6,7 +6,7 @@
 #include "thirdparty/zmqpp/socket.hpp"
 
 #ifdef _WIN32
-static const String INPUT_SYNC_ADDRESS("ipc://input_sync");
+static const String INPUT_SYNC_ADDRESS("ipc://sandbox/input_sync");
 #else
 static const String INPUT_SYNC_ADDRESS("ipc:///tmp/input_sync");
 #endif

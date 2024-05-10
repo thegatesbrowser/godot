@@ -6,7 +6,7 @@
 #include "servers/rendering/rendering_device_binds.h"
 
 #ifdef _WIN32
-static const String FILEHANDLE_PATH("ipc://external_texture");
+static const String FILEHANDLE_PATH("ipc://sandbox/external_texture");
 #else
 static const String FILEHANDLE_PATH("/tmp/external_texture");
 #endif
