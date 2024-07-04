@@ -181,7 +181,7 @@ DisplayServerMacOS::WindowID DisplayServerMacOS::_create_window(WindowMode p_mod
 
 #if defined(VULKAN_ENABLED)
 		if (context_vulkan) {
-			Error err = context_vulkan->window_create(window_id_counter, p_vsync_mode, wd.window_view, p_rect.size.width, p_rect.size.height);
+			Error err = context_vulkan->window_create(window_id_counter, p_vsync_mode, (CAMetalLayer *const *)&layer, p_rect.size.width, p_rect.size.height);
 			ERR_FAIL_COND_V_MSG(err != OK, INVALID_WINDOW_ID, "Can't create a Vulkan context");
 		}
 #endif

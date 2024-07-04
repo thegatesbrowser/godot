@@ -35,22 +35,22 @@
 #ifdef USE_VOLK
 #include <volk.h>
 #else
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_metal.h>
 #endif
 
 const char *VulkanContextMacOS::_get_platform_surface_extension() const {
-	return VK_MVK_MACOS_SURFACE_EXTENSION_NAME;
+	return VK_EXT_METAL_SURFACE_EXTENSION_NAME;
 }
 
-Error VulkanContextMacOS::window_create(DisplayServer::WindowID p_window_id, DisplayServer::VSyncMode p_vsync_mode, id p_window, int p_width, int p_height) {
-	VkMacOSSurfaceCreateInfoMVK createInfo;
-	createInfo.sType = VK_STRUCTURE_TYPE_MACOS_SURFACE_CREATE_INFO_MVK;
+Error VulkanContextMacOS::window_create(DisplayServer::WindowID p_window_id, DisplayServer::VSyncMode p_vsync_mode, CAMetalLayer *const *p_metal_layer, int p_width, int p_height) {
+	VkMetalSurfaceCreateInfoEXT createInfo;
+	createInfo.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
 	createInfo.pNext = nullptr;
 	createInfo.flags = 0;
-	createInfo.pView = (__bridge const void *)p_window;
+	createInfo.pLayer = *p_metal_layer;
 
 	VkSurfaceKHR surface;
-	VkResult err = vkCreateMacOSSurfaceMVK(get_instance(), &createInfo, nullptr, &surface);
+	VkResult err = vkCreateMetalSurfaceEXT(get_instance(), &createInfo, nullptr, &surface);
 	ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
 	return _window_create(p_window_id, p_vsync_mode, surface, p_width, p_height);
 }

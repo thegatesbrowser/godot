@@ -81,7 +81,7 @@ DisplayServerIOS::DisplayServerIOS(const String &p_rendering_driver, WindowMode 
 		}
 
 		Size2i size = Size2i(layer.bounds.size.width, layer.bounds.size.height) * screen_get_max_scale();
-		if (context_vulkan->window_create(MAIN_WINDOW_ID, p_vsync_mode, layer, size.width, size.height) != OK) {
+		if (context_vulkan->window_create(MAIN_WINDOW_ID, p_vsync_mode, (CAMetalLayer *const *)&layer, size.width, size.height) != OK) {
 			memdelete(context_vulkan);
 			context_vulkan = nullptr;
 			r_error = ERR_UNAVAILABLE;

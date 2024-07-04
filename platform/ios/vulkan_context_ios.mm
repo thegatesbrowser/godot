@@ -35,23 +35,22 @@
 #ifdef USE_VOLK
 #include <volk.h>
 #else
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_metal.h>
 #endif
 
 const char *VulkanContextIOS::_get_platform_surface_extension() const {
-	return VK_MVK_IOS_SURFACE_EXTENSION_NAME;
+	return VK_EXT_METAL_SURFACE_EXTENSION_NAME;
 }
 
-Error VulkanContextIOS::window_create(DisplayServer::WindowID p_window_id, DisplayServer::VSyncMode p_vsync_mode, CALayer *p_metal_layer, int p_width, int p_height) {
-	VkIOSSurfaceCreateInfoMVK createInfo;
-	createInfo.sType = VK_STRUCTURE_TYPE_IOS_SURFACE_CREATE_INFO_MVK;
+Error VulkanContextIOS::window_create(DisplayServer::WindowID p_window_id, DisplayServer::VSyncMode p_vsync_mode, CAMetalLayer *const *p_metal_layer, int p_width, int p_height) {
+	VkMetalSurfaceCreateInfoEXT createInfo;
+	createInfo.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
 	createInfo.pNext = nullptr;
 	createInfo.flags = 0;
-	createInfo.pView = (__bridge const void *)p_metal_layer;
+	createInfo.pLayer = *p_metal_layer;
 
 	VkSurfaceKHR surface;
-	VkResult err =
-			vkCreateIOSSurfaceMVK(get_instance(), &createInfo, nullptr, &surface);
+	VkResult err = vkCreateMetalSurfaceEXT(get_instance(), &createInfo, nullptr, &surface);
 	ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
 
 	return _window_create(p_window_id, p_vsync_mode, surface, p_width, p_height);
