@@ -166,9 +166,11 @@ class RenderingDeviceVulkan : public RenderingDevice {
 	Error _texture_update(RID p_texture, uint32_t p_layer, const Vector<uint8_t> &p_data, BitField<BarrierMask> p_post_barrier, bool p_use_setup_queue);
 
 	// External texture
+	VmaPool ext_image_pool = VK_NULL_HANDLE;
+#ifndef MACOS_ENABLED
 	VkExportMemoryAllocateInfo export_alloc_info;
 	VkImportMemoryXInfoKHR import_memory_info;
-	VmaPool ext_image_pool = VK_NULL_HANDLE;
+#endif
 
 	/*****************/
 	/**** SAMPLER ****/

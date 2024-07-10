@@ -1680,15 +1680,29 @@ void RenderingDeviceVulkan::_buffer_memory_barrier(VkBuffer buffer, uint64_t p_f
 RID RenderingDeviceVulkan::external_texture_create(const TextureFormat &p_format, const TextureView &p_view, FileHandle *p_filehandle, const Vector<Vector<uint8_t>> &p_data) {
 	_THREAD_SAFE_METHOD_
 
+#ifdef MACOS_ENABLED
+	VkExportMetalObjectCreateInfoEXT export_create_info = {
+		/*sType*/ VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+		/*pNext*/ nullptr,
+		/*exportObjectType*/ VK_EXPORT_METAL_OBJECT_TYPE_METAL_IOSURFACE_BIT_EXT
+	};
+	VkImportMetalIOSurfaceInfoEXT image_create_pnext = {
+		/*sType*/ VK_STRUCTURE_TYPE_IMPORT_METAL_IO_SURFACE_INFO_EXT,
+		/*pNext*/ &export_create_info,
+		/*ioSurface*/ VK_NULL_HANDLE
+	};
+#else
 	VkExternalMemoryHandleTypeFlags ext_handle_type = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_X_BIT;
-	VkExternalMemoryImageCreateInfo ext_image_info = {
+	VkExternalMemoryImageCreateInfo image_create_pnext = {
 		/*sType*/ VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
 		/*pNext*/ nullptr,
 		/*handleTypes*/ ext_handle_type
 	};
+#endif
+
 	VkImageCreateInfo image_create_info;
 	image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	image_create_info.pNext = &ext_image_info;
+	image_create_info.pNext = &image_create_pnext;
 	image_create_info.flags = 0;
 
 	VkImageFormatListCreateInfoKHR format_list_create_info; // Keep out of the if, needed for creation.
@@ -1889,6 +1903,7 @@ RID RenderingDeviceVulkan::external_texture_create(const TextureFormat &p_format
 	allocInfo.memoryTypeBits = 0;
 	allocInfo.pUserData = nullptr;
 
+#ifndef MACOS_ENABLED
 	// Create pool with export alloc.
 
 	if (ext_image_pool == VK_NULL_HANDLE) {
@@ -1912,6 +1927,7 @@ RID RenderingDeviceVulkan::external_texture_create(const TextureFormat &p_format
 		ERR_FAIL_COND_V_MSG(res, RID(), "vmaCreatePool failed with error " + itos(res) + ".");
 	}
 	allocInfo.pool = ext_image_pool;
+#endif
 
 	Texture texture;
 
@@ -1932,6 +1948,24 @@ RID RenderingDeviceVulkan::external_texture_create(const TextureFormat &p_format
 	texture.samples = p_format.samples;
 	texture.allowed_shared_formats = p_format.shareable_formats;
 
+#ifdef MACOS_ENABLED
+	// Export IOSurfaceRef.
+
+	VkExportMetalIOSurfaceInfoEXT export_iosurface_info = {
+		/*sType*/ VK_STRUCTURE_TYPE_EXPORT_METAL_IO_SURFACE_INFO_EXT,
+		/*pNext*/ nullptr,
+		/*image*/ texture.image,
+		/*ioSurface*/ nullptr
+	};
+	VkExportMetalObjectsInfoEXT metal_objects_info = {
+		/*sType*/ VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
+		/*pNext*/ &export_iosurface_info
+	};
+	vkExportMetalObjectsEXT(device, &metal_objects_info);
+	ERR_FAIL_COND_V_MSG(export_iosurface_info.ioSurface == nullptr, RID(), "IOSurfaceRef was not exported.");
+
+	*p_filehandle = std::move(export_iosurface_info.ioSurface);
+#else
 	// Create file descriptor.
 
 	VkMemoryGetXInfoKHR memory_get_info = {
@@ -1942,6 +1976,7 @@ RID RenderingDeviceVulkan::external_texture_create(const TextureFormat &p_format
 	};
 	err = vkGetMemoryXKHR(device, &memory_get_info, p_filehandle);
 	ERR_FAIL_COND_V_MSG(err, RID(), "vkGetMemoryXKHR failed with error " + itos(err) + ".");
+#endif
 
 	// Set base layout based on usage priority.
 
@@ -2071,21 +2106,34 @@ RID RenderingDeviceVulkan::external_texture_create(const TextureFormat &p_format
 	return id;
 }
 
-
 RID RenderingDeviceVulkan::external_texture_import(const TextureFormat &p_format, const TextureView &p_view, FileHandle p_filehandle) {
 	_THREAD_SAFE_METHOD_
 
 	Vector<Vector<uint8_t>> p_data = Vector<Vector<uint8_t>>();
 
+#ifdef MACOS_ENABLED
+	VkExportMetalObjectCreateInfoEXT export_create_info = {
+		/*sType*/ VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+		/*pNext*/ nullptr,
+		/*exportObjectType*/ VK_EXPORT_METAL_OBJECT_TYPE_METAL_IOSURFACE_BIT_EXT
+	};
+	VkImportMetalIOSurfaceInfoEXT image_create_pnext = {
+		/*sType*/ VK_STRUCTURE_TYPE_IMPORT_METAL_IO_SURFACE_INFO_EXT,
+		/*pNext*/ &export_create_info,
+		/*ioSurface*/ p_filehandle
+	};
+#else
 	VkExternalMemoryHandleTypeFlags ext_handle_type = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_X_BIT;
-	VkExternalMemoryImageCreateInfo ext_image_info = {
+	VkExternalMemoryImageCreateInfo image_create_pnext = {
 		/*sType*/ VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
 		/*pNext*/ nullptr,
 		/*handleTypes*/ ext_handle_type
 	};
+#endif
+
 	VkImageCreateInfo image_create_info;
 	image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	image_create_info.pNext = &ext_image_info;
+	image_create_info.pNext = &image_create_pnext;
 	image_create_info.flags = 0;
 
 	VkImageFormatListCreateInfoKHR format_list_create_info; // Keep out of the if, needed for creation.
@@ -2286,6 +2334,7 @@ RID RenderingDeviceVulkan::external_texture_import(const TextureFormat &p_format
 	allocInfo.memoryTypeBits = 0;
 	allocInfo.pUserData = nullptr;
 
+#ifndef MACOS_ENABLED
 	// Create pool with import memory
 
 	if (ext_image_pool == VK_NULL_HANDLE) {
@@ -2311,6 +2360,7 @@ RID RenderingDeviceVulkan::external_texture_import(const TextureFormat &p_format
 		ERR_FAIL_COND_V_MSG(res, RID(), "vmaCreatePool failed with error " + itos(res) + ".");
 	}
 	allocInfo.pool = ext_image_pool;
+#endif
 
 	Texture texture;
 

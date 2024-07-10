@@ -1,7 +1,12 @@
 #include "external_texture.h"
 
-#ifdef _WIN32
+#ifdef WINDOWS_ENABLED
 #include "Windows.h"
+#include "zmq_context.h"
+#include "socket.hpp"
+#include "message.hpp"
+#elif MACOS_ENABLED
+#include <IOSurface/IOSurface.h>
 #include "zmq_context.h"
 #include "socket.hpp"
 #include "message.hpp"
@@ -14,6 +19,7 @@ Error ExternalTexture::create(const RD::TextureFormat &p_format, const RD::Textu
 	format = p_format;
 	rid = RD::get_singleton()->external_texture_create(p_format, p_view, &filehandle, p_data);
 	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_CANT_CREATE, "Unable to create external texture");
+	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, ERR_CANT_CREATE, "Unable to export filehandle");
 
     return OK;
 }
@@ -32,7 +38,7 @@ Error ExternalTexture::import(const RD::TextureFormat &p_format, const RD::Textu
 bool ExternalTexture::send_filehandle(const String &p_path) {
 	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, false, "Sending invalid filehandle. First create external texture");
 
-#ifdef _WIN32
+#ifdef WINDOWS_ENABLED
 	// Duplicate handle
 	PackedStringArray split = p_path.split("|");
 	ERR_FAIL_COND_V_MSG(split.size() != 2, false, "Invalid path. Should be 'ipc://path|targetProcessId'");
@@ -63,23 +69,47 @@ bool ExternalTexture::send_filehandle(const String &p_path) {
 	}
 
 	return success;
+#elif MACOS_ENABLED
+	uint32_t surfaceID = IOSurfaceGetID(filehandle);
+
+	// Send IOSurfaceID
+	zmqpp::socket sock(zmqpp::socket(ctx, zmqpp::socket_type::pair));
+	sock.connect(p_path.utf8().get_data());
+
+	zmqpp::message msg;
+	msg << surfaceID;
+	bool success = sock.send(msg, true);
+	sock.close();
+
+	return success;
 #else
 	return flingfd_simple_send(p_path.utf8().get_data(), filehandle);
 #endif
 }
 
 bool ExternalTexture::recv_filehandle(const String &p_path) {
-#ifdef _WIN32
+#ifdef WINDOWS_ENABLED
 	zmqpp::socket sock(zmqpp::socket(ctx, zmqpp::socket_type::pair));
 	sock.bind(p_path.utf8().get_data());
 
-	size_t size = sizeof(FileHandle);
 	zmqpp::message msg;
 	sock.receive(msg, false); // WARNING: BLOCKING COMMAND
 	int64_t data;
 	msg >> data;
-	filehandle = reinterpret_cast<void*>(data);
 	sock.close();
+
+	filehandle = reinterpret_cast<void*>(data);
+#elif MACOS_ENABLED
+	zmqpp::socket sock(zmqpp::socket(ctx, zmqpp::socket_type::pair));
+	sock.bind(p_path.utf8().get_data());
+
+	zmqpp::message msg;
+	sock.receive(msg, false); // WARNING: BLOCKING COMMAND
+	uint32_t surfaceID;
+	msg >> surfaceID;
+	sock.close();
+
+	filehandle = IOSurfaceLookup(surfaceID);
 #else
 	filehandle = flingfd_simple_recv(p_path.utf8().get_data()); // WARNING: BLOCKING COMMAND
 #endif

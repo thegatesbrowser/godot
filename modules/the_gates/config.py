@@ -23,19 +23,22 @@ def configure(env):
         return
 
     if env.msvc:
+        # TODO: fix not msvc windows build
         # Build libzmq https://www.youtube.com/watch?v=OiGf9T_TPa8
         # Fix linking mismatch https://stackoverflow.com/questions/28887001/lnk2038-mismatch-detected-for-runtimelibrary-value-mt-staticrelease-doesn
         env.Prepend(CPPDEFINES=["ZMQ_STATIC"])
         env.Prepend(CPPPATH=["C:/Program Files (x86)/ZeroMQ/include"])
         env.Append(LIBPATH=["C:/Program Files (x86)/ZeroMQ/lib"])
         env.Append(LINKFLAGS=["libzmq-v143-mt-s-4_3_5.lib"])
-    else:
+        print("Linking ZeroMQ statically")
+
+    elif env["platform"] == "linuxbsd":
         if os.system("pkg-config --exists libzmq"):
             print("Error: ZeroMQ librarie not found. Aborting.")
             sys.exit(255)
         else:
             env.ParseConfig("pkg-config libzmq --cflags --libs --static")
-            print("Linking ZeroMQ")
+            print("Linking ZeroMQ statically")
 
         if os.system("pkg-config --exists libseccomp"):
             print("Error: Seccomp librarie not found. Aborting.")
@@ -43,3 +46,13 @@ def configure(env):
         else:
             env.ParseConfig("pkg-config libseccomp --cflags --libs")
             print("Linking Seccomp")
+
+    else:
+        # MacOS
+        if os.system("pkg-config --exists libzmq"):
+            print("Error: ZeroMQ librarie not found. Aborting.")
+            sys.exit(255)
+        else:
+            # Linked dynamically
+            env.ParseConfig("pkg-config libzmq --cflags --libs")
+            print("Linking ZeroMQ dynamically")

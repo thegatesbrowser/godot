@@ -499,15 +499,19 @@ Error VulkanContext::_initialize_device_extensions() {
 	// Make sure our core extensions are here
 	register_requested_device_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME, true);
 
-	// Needed for exchanging framebuffers with sandbox process
+	// For exchanging framebuffers with sandbox process
+#ifdef LINUXBSD_ENABLED
 	register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, true);
-	register_requested_device_extension(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME, true);
-#ifdef _WIN32
-	register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME, true);
-	register_requested_device_extension(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME, true);
-#else
 	register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME, true);
-	register_requested_device_extension(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, true);
+#endif
+
+#ifdef WINDOWS_ENABLED
+	register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, true);
+	register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME, true);
+#endif
+
+#ifdef MACOS_ENABLED
+	register_requested_device_extension(VK_EXT_METAL_OBJECTS_EXTENSION_NAME, true);
 #endif
 
 	register_requested_device_extension(VK_KHR_MULTIVIEW_EXTENSION_NAME, false);

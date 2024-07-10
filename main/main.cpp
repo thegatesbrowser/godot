@@ -3589,7 +3589,7 @@ bool Main::start() {
 
 	// ExternalTexture
 	Array arg;
-#ifdef _WIN32
+#ifdef WINDOWS_ENABLED
 	arg.append(FILEHANDLE_PATH + "|" + itos(OS::get_singleton()->get_process_id()));
 #else
 	arg.append(FILEHANDLE_PATH);
@@ -3622,7 +3622,7 @@ bool Main::start() {
 	input_sync = memnew(InputSync);
 	input_sync->connect();
 
-#ifndef _WIN32
+#ifdef LINUXBSD_ENABLED
 	// Sandboxing
 	err = Sandboxing::sandbox();
 	if (err != OK) {
