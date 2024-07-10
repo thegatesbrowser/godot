@@ -1,7 +1,7 @@
 #ifndef THE_GATES_PORTABLE_H
 #define THE_GATES_PORTABLE_H
 
-#ifdef _WIN32   // ===== definitions on windows ===== //
+#ifdef WINDOWS_ENABLED
 
 #ifdef _WIN64
     typedef long long LONG_PTR;
@@ -9,8 +9,8 @@
     typedef long LONG_PTR;
 #endif
 
-typedef void* FileHandle; // HANDLE
-#define FileHandleInvalid ((FileHandle)(LONG_PTR)-1) // INVALID_HANDLE_VALUE
+typedef void* FileHandle;
+#define FileHandleInvalid ((FileHandle)(LONG_PTR)-1)
 
 #define vkGetMemoryXKHR vkGetMemoryWin32HandleKHR
 #define VkMemoryGetXInfoKHR VkMemoryGetWin32HandleInfoKHR
@@ -21,7 +21,17 @@ typedef void* FileHandle; // HANDLE
 #define VK_STRUCTURE_TYPE_EXPORT_MEMORY_X_INFO_KHR VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR
 #define VK_STRUCTURE_TYPE_IMPORT_MEMORY_X_INFO_KHR VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR
 
-#else           // ===== definitions on other (unix) ===== //
+#endif
+
+#ifdef MACOS_ENABLED
+
+typedef struct __IOSurface* IOSurfaceRef;
+typedef IOSurfaceRef FileHandle;
+#define FileHandleInvalid nullptr
+
+#endif
+
+#ifdef LINUXBSD_ENABLED
 
 typedef int FileHandle;
 #define FileHandleInvalid -1

@@ -5,7 +5,7 @@
 #include "core/input/input.h"
 #include "thirdparty/zmqpp/socket.hpp"
 
-#ifdef _WIN32
+#ifdef WINDOWS_ENABLED
 static const String INPUT_SYNC_ADDRESS("ipc://sandbox/input_sync");
 #else
 static const String INPUT_SYNC_ADDRESS("ipc:///tmp/input_sync");
