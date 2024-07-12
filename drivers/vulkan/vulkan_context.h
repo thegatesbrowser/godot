@@ -313,6 +313,7 @@ public:
 	void window_destroy(DisplayServer::WindowID p_window_id);
 	VkFramebuffer window_get_framebuffer(DisplayServer::WindowID p_window = 0);
 	VkRenderPass window_get_render_pass(DisplayServer::WindowID p_window = 0);
+	VkImage window_get_image(DisplayServer::WindowID p_window = 0);
 
 	RID local_device_create();
 	VkDevice local_device_get_vk_device(RID p_local_device);

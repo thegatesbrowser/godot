@@ -1918,6 +1918,18 @@ VkFramebuffer VulkanContext::window_get_framebuffer(DisplayServer::WindowID p_wi
 	}
 }
 
+VkImage VulkanContext::window_get_image(DisplayServer::WindowID p_window) {
+	ERR_FAIL_COND_V(!windows.has(p_window), VK_NULL_HANDLE);
+	ERR_FAIL_COND_V(!window_is_valid_swapchain(p_window), VK_NULL_HANDLE);
+	Window *w = &windows[p_window];
+	// Vulkan use of currentbuffer.
+	if (w->swapchain_image_resources != VK_NULL_HANDLE) {
+		return w->swapchain_image_resources[w->current_buffer].image;
+	} else {
+		return VK_NULL_HANDLE;
+	}
+}
+
 void VulkanContext::window_destroy(DisplayServer::WindowID p_window_id) {
 	ERR_FAIL_COND(!windows.has(p_window_id));
 	_clean_up_swap_chain(&windows[p_window_id]);

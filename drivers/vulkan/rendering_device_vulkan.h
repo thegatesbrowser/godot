@@ -1082,6 +1082,7 @@ class RenderingDeviceVulkan : public RenderingDevice {
 public:
 	virtual RID external_texture_create(const TextureFormat &p_format, const TextureView &p_view, FileHandle *p_filehandle, const Vector<Vector<uint8_t>> &p_data = Vector<Vector<uint8_t>>());
 	virtual RID external_texture_import(const TextureFormat &p_format, const TextureView &p_view, FileHandle p_filehandle);
+	virtual Error swapchain_copy(RID p_to_texture, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_src_mipmap, uint32_t p_src_layer, BitField<BarrierMask> p_post_barrier = BARRIER_MASK_ALL_BARRIERS);
 
 	virtual RID texture_create(const TextureFormat &p_format, const TextureView &p_view, const Vector<Vector<uint8_t>> &p_data = Vector<Vector<uint8_t>>());
 	virtual RID texture_create_shared(const TextureView &p_view, RID p_with_texture);

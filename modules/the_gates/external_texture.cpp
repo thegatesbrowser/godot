@@ -118,6 +118,19 @@ bool ExternalTexture::recv_filehandle(const String &p_path) {
 	return true;
 }
 
+Error ExternalTexture::copy_from_swapchain() {
+	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_UNAVAILABLE, "ExternalTexture is not valid. Create or import first");
+
+	Vector3 size = {
+		static_cast<float>(format.width),
+		static_cast<float>(format.height),
+		static_cast<float>(format.depth)
+	};
+	const Vector3 zero = { 0, 0, 0 };
+
+	return RD::get_singleton()->swapchain_copy(rid, zero, size, 0, 0);
+}
+
 Error ExternalTexture::_copy(RID p_texture, bool p_from) {
 	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_UNAVAILABLE, "ExternalTexture is not valid. Create or import first");
 	ERR_FAIL_COND_V_MSG(!p_texture.is_valid(), ERR_INVALID_PARAMETER, "Parameter texture is not valid");
@@ -127,7 +140,7 @@ Error ExternalTexture::_copy(RID p_texture, bool p_from) {
 		static_cast<float>(format.height),
 		static_cast<float>(format.depth)
 	};
-	Vector3 zero = { 0, 0, 0 };
+	const Vector3 zero = { 0, 0, 0 };
 
 	if (p_from) {
 		return RD::get_singleton()->texture_copy(p_texture, rid, zero, zero, size, 0, 0, 0, 0);

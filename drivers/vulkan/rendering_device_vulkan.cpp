@@ -2506,6 +2506,204 @@ RID RenderingDeviceVulkan::external_texture_import(const TextureFormat &p_format
 	return id;
 }
 
+Error RenderingDeviceVulkan::swapchain_copy(RID p_to_texture, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_dst_mipmap, uint32_t p_dst_layer, BitField<BarrierMask> p_post_barrier) {
+	_THREAD_SAFE_METHOD_
+
+	// Current swapchain image
+	VkImage src_image = context->window_get_image(DisplayServer::MAIN_WINDOW_ID);
+
+	uint32_t src_width = context->window_get_width(DisplayServer::MAIN_WINDOW_ID);
+	uint32_t src_height = context->window_get_height(DisplayServer::MAIN_WINDOW_ID);
+	uint32_t src_depth = 1;
+	const Vector3 p_from = { 0, 0, 0 };
+
+	// Define properties based on swapchain image creation vulkan_context::_update_swapchain
+	uint32_t src_mipmap = 0; // VkImageViewCreateInfo::baseMipLevel
+	uint32_t src_layer = 0; // VkImageViewCreateInfo::baseArrayLayer
+	uint32_t src_mipmaps = 1; // VkImageViewCreateInfo::levelCount
+	VkImageAspectFlags src_read_aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT; // VkImageViewCreateInfo::aspectMask
+	VkImageAspectFlags src_barrier_aspect_mask = 0; // VkAttachmentReference2KHR::aspectMask
+	VkImageLayout src_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // VkAttachmentDescription2KHR::finalLayout
+
+	ERR_FAIL_COND_V(p_from.x < 0 || p_from.x + p_size.x > src_width, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(p_from.y < 0 || p_from.y + p_size.y > src_height, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(p_from.z < 0 || p_from.z + p_size.z > src_depth, ERR_INVALID_PARAMETER);
+
+	Texture *dst_tex = texture_owner.get_or_null(p_to_texture);
+	ERR_FAIL_NULL_V(dst_tex, ERR_INVALID_PARAMETER);
+
+	ERR_FAIL_COND_V_MSG(dst_tex->bound, ERR_INVALID_PARAMETER,
+			"Destination texture can't be copied while a draw list that uses it as part of a framebuffer is being created. Ensure the draw list is finalized (and that the color/depth texture using it is not set to `RenderingDevice.FINAL_ACTION_CONTINUE`) to copy this texture.");
+	ERR_FAIL_COND_V_MSG(!(dst_tex->usage_flags & TEXTURE_USAGE_CAN_COPY_TO_BIT), ERR_INVALID_PARAMETER,
+			"Destination texture requires the `RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT` to be set to be retrieved.");
+
+	uint32_t dst_layer_count = dst_tex->layers;
+	uint32_t dst_width, dst_height, dst_depth;
+	get_image_format_required_size(dst_tex->format, dst_tex->width, dst_tex->height, dst_tex->depth, p_dst_mipmap + 1, &dst_width, &dst_height, &dst_depth);
+	if (dst_tex->type == TEXTURE_TYPE_CUBE || dst_tex->type == TEXTURE_TYPE_CUBE_ARRAY) {
+		dst_layer_count *= 6;
+	}
+
+	ERR_FAIL_COND_V(p_to.x < 0 || p_to.x + p_size.x > dst_width, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(p_to.y < 0 || p_to.y + p_size.y > dst_height, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(p_to.z < 0 || p_to.z + p_size.z > dst_depth, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(p_dst_mipmap >= dst_tex->mipmaps, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(p_dst_layer >= dst_layer_count, ERR_INVALID_PARAMETER);
+
+	ERR_FAIL_COND_V_MSG(src_read_aspect_mask != dst_tex->read_aspect_mask, ERR_INVALID_PARAMETER,
+			"Source and destination texture must be of the same type (color or depth).");
+
+	VkCommandBuffer command_buffer = frames[frame].draw_command_buffer;
+
+	{
+		// PRE Copy the image.
+
+		{ // Source.
+			VkImageMemoryBarrier image_memory_barrier;
+			image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			image_memory_barrier.pNext = nullptr;
+			image_memory_barrier.srcAccessMask = 0;
+			image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			image_memory_barrier.oldLayout = src_layout;
+			image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+			image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier.image = src_image;
+			image_memory_barrier.subresourceRange.aspectMask = src_barrier_aspect_mask;
+			image_memory_barrier.subresourceRange.baseMipLevel = src_mipmap;
+			image_memory_barrier.subresourceRange.levelCount = 1;
+			image_memory_barrier.subresourceRange.baseArrayLayer = src_layer;
+			image_memory_barrier.subresourceRange.layerCount = 1;
+
+			vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &image_memory_barrier);
+		}
+		{ // Dest.
+			VkImageMemoryBarrier image_memory_barrier;
+			image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			image_memory_barrier.pNext = nullptr;
+			image_memory_barrier.srcAccessMask = 0;
+			image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			image_memory_barrier.oldLayout = dst_tex->layout;
+			image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+			image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier.image = dst_tex->image;
+			image_memory_barrier.subresourceRange.aspectMask = dst_tex->read_aspect_mask;
+			image_memory_barrier.subresourceRange.baseMipLevel = p_dst_mipmap;
+			image_memory_barrier.subresourceRange.levelCount = 1;
+			image_memory_barrier.subresourceRange.baseArrayLayer = p_dst_layer;
+			image_memory_barrier.subresourceRange.layerCount = 1;
+
+			vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &image_memory_barrier);
+		}
+
+		// COPY.
+
+		{
+			VkImageCopy image_copy_region;
+			image_copy_region.srcSubresource.aspectMask = src_read_aspect_mask;
+			image_copy_region.srcSubresource.baseArrayLayer = src_layer;
+			image_copy_region.srcSubresource.layerCount = 1;
+			image_copy_region.srcSubresource.mipLevel = src_mipmap;
+			image_copy_region.srcOffset.x = p_from.x;
+			image_copy_region.srcOffset.y = p_from.y;
+			image_copy_region.srcOffset.z = p_from.z;
+
+			image_copy_region.dstSubresource.aspectMask = dst_tex->read_aspect_mask;
+			image_copy_region.dstSubresource.baseArrayLayer = p_dst_layer;
+			image_copy_region.dstSubresource.layerCount = 1;
+			image_copy_region.dstSubresource.mipLevel = p_dst_mipmap;
+			image_copy_region.dstOffset.x = p_to.x;
+			image_copy_region.dstOffset.y = p_to.y;
+			image_copy_region.dstOffset.z = p_to.z;
+
+			image_copy_region.extent.width = p_size.x;
+			image_copy_region.extent.height = p_size.y;
+			image_copy_region.extent.depth = p_size.z;
+
+			vkCmdCopyImage(command_buffer, src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst_tex->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &image_copy_region);
+		}
+
+		// RESTORE LAYOUT for SRC and DST.
+
+		uint32_t barrier_flags = 0;
+		uint32_t access_flags = 0;
+		if (p_post_barrier.has_flag(BARRIER_MASK_COMPUTE)) {
+			barrier_flags |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			access_flags |= VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		}
+		if (p_post_barrier.has_flag(BARRIER_MASK_VERTEX)) {
+			barrier_flags |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+			access_flags |= VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		}
+		if (p_post_barrier.has_flag(BARRIER_MASK_FRAGMENT)) {
+			barrier_flags |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			access_flags |= VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		}
+		if (p_post_barrier.has_flag(BARRIER_MASK_TRANSFER)) {
+			barrier_flags |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+			access_flags |= VK_ACCESS_TRANSFER_WRITE_BIT;
+		}
+
+		if (barrier_flags == 0) {
+			barrier_flags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		}
+
+		{ // Restore src.
+			VkImageMemoryBarrier image_memory_barrier;
+			image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			image_memory_barrier.pNext = nullptr;
+			image_memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			image_memory_barrier.dstAccessMask = access_flags;
+			image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			image_memory_barrier.newLayout = src_layout;
+			image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier.image = src_image;
+			image_memory_barrier.subresourceRange.aspectMask = src_barrier_aspect_mask;
+			image_memory_barrier.subresourceRange.baseMipLevel = src_mipmap;
+			image_memory_barrier.subresourceRange.levelCount = src_mipmaps;
+			image_memory_barrier.subresourceRange.baseArrayLayer = src_layer;
+			image_memory_barrier.subresourceRange.layerCount = 1;
+
+			vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, barrier_flags, 0, 0, nullptr, 0, nullptr, 1, &image_memory_barrier);
+		}
+
+		{ // Make dst readable.
+
+			VkImageMemoryBarrier image_memory_barrier;
+			image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			image_memory_barrier.pNext = nullptr;
+			image_memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			image_memory_barrier.dstAccessMask = access_flags;
+			image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			image_memory_barrier.newLayout = dst_tex->layout;
+
+			image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier.image = dst_tex->image;
+			image_memory_barrier.subresourceRange.aspectMask = dst_tex->read_aspect_mask;
+			image_memory_barrier.subresourceRange.baseMipLevel = src_mipmap;
+			image_memory_barrier.subresourceRange.levelCount = 1;
+			image_memory_barrier.subresourceRange.baseArrayLayer = src_layer;
+			image_memory_barrier.subresourceRange.layerCount = 1;
+
+			vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, barrier_flags, 0, 0, nullptr, 0, nullptr, 1, &image_memory_barrier);
+		}
+	}
+
+	if (dst_tex->used_in_frame != frames_drawn) {
+		dst_tex->used_in_raster = false;
+		dst_tex->used_in_compute = false;
+		dst_tex->used_in_frame = frames_drawn;
+	}
+	dst_tex->used_in_transfer = true;
+
+	return OK;
+}
+
 RID RenderingDeviceVulkan::texture_create(const TextureFormat &p_format, const TextureView &p_view, const Vector<Vector<uint8_t>> &p_data) {
 	_THREAD_SAFE_METHOD_
 
