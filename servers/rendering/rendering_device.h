@@ -546,6 +546,7 @@ public:
 
 	virtual RID external_texture_create(const TextureFormat &p_format, const TextureView &p_view, FileHandle *p_filehandle, const Vector<Vector<uint8_t>> &p_data = Vector<Vector<uint8_t>>()) { return RID(); };
 	virtual RID external_texture_import(const TextureFormat &p_format, const TextureView &p_view, FileHandle p_filehandle) { return RID(); };
+	virtual Error swapchain_copy(RID p_to_texture, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_src_mipmap, uint32_t p_src_layer, BitField<BarrierMask> p_post_barrier = BARRIER_MASK_ALL_BARRIERS) { return ERR_METHOD_NOT_FOUND; };
 	static TextureFormat _get_base(const Ref<RDTextureFormat> &p_format);
 	static TextureView _get_base(const Ref<RDTextureView> &p_format);
 
