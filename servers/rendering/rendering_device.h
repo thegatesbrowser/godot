@@ -1166,6 +1166,7 @@ public:
 	virtual int screen_get_width(DisplayServer::WindowID p_screen = 0) const = 0;
 	virtual int screen_get_height(DisplayServer::WindowID p_screen = 0) const = 0;
 	virtual FramebufferFormatID screen_get_framebuffer_format() const = 0;
+	virtual DataFormat screen_get_format() const = 0;
 
 	/********************/
 	/**** DRAW LISTS ****/

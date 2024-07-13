@@ -7748,6 +7748,24 @@ RenderingDevice::FramebufferFormatID RenderingDeviceVulkan::screen_get_framebuff
 	return const_cast<RenderingDeviceVulkan *>(this)->framebuffer_format_create(screen_attachment);
 }
 
+RenderingDevice::DataFormat RenderingDeviceVulkan::screen_get_format() const {
+	_THREAD_SAFE_METHOD_
+	ERR_FAIL_COND_V_MSG(local_device.is_valid(), DATA_FORMAT_MAX, "Local devices have no screen");
+
+	// Very hacky, but not used often per frame so I guess ok.
+	VkFormat vkformat = context->get_screen_format();
+	DataFormat format = DATA_FORMAT_MAX;
+	for (int i = 0; i < DATA_FORMAT_MAX; i++) {
+		if (vkformat == vulkan_formats[i]) {
+			format = DataFormat(i);
+			break;
+		}
+	}
+
+	ERR_FAIL_COND_V(format == DATA_FORMAT_MAX, DATA_FORMAT_MAX);
+	return format;
+}
+
 /*******************/
 /**** DRAW LIST ****/
 /*******************/
