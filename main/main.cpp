@@ -246,6 +246,7 @@ bool profile_gpu = false;
 static ExternalTexture	*ext_texture = nullptr;
 static CommandSync		*command_sync = nullptr;
 static InputSync		*input_sync = nullptr;
+static bool				first_draw_sent = false;
 #endif
 String gdext_libs_dir = "";
 
@@ -3587,8 +3588,13 @@ bool Main::start() {
 	command_sync->bind_commands();
 	command_sync->connect();
 
-	// ExternalTexture
+	// Set texture format RGBA8 or BGRA8
 	Array arg;
+	arg.append(RD::get_singleton()->screen_get_format());
+	command_sync->send_command("ext_texture_format", arg);
+
+	// ExternalTexture
+	arg.clear();
 #ifdef WINDOWS_ENABLED
 	arg.append(FILEHANDLE_PATH + "|" + itos(OS::get_singleton()->get_process_id()));
 #else
@@ -3842,6 +3848,13 @@ bool Main::iteration() {
 	}
 
 #ifdef THE_GATES_SANDBOX
+	if (Engine::get_singleton()->frames_drawn > 2 && !first_draw_sent) {
+		// Send first frame drawn
+		command_sync->send_command("first_frame_drawn", Array());
+
+		first_draw_sent = true;
+	}
+
 	// Render send
 	ext_texture->copy_from_swapchain();
 
