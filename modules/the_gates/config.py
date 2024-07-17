@@ -24,8 +24,10 @@ def configure(env):
 
     if env.msvc:
         # TODO: fix not msvc windows build
-        # Build libzmq https://www.youtube.com/watch?v=OiGf9T_TPa8
-        # Fix linking mismatch https://stackoverflow.com/questions/28887001/lnk2038-mismatch-detected-for-runtimelibrary-value-mt-staticrelease-doesn
+        
+        # 1. Build libzmq https://www.youtube.com/watch?v=OiGf9T_TPa8
+        # 2. Fix linking mismatch https://stackoverflow.com/questions/28887001/lnk2038-mismatch-detected-for-runtimelibrary-value-mt-staticrelease-doesn
+        # 3. Place inside C:/Program Files (x86)/ZeroMQ/
         env.Prepend(CPPDEFINES=["ZMQ_STATIC"])
         env.Prepend(CPPPATH=["C:/Program Files (x86)/ZeroMQ/include"])
         env.Append(LIBPATH=["C:/Program Files (x86)/ZeroMQ/lib"])
@@ -49,6 +51,10 @@ def configure(env):
 
     else:
         # MacOS
+
+        # 1. Install zeromq arm64 and x86_64 with brew https://stackoverflow.com/questions/64963370/error-cannot-install-in-homebrew-on-arm-processor-in-intel-default-prefix-usr 
+        # 2. Link them with lipo into universal library
+        # 3. Replace libzmq.dylib that pkg-config returns
         if os.system("pkg-config --exists libzmq"):
             print("Error: ZeroMQ librarie not found. Aborting.")
             sys.exit(255)

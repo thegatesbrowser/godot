@@ -52,6 +52,11 @@
 }
 
 - (void)forceUnbundledWindowActivationHackStep2 {
+#ifdef THE_GATES_SANDBOX
+	print_verbose("forceUnbundledWindowActivationHackStep2: return. Sandbox mode");
+	return;
+#endif
+
 	// Step 2: Register app as foreground process.
 	ProcessSerialNumber psn = { 0, kCurrentProcess };
 	(void)TransformProcessType(&psn, kProcessTransformToForegroundApplication);
