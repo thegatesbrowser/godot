@@ -807,8 +807,10 @@ OS_MacOS::OS_MacOS() {
 	// Implicitly create shared NSApplication instance.
 	[GodotApplication sharedApplication];
 
+#ifndef THE_GATES_SANDBOX
 	// In case we are unbundled, make us a proper UI application.
 	[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+#endif
 
 	// Menu bar setup must go between sharedApplication above and
 	// finishLaunching below, in order to properly emulate the behavior

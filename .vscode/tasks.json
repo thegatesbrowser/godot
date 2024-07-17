@@ -42,6 +42,46 @@
             "-j", "$(nproc)", "production=yes", "tools=no", "target=template_debug", "use_lto=yes", "the_gates_sandbox=yes", "disable_exceptions=no"
           ],
           "problemMatcher": "$msCompile"
+      },
+      {
+          "label": "build (template_release, x86_64)",
+          "group": "build",
+          "type": "shell",
+          "command": "scons",
+          "args": [
+            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_release", "use_lto=yes", "the_gates_sandbox=no", "disable_exceptions=no", "arch=x86_64"
+          ],
+          "problemMatcher": "$msCompile"
+      },
+      {
+          "label": "build sandbox (template_debug, x86_64)",
+          "group": "build",
+          "type": "shell",
+          "command": "scons",
+          "args": [
+            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_debug", "use_lto=yes", "the_gates_sandbox=yes", "disable_exceptions=no", "arch=x86_64"
+          ],
+          "problemMatcher": "$msCompile"
+      },
+      {
+          "label": "Make universal macos",
+          "group": "build",
+          "type": "shell",
+          "command": "lipo",
+          "args": [
+            "-create", "bin/godot.macos.template_release.x86_64", "bin/godot.macos.template_release.arm64", "-output", "bin/godot.macos.template_release.universal"
+          ],
+          "problemMatcher": "$msCompile"
+      },
+      {
+          "label": "Make universal macos sandbox",
+          "group": "build",
+          "type": "shell",
+          "command": "lipo",
+          "args": [
+            "-create", "bin/godot.macos.template_debug.sandbox.x86_64", "bin/godot.macos.template_debug.sandbox.arm64", "-output", "bin/godot.macos.template_debug.sandbox.universal"
+          ],
+          "problemMatcher": "$msCompile"
       }
   ]
 }
