@@ -5,12 +5,16 @@
 #include "zmq_context.h"
 #include "socket.hpp"
 #include "message.hpp"
-#elif MACOS_ENABLED
+#endif
+
+#if MACOS_ENABLED
 #include <IOSurface/IOSurface.h>
 #include "zmq_context.h"
 #include "socket.hpp"
 #include "message.hpp"
-#else
+#endif
+
+#if LINUXBSD_ENABLED
 #include "flingfd.h"
 #endif
 
