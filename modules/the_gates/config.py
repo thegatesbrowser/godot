@@ -52,7 +52,7 @@ def configure(env):
     else:
         # MacOS
 
-        # 1. Install zeromq arm64 and x86_64 with brew https://stackoverflow.com/questions/64963370/error-cannot-install-in-homebrew-on-arm-processor-in-intel-default-prefix-usr 
+        # 1. Build zeromq with cmake and Xcode both arm64 (macOS 11.0+) and x86_64 (macOS 10.13+) https://github.com/zeromq/libzmq
         # 2. Link them with lipo into universal library
         # 3. Replace libzmq.dylib that pkg-config returns
         if os.system("pkg-config --exists libzmq"):
