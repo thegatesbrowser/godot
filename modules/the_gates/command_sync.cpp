@@ -60,14 +60,11 @@ void CommandSync::bind_commands() {
 	};
 	Input::set_mouse_mode_func = _input_set_mouse_mode;
 
-	auto _scene_tree_open_gate = [] (String p_url) {
-		print_line("_scene_tree_open_gate " + p_url);
+	auto _scene_tree_send_command = [] (const String &p_name, const Array &p_args) {
 
-		Array args;
-		args.append(p_url);
-		singleton->send_command("open_gate", args);
+		singleton->send_command(p_name, p_args);
 	};
-	SceneTree::open_gate_func = _scene_tree_open_gate;
+	SceneTree::send_command_func = _scene_tree_send_command;
 }
 
 void CommandSync::_bind_methods() {

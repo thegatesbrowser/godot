@@ -420,10 +420,10 @@ public:
 	static void add_idle_callback(IdleCallback p_callback);
 
 	void set_disable_node_threading(bool p_disable);
-	
+
 	// TheGates
-	static void (*open_gate_func)(String);
-	void open_gate(String p_url);
+	static void (*send_command_func)(const String &p_name, const Array &p_args);
+	void send_command(const String &p_name, const Array &p_args);
 
 	//default texture settings
 
