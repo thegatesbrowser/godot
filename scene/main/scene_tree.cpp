@@ -1562,14 +1562,14 @@ bool SceneTree::is_multiplayer_poll_enabled() const {
 	return multiplayer_poll;
 }
 
-void (*SceneTree::open_gate_func)(String) = nullptr;
+void (*SceneTree::send_command_func)(const String &p_name, const Array &p_args) = nullptr;
 
-void SceneTree::open_gate(String p_url) {
-	open_gate_func(p_url);
+void SceneTree::send_command(const String &p_name, const Array &p_args) {
+	send_command_func(p_name, p_args);
 }
 
 void SceneTree::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("open_gate", "url"), &SceneTree::open_gate);
+	ClassDB::bind_method(D_METHOD("send_command", "name", "args"), &SceneTree::send_command);
 
 	ClassDB::bind_method(D_METHOD("get_root"), &SceneTree::get_root);
 	ClassDB::bind_method(D_METHOD("has_group", "name"), &SceneTree::has_group);
