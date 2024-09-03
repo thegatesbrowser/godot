@@ -24,7 +24,7 @@ def configure(env):
 
     if env.msvc:
         # TODO: fix not msvc windows build
-        
+
         # 1. Build libzmq https://www.youtube.com/watch?v=OiGf9T_TPa8
         # 2. Fix linking mismatch https://stackoverflow.com/questions/28887001/lnk2038-mismatch-detected-for-runtimelibrary-value-mt-staticrelease-doesn
         # 3. Place inside C:/Program Files (x86)/ZeroMQ/
