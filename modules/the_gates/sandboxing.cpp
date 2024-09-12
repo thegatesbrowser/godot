@@ -25,6 +25,7 @@ Error Sandboxing::sandbox() {
 		"exit_group",
 		"fadvise64",
 		"fcntl",
+		"flock",
 		"fstat",
 		"fstatfs",
 		"ftruncate",
