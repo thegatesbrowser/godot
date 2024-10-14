@@ -19,6 +19,7 @@ Error Sandboxing::sandbox() {
 		"chdir",
 		"clock_gettime",
 		"clock_nanosleep",
+		"clone",
 		"clone3",
 		"close",
 		"connect",
