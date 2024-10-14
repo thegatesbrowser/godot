@@ -15,6 +15,7 @@ Error Sandboxing::sandbox() {
 		"access",
 		"arch_prctl",
 		"brk",
+		"bind",
 		"chdir",
 		"clock_gettime",
 		"clock_nanosleep",
