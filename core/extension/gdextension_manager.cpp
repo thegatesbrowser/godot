@@ -338,6 +338,9 @@ GDExtensionManager::GDExtensionManager() {
 }
 
 GDExtensionManager::~GDExtensionManager() {
+	if (singleton == this) {
+		singleton = nullptr;
+	}
 #ifndef DISABLE_DEPRECATED
 	GDExtensionCompatHashes::finalize();
 #endif
