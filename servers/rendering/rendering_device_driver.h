@@ -276,8 +276,8 @@ public:
 		uint64_t layer_pitch = 0;
 	};
 
-	virtual RID external_texture_create(const TextureFormat &p_format, const TextureView &p_view, FileHandle *p_filehandle, const Vector<Vector<uint8_t>> &p_data = Vector<Vector<uint8_t>>()) = 0;
-	virtual RID external_texture_import(const TextureFormat &p_format, const TextureView &p_view, FileHandle p_filehandle) = 0;
+	virtual TextureID external_texture_create(const TextureFormat &p_format, const TextureView &p_view, FileHandle *p_filehandle) = 0;
+	virtual TextureID external_texture_import(const TextureFormat &p_format, const TextureView &p_view, FileHandle p_filehandle) = 0;
 	virtual Error swapchain_copy(RID p_to_texture, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_src_mipmap, uint32_t p_src_layer) = 0;
 
 	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) = 0;
