@@ -36,7 +36,7 @@ public:
 
     Error copy_to(RID p_texture) { return _copy(p_texture, false); };
     Error copy_from(RID p_texture) { return _copy(p_texture, true); };
-	Error copy_from_swapchain();
+	Error copy_from_screen();
 
 	RID get_rid() const { return rid; };
 

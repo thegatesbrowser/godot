@@ -344,6 +344,7 @@ private:
 		LocalVector<uint32_t> command_queues_acquired_semaphores;
 		RenderPassID render_pass;
 		uint32_t image_index = 0;
+		uint32_t last_image_index = 0;
 	};
 
 	void _swap_chain_release(SwapChain *p_swap_chain);
@@ -353,6 +354,8 @@ public:
 	virtual Error swap_chain_resize(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, uint32_t p_desired_framebuffer_count) override final;
 	virtual FramebufferID swap_chain_acquire_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, bool &r_resize_required) override final;
 	virtual RenderPassID swap_chain_get_render_pass(SwapChainID p_swap_chain) override final;
+	virtual TightLocalVector<uint64_t> swap_chain_get_images(SwapChainID p_swap_chain) override final;
+	virtual uint32_t swap_chain_get_image_index(SwapChainID p_swap_chain) override final;
 	virtual DataFormat swap_chain_get_format(SwapChainID p_swap_chain) override final;
 	virtual void swap_chain_free(SwapChainID p_swap_chain) override final;
 

@@ -1014,12 +1014,6 @@ RID RenderingDevice::external_texture_import(const TextureFormat &p_format, cons
 	return id;
 }
 
-Error RenderingDevice::swapchain_copy(RID p_to_texture, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_src_mipmap, uint32_t p_src_layer) {
-	_THREAD_SAFE_METHOD_
-
-	return driver->swapchain_copy(p_to_texture, p_to, p_size, p_src_mipmap, p_src_layer);
-}
-
 RID RenderingDevice::texture_create(const TextureFormat &p_format, const TextureView &p_view, const Vector<Vector<uint8_t>> &p_data) {
 	_THREAD_SAFE_METHOD_
 
@@ -3847,7 +3841,55 @@ Error RenderingDevice::screen_prepare_for_drawing(DisplayServer::WindowID p_scre
 	screen_framebuffers[p_screen] = framebuffer;
 	frames[frame].swap_chains_to_present.push_back(it->value);
 
+	if (resize_required) {
+		TightLocalVector<RID> texture_rids;
+
+		TightLocalVector<uint64_t> images = driver->swap_chain_get_images(it->value);
+		DataFormat format = driver->swap_chain_get_format(it->value);
+		uint32_t width = screen_get_width(p_screen);
+		uint32_t height = screen_get_height(p_screen);
+
+		// create Godot texture objects for each entry in our swapchain
+		for (uint32_t i = 0; i < images.size(); i++) {
+			RID image_rid = texture_create_from_extension(
+				RenderingDevice::TEXTURE_TYPE_2D,
+				format,
+				RenderingDevice::TEXTURE_SAMPLES_1,
+				RenderingDevice::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT,
+				images[i],
+				width,
+				height,
+				1, // p_depth
+				1 // p_layers
+			);
+
+			texture_rids.push_back(image_rid);
+		}
+
+		screen_textures[p_screen] = texture_rids;
+	}
+
 	return OK;
+}
+
+Error RenderingDevice::screen_copy(RID p_to_texture, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_dst_mipmap, uint32_t p_dst_layer, DisplayServer::WindowID p_screen) {
+	_THREAD_SAFE_METHOD_
+
+	HashMap<DisplayServer::WindowID, RDD::SwapChainID>::ConstIterator swap_chains_it = screen_swap_chains.find(p_screen);
+	ERR_FAIL_COND_V_MSG(swap_chains_it == screen_swap_chains.end(), FAILED, "Screen was never created.");
+
+	HashMap<DisplayServer::WindowID, TightLocalVector<RID>>::ConstIterator textures_it = screen_textures.find(p_screen);
+	ERR_FAIL_COND_V_MSG(textures_it == screen_textures.end(), FAILED, "Screen was never prepared.");
+
+	uint32_t image_index = driver->swap_chain_get_image_index(swap_chains_it->value);
+	RID src_texture = textures_it->value[image_index];
+	const Vector3 from = { 0, 0, 0 };
+
+	// Define properties based on swapchain image creation vulkan_context::_update_swapchain
+	const uint32_t src_mipmap = 0; // VkImageViewCreateInfo::baseMipLevel
+	const uint32_t src_layer = 0; // VkImageViewCreateInfo::baseArrayLayer
+
+	return texture_copy(src_texture, p_to_texture, from, p_to, p_size, src_mipmap, p_dst_mipmap, src_layer, p_dst_layer);
 }
 
 int RenderingDevice::screen_get_width(DisplayServer::WindowID p_screen) const {

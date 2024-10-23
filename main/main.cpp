@@ -4274,7 +4274,7 @@ bool Main::iteration() {
 	}
 
 	// Render send
-	ext_texture->copy_from_swapchain();
+	ext_texture->copy_from_screen();
 
 	// Input sync
 	input_sync->receive_input_events();

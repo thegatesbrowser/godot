@@ -314,7 +314,6 @@ public:
 	static TextureFormat _get_base(const Ref<RDTextureFormat> &p_format);
 	RID external_texture_create(const TextureFormat &p_format, const TextureView &p_view, FileHandle *p_filehandle, const Vector<Vector<uint8_t>> &p_data = Vector<Vector<uint8_t>>());
 	RID external_texture_import(const TextureFormat &p_format, const TextureView &p_view, FileHandle p_filehandle);
-	Error swapchain_copy(RID p_to_texture, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_src_mipmap, uint32_t p_src_layer);
 
 	RID texture_create(const TextureFormat &p_format, const TextureView &p_view, const Vector<Vector<uint8_t>> &p_data = Vector<Vector<uint8_t>>());
 	RID texture_create_shared(const TextureView &p_view, RID p_with_texture);
@@ -1051,12 +1050,14 @@ private:
 	/****************/
 	HashMap<DisplayServer::WindowID, RDD::SwapChainID> screen_swap_chains;
 	HashMap<DisplayServer::WindowID, RDD::FramebufferID> screen_framebuffers;
+	HashMap<DisplayServer::WindowID, TightLocalVector<RID>> screen_textures;
 
 	uint32_t _get_swap_chain_desired_count() const;
 
 public:
 	Error screen_create(DisplayServer::WindowID p_screen = DisplayServer::MAIN_WINDOW_ID);
 	Error screen_prepare_for_drawing(DisplayServer::WindowID p_screen = DisplayServer::MAIN_WINDOW_ID);
+	Error screen_copy(RID p_to_texture, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_src_mipmap, uint32_t p_src_layer, DisplayServer::WindowID p_screen = DisplayServer::MAIN_WINDOW_ID);
 	int screen_get_width(DisplayServer::WindowID p_screen = DisplayServer::MAIN_WINDOW_ID) const;
 	int screen_get_height(DisplayServer::WindowID p_screen = DisplayServer::MAIN_WINDOW_ID) const;
 	FramebufferFormatID screen_get_framebuffer_format(DisplayServer::WindowID p_screen = DisplayServer::MAIN_WINDOW_ID) const;

@@ -458,6 +458,12 @@ public:
 	// Retrieve the render pass that can be used to draw on the swap chain's framebuffers.
 	virtual RenderPassID swap_chain_get_render_pass(SwapChainID p_swap_chain) = 0;
 
+	// Retrieve swap chain images to create textures and copy from them.
+	virtual TightLocalVector<uint64_t> swap_chain_get_images(SwapChainID p_swap_chain) = 0;
+
+	// Retrieve current image index of swap chain.
+	virtual uint32_t swap_chain_get_image_index(SwapChainID p_swap_chain) = 0;
+
 	// Retrieve the format used by the swap chain's framebuffers.
 	virtual DataFormat swap_chain_get_format(SwapChainID p_swap_chain) = 0;
 

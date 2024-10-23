@@ -122,7 +122,7 @@ Error ExternalTexture::import(const RD::TextureFormat &p_format, const RD::Textu
     return OK;
 }
 
-Error ExternalTexture::copy_from_swapchain() {
+Error ExternalTexture::copy_from_screen() {
 	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_UNAVAILABLE, "ExternalTexture is not valid. Create or import first");
 
 	Vector3 size = {
@@ -132,7 +132,7 @@ Error ExternalTexture::copy_from_swapchain() {
 	};
 	const Vector3 zero = { 0, 0, 0 };
 
-	return RD::get_singleton()->swapchain_copy(rid, zero, size, 0, 0);
+	return RD::get_singleton()->screen_copy(rid, zero, size, 0, 0);
 }
 
 Error ExternalTexture::_create(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data) {

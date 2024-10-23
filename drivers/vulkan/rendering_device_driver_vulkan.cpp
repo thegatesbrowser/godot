@@ -3415,6 +3415,7 @@ RDD::FramebufferID RenderingDeviceDriverVulkan::swap_chain_acquire_framebuffer(C
 	command_queue->pending_semaphores_for_fence.push_back(semaphore_index);
 
 	// Return the corresponding framebuffer to the new current image.
+	swap_chain->last_image_index = swap_chain->image_index;
 	return swap_chain->framebuffers[swap_chain->image_index];
 }
 
@@ -3423,6 +3424,26 @@ RDD::RenderPassID RenderingDeviceDriverVulkan::swap_chain_get_render_pass(SwapCh
 
 	SwapChain *swap_chain = (SwapChain *)(p_swap_chain.id);
 	return swap_chain->render_pass;
+}
+
+TightLocalVector<uint64_t> RenderingDeviceDriverVulkan::swap_chain_get_images(SwapChainID p_swap_chain) {
+	DEV_ASSERT(p_swap_chain.id != 0);
+
+	SwapChain *swap_chain = (SwapChain *)(p_swap_chain.id);
+	TightLocalVector<uint64_t> images;
+
+	for (uint32_t i = 0; i < swap_chain->images.size(); i++) {
+		images.push_back((uint64_t)swap_chain->images[i]);
+	}
+
+	return images;
+}
+
+uint32_t RenderingDeviceDriverVulkan::swap_chain_get_image_index(SwapChainID p_swap_chain) {
+	DEV_ASSERT(p_swap_chain.id != 0);
+
+	SwapChain *swap_chain = (SwapChain *)(p_swap_chain.id);
+	return swap_chain->last_image_index;
 }
 
 RDD::DataFormat RenderingDeviceDriverVulkan::swap_chain_get_format(SwapChainID p_swap_chain) {
