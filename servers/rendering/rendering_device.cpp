@@ -3851,7 +3851,7 @@ Error RenderingDevice::screen_prepare_for_drawing(DisplayServer::WindowID p_scre
 
 		// create Godot texture objects for each entry in our swapchain
 		for (uint32_t i = 0; i < images.size(); i++) {
-			RID image_rid = texture_create_from_extension(
+			RID texture_rid = texture_create_from_extension(
 				RenderingDevice::TEXTURE_TYPE_2D,
 				format,
 				RenderingDevice::TEXTURE_SAMPLES_1,
@@ -3863,7 +3863,8 @@ Error RenderingDevice::screen_prepare_for_drawing(DisplayServer::WindowID p_scre
 				1 // p_layers
 			);
 
-			texture_rids.push_back(image_rid);
+			print_line("Screen texture created " + itos(texture_rid.get_id()));
+			texture_rids.push_back(texture_rid);
 		}
 
 		screen_textures[p_screen] = texture_rids;
@@ -3949,6 +3950,18 @@ Error RenderingDevice::screen_free(DisplayServer::WindowID p_screen) {
 	driver->swap_chain_free(swap_chain);
 	screen_framebuffers.erase(screen);
 	screen_swap_chains.erase(screen);
+
+	HashMap<DisplayServer::WindowID, TightLocalVector<RID>>::ConstIterator textures_it = screen_textures.find(screen);
+	if (textures_it != screen_textures.end()) {
+		for (uint32_t i = 0; i < textures_it->value.size(); i++) {
+			RID texture_rid = textures_it->value[i];
+			if (texture_rid.is_valid()) {
+				free(texture_rid);
+				print_line("Screen texture freed " + itos(texture_rid.get_id()));
+			}
+		}
+	}
+	screen_textures.erase(screen);
 
 	return OK;
 }
