@@ -209,7 +209,6 @@ public:
 public:
 	virtual TextureID external_texture_create(const TextureFormat &p_format, const TextureView &p_view, FileHandle *p_filehandle) override final;
 	virtual TextureID external_texture_import(const TextureFormat &p_format, const TextureView &p_view, FileHandle p_filehandle) override final;
-	virtual Error swapchain_copy(RID p_to_texture, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_src_mipmap, uint32_t p_src_layer) override final;
 
 	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) override final;
 	virtual TextureID texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil) override final;
