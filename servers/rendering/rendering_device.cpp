@@ -3863,7 +3863,6 @@ Error RenderingDevice::screen_prepare_for_drawing(DisplayServer::WindowID p_scre
 					1 // p_layers
 			);
 
-			print_line("Screen texture created " + itos(texture_rid.get_id()));
 			texture_rids.push_back(texture_rid);
 		}
 
@@ -3957,7 +3956,6 @@ Error RenderingDevice::screen_free(DisplayServer::WindowID p_screen) {
 			RID texture_rid = textures_it->value[i];
 			if (texture_rid.is_valid()) {
 				free(texture_rid);
-				print_line("Screen texture freed " + itos(texture_rid.get_id()));
 			}
 		}
 	}
