@@ -3852,15 +3852,15 @@ Error RenderingDevice::screen_prepare_for_drawing(DisplayServer::WindowID p_scre
 		// create Godot texture objects for each entry in our swapchain
 		for (uint32_t i = 0; i < images.size(); i++) {
 			RID texture_rid = texture_create_from_extension(
-				RenderingDevice::TEXTURE_TYPE_2D,
-				format,
-				RenderingDevice::TEXTURE_SAMPLES_1,
-				RenderingDevice::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT,
-				images[i],
-				width,
-				height,
-				1, // p_depth
-				1 // p_layers
+					RenderingDevice::TEXTURE_TYPE_2D,
+					format,
+					RenderingDevice::TEXTURE_SAMPLES_1,
+					RenderingDevice::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT,
+					images[i],
+					width,
+					height,
+					1, // p_depth
+					1 // p_layers
 			);
 
 			print_line("Screen texture created " + itos(texture_rid.get_id()));
