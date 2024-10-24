@@ -55,7 +55,9 @@
         "stop_token": "cpp",
         "typeinfo": "cpp",
         "utility": "cpp",
-        "cassert": "cpp"
+        "cassert": "cpp",
+        "__split_buffer": "cpp",
+        "*.ipp": "cpp"
     },
     "esbonio.sphinx.confDir": "",
     "C_Cpp.errorSquiggles": "disabled",

@@ -3882,6 +3882,8 @@ Error RenderingDevice::screen_copy(RID p_to_texture, const Vector3 &p_to, const 
 	ERR_FAIL_COND_V_MSG(textures_it == screen_textures.end(), FAILED, "Screen was never prepared.");
 
 	uint32_t image_index = driver->swap_chain_get_image_index(swap_chains_it->value);
+	ERR_FAIL_COND_V_MSG(image_index < 0 || image_index >= textures_it->value.size(), FAILED, "Image index is out of bound.");
+
 	RID src_texture = textures_it->value[image_index];
 	const Vector3 from = { 0, 0, 0 };
 
