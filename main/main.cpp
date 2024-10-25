@@ -259,10 +259,11 @@ bool profile_gpu = false;
 
 // TheGates
 #ifdef THE_GATES_SANDBOX
-static ExternalTexture	*ext_texture = nullptr;
-static CommandSync		*command_sync = nullptr;
-static InputSync		*input_sync = nullptr;
-static bool				first_draw_sent = false;
+static ExternalTexture *ext_texture = nullptr;
+static CommandSync *command_sync = nullptr;
+static InputSync *input_sync = nullptr;
+static bool first_frame_sent = false;
+static uint32_t heartbeat = 0;
 #endif
 String gdext_libs_dir = "";
 
@@ -4266,11 +4267,16 @@ bool Main::iteration() {
 	}
 
 #ifdef THE_GATES_SANDBOX
-	if (Engine::get_singleton()->frames_drawn > 2 && !first_draw_sent) {
+	if (!first_frame_sent && Engine::get_singleton()->frames_drawn > 2) {
 		// Send first frame drawn
-		command_sync->send_command("first_frame_drawn", Array());
+		command_sync->send_command("first_frame", Array());
+		first_frame_sent = true;
+	}
 
-		first_draw_sent = true;
+	heartbeat += ticks_elapsed;
+	if (heartbeat > 1000000) {
+		command_sync->send_command("heartbeat", Array());
+		heartbeat %= 1000000;
 	}
 
 	// Render send
