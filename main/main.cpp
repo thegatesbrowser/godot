@@ -132,8 +132,8 @@
 #endif // MODULE_GDSCRIPT_ENABLED
 
 #ifdef THE_GATES_SANDBOX
-#include "modules/the_gates/external_texture.h"
 #include "modules/the_gates/command_sync.h"
+#include "modules/the_gates/external_texture.h"
 #include "modules/the_gates/input_sync.h"
 #include "modules/the_gates/sandboxing.h"
 #endif
