@@ -4,11 +4,15 @@
 #include <seccomp.h>
 #include <sys/prctl.h>
 #include <signal.h>
+#include <fstream>
+#include <string>
 #endif
 
 #ifdef LINUXBSD_ENABLED
 void handle_sigsys(int signum, siginfo_t *info, void *context) {
-    print_line("Caught SIGSYS: Bad syscall number", info->si_syscall);
+	uint32_t arch = seccomp_arch_native();
+	char *syscall_name = seccomp_syscall_resolve_num_arch(arch, info->si_syscall);
+	print_line(vformat("Disallowed syscall \"%s\" caught in sandbox", syscall_name));
 }
 
 Error Sandboxing::sandbox() {
@@ -29,6 +33,7 @@ Error Sandboxing::sandbox() {
 		"close",
 		"connect",
 		"execve",
+		"exit",
 		"exit_group",
 		"fadvise64",
 		"fcntl",
@@ -54,6 +59,7 @@ Error Sandboxing::sandbox() {
 		"ioctl",
 		"lseek",
 		"lstat",
+		"madvise",
 		"memfd_create",
 		"mkdir",
 		"mmap",
@@ -68,6 +74,7 @@ Error Sandboxing::sandbox() {
 		"prctl",
 		"pread64",
 		"prlimit64",
+		"pselect6",
 		"read",
 		"readlink",
 		"recvfrom",
@@ -102,6 +109,7 @@ Error Sandboxing::sandbox() {
 	};
 
 	// Set up the signal handler
+	// Use auditd.service and SCMP_ACT_LOG to handle SIGSYS from other threads
     struct sigaction sa;
     sa.sa_sigaction = handle_sigsys;
     sa.sa_flags = SA_SIGINFO;
