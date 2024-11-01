@@ -69,7 +69,8 @@
         "__tree": "cpp",
         "ios": "cpp",
         "map": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "locale": "cpp"
     },
     "esbonio.sphinx.confDir": "",
     "C_Cpp.errorSquiggles": "disabled",

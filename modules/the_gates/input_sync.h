@@ -25,6 +25,8 @@ public:
 	void send_input_event(const Ref<InputEvent> &p_event);
 	void receive_input_events();
 
+	void close();
+
 	InputSync();
 	~InputSync();
 };

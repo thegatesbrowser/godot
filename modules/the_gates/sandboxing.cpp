@@ -32,6 +32,7 @@ Error Sandboxing::sandbox() {
 		"clone3",
 		"close",
 		"connect",
+		"dup3",
 		"execve",
 		"exit",
 		"exit_group",
