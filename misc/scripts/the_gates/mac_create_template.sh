@@ -7,6 +7,6 @@ cp bin/godot.macos.template_release.universal bin/macos_template.app/Contents/Ma
 cp bin/godot.macos.template_debug.sandbox.universal bin/macos_template.app/Contents/Frameworks/Sandbox.universal
 
 rm bin/macos.zip
-zip -q -9 -r bin/macos.zip bin/macos_template.app
+(cd bin && zip -q -9 -r macos.zip macos_template.app)
 
 set +o xtrace
