@@ -26,9 +26,14 @@ void InputSync::receive_input_events() {
 	}
 }
 
+void InputSync::close() {
+	sock.close();
+}
+
 void InputSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bind", "address"), &InputSync::bind, DEFVAL(INPUT_SYNC_ADDRESS));
 	ClassDB::bind_method(D_METHOD("send_input_event", "event"), &InputSync::send_input_event);
+	ClassDB::bind_method(D_METHOD("close"), &InputSync::close);
 }
 
 InputSync::InputSync()
@@ -36,5 +41,4 @@ InputSync::InputSync()
 }
 
 InputSync::~InputSync() {
-	sock.close();
 }

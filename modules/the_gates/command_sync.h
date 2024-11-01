@@ -36,6 +36,8 @@ public:
 	void bind_commands();
 	void receive_commands();
 
+	void close();
+
 	CommandSync(zmqpp::socket_type type = zmqpp::socket_type::pair);
 	~CommandSync();
 };

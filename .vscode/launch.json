@@ -23,7 +23,7 @@
             "args": [
                 "--verbose",
                 "--path",
-                "/home/nordup/projects/godot/the-gates-folder/the-gates/project"
+                "/home/nordup/projects/thegates-folder/thegates/app"
             ],
             "cwd": "${workspaceFolder}"
         },

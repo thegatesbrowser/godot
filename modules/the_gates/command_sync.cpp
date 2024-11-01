@@ -41,14 +41,6 @@ Variant CommandSync::call_execute_function(const Ref<Command> &p_command) {
 	return ret;
 }
 
-void CommandSync::receive_commands() {
-	std::string msg;
-
-	while (sock.receive(msg, true)) {
-		Variant res = call_execute_function((Ref<Command>)str_to_var(msg.c_str()));
-	}
-}
-
 void CommandSync::bind_commands() {
 	auto _input_set_mouse_mode = [] (Input::MouseMode p_mode) {
 		print_line("_input_set_mouse_mode " + itos((int)p_mode));
@@ -67,6 +59,18 @@ void CommandSync::bind_commands() {
 	SceneTree::send_command_func = _scene_tree_send_command;
 }
 
+void CommandSync::receive_commands() {
+	std::string msg;
+
+	while (sock.receive(msg, true)) {
+		Variant res = call_execute_function((Ref<Command>)str_to_var(msg.c_str()));
+	}
+}
+
+void CommandSync::close() {
+	sock.close();
+}
+
 void CommandSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bind", "address"), &CommandSync::bind, DEFVAL(COMMAND_SYNC_ADDRESS));
 	ClassDB::bind_method(D_METHOD("receive_commands"), &CommandSync::receive_commands);
@@ -74,6 +78,8 @@ void CommandSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_execute_function"), &CommandSync::get_execute_function);
 	ClassDB::bind_method(D_METHOD("set_execute_function", "execute_function"), &CommandSync::set_execute_function);
 	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "execute_function", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR), "set_execute_function", "get_execute_function");
+
+	ClassDB::bind_method(D_METHOD("close"), &CommandSync::close);
 }
 
 CommandSync::CommandSync(zmqpp::socket_type type)
@@ -84,5 +90,4 @@ CommandSync::CommandSync(zmqpp::socket_type type)
 }
 
 CommandSync::~CommandSync() {
-	sock.close();
 }
