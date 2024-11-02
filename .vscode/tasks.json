@@ -9,7 +9,7 @@
           "type": "shell",
           "command": "scons",
           "args": [
-            "-j", "$(nproc)", "dev_build=yes", "the_gates_sandbox=no", "compiledb=yes", "use_llvm=yes", "linker=lld", "disable_exceptions=no"
+            "dev_build=yes", "the_gates_sandbox=no", "compiledb=yes", "use_llvm=yes", "linker=lld", "disable_exceptions=no"
           ],
           "problemMatcher": "$msCompile"
       },
@@ -19,7 +19,7 @@
           "type": "shell",
           "command": "scons",
           "args": [
-            "-j", "$(nproc)", "dev_build=yes", "target=template_debug", "the_gates_sandbox=yes", "compiledb=yes", "use_llvm=yes", "linker=lld", "disable_exceptions=no"
+            "dev_build=yes", "target=template_debug", "the_gates_sandbox=yes", "compiledb=yes", "use_llvm=yes", "linker=lld", "disable_exceptions=no"
           ],
           "problemMatcher": "$msCompile"
       },
@@ -29,17 +29,17 @@
           "type": "shell",
           "command": "scons",
           "args": [
-            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_release", "use_lto=yes", "the_gates_sandbox=no", "disable_exceptions=no"
+            "production=yes", "tools=no", "target=template_release", "optimize=speed", "the_gates_sandbox=no", "disable_exceptions=no"
           ],
           "problemMatcher": "$msCompile"
       },
       {
-          "label": "build sandbox (template_debug)",
+          "label": "build sandbox (template_release)",
           "group": "build",
           "type": "shell",
           "command": "scons",
           "args": [
-            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_debug", "use_lto=yes", "the_gates_sandbox=yes", "disable_exceptions=no"
+            "production=yes", "tools=no", "target=template_release", "optimize=speed", "the_gates_sandbox=yes", "disable_exceptions=no"
           ],
           "problemMatcher": "$msCompile"
       },
@@ -49,17 +49,17 @@
           "type": "shell",
           "command": "scons",
           "args": [
-            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_release", "use_lto=yes", "the_gates_sandbox=no", "disable_exceptions=no", "arch=x86_64"
+            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_release", "optimize=speed", "the_gates_sandbox=no", "disable_exceptions=no", "arch=x86_64"
           ],
           "problemMatcher": "$msCompile"
       },
       {
-          "label": "build sandbox (template_debug, x86_64)",
+          "label": "build sandbox (template_release, x86_64)",
           "group": "build",
           "type": "shell",
           "command": "scons",
           "args": [
-            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_debug", "use_lto=yes", "the_gates_sandbox=yes", "disable_exceptions=no", "arch=x86_64"
+            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_release", "optimize=speed", "the_gates_sandbox=yes", "disable_exceptions=no", "arch=x86_64"
           ],
           "problemMatcher": "$msCompile"
       }
