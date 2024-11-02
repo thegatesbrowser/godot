@@ -49,7 +49,7 @@ class FileAccessWindowsPipe : public FileAccess {
 	void _close();
 
 public:
-	Error open_existing(HANDLE p_rfd, HANDLE p_wfd, bool p_blocking);
+	Error open_existing(HANDLE p_rfd, HANDLE p_wfd);
 
 	virtual Error open_internal(const String &p_path, int p_mode_flags) override; ///< open a file
 	virtual bool is_open() const override; ///< true when file is open
