@@ -72,28 +72,26 @@ def configure(env):
             "C:/src/chromium/src/out/sandbox_build/obj/sandbox"
         ])
 
-        # Create library objects without platform suffixes
-        libs = [
-            env.Library("base.dll"),
-            env.Library("sandbox"),
-            env.Library("libc++.dll"),
-            env.Library("pe_image"),
-            env.Library("third_party_abseil-cpp_absl.dll"),
-            env.Library("third_party_perfetto_libperfetto.dll"),
-            env.Library("third_party_boringssl.dll"),
-            env.Library("third_party_zlib.dll"),
-            env.Library("cppgen_plugin"),
-            env.Library("protozero_plugin"),
-            env.Library("base_allocator_partition_allocator_src_partition_alloc_raw_ptr.dll"),
-            env.Library("base_allocator_partition_allocator_src_partition_alloc_allocator_shim.dll"),
-            env.Library("base_allocator_partition_allocator_src_partition_alloc_allocator_core.dll"),
-            env.Library("base_allocator_partition_allocator_src_partition_alloc_allocator_base.dll"),
-            env.Library("windows.0.52.0"),
-            env.Library("delayimp"),
-            env.Library("common"),
-            env.Library("service_resolver")
-        ]
-        env.Append(LIBS=libs)
+        env.Append(LIBS=[
+            "base.dll.lib",
+            "sandbox.lib",
+            "libc++.dll.lib",
+            "pe_image.lib",
+            "third_party_abseil-cpp_absl.dll.lib",
+            "third_party_perfetto_libperfetto.dll.lib",
+            "third_party_boringssl.dll.lib",
+            "third_party_zlib.dll.lib",
+            "cppgen_plugin.lib",
+            "protozero_plugin.lib",
+            "base_allocator_partition_allocator_src_partition_alloc_raw_ptr.dll.lib",
+            "base_allocator_partition_allocator_src_partition_alloc_allocator_shim.dll.lib",
+            "base_allocator_partition_allocator_src_partition_alloc_allocator_core.dll.lib",
+            "base_allocator_partition_allocator_src_partition_alloc_allocator_base.dll.lib",
+            "windows.0.52.0.lib",
+            "delayimp.lib",
+            "common.lib",
+            "service_resolver.lib"
+        ])
     
     elif env["platform"] == "linuxbsd":
         if os.system("pkg-config --exists libzmq"):
