@@ -34,6 +34,37 @@ def configure(env):
         env.Append(LINKFLAGS=["libzmq-v143-mt-s-4_3_5.lib"])
         print("Linking ZeroMQ statically")
 
+        # Chromium sandboxing
+        env.Replace(CC = "clang-cl")
+        env.Replace(CXX = "clang-cl")
+        
+        # Enable required instruction sets for both our module and thirdparty code
+        env.Prepend(CCFLAGS=['/arch:AVX2'])  # This includes SSE3/SSSE3 support
+        
+        # Add Windows intrinsic support
+        env.Prepend(CPPDEFINES=[
+            ('_CRT_INTERNAL_NONSTDC_NAMES', 1),
+            ('_CRT_INTERNAL_NONSTDC_NAMES_WITH_EXCEPTIONS', 1)
+        ])
+        
+        # Add Windows headers for intrinsics
+        env.Prepend(CPPPATH=['C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt'])
+        
+        # Add module-specific include paths
+        env.Prepend(CPPPATH=[
+            'C:/src/chromium/src/',
+            'C:/src/chromium/src/out/sandbox_build/gen/',
+            'C:/src/chromium/src/buildtools/third_party/libc++/',
+            'C:/src/chromium/src/third_party/perfetto/include/',
+            'C:/src/chromium/src/out/sandbox_build/gen/third_party/perfetto/build_config/',
+            'C:/src/chromium/src/out/sandbox_build/gen/third_party/perfetto/',
+            'C:/src/chromium/src/base/allocator/partition_allocator/src/',
+            'C:/src/chromium/src/out/sandbox_build/gen/base/allocator/partition_allocator/src/',
+            'C:/src/chromium/src/third_party/abseil-cpp/',
+            'C:/src/chromium/src/third_party/boringssl/src/include/',
+            'C:/src/chromium/src/third_party/protobuf/src/'
+        ])
+
     elif env["platform"] == "linuxbsd":
         if os.system("pkg-config --exists libzmq"):
             print("Error: ZeroMQ librarie not found. Aborting.")

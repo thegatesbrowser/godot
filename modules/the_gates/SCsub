@@ -55,5 +55,9 @@ module_obj = []
 env_tg.add_source_files(module_obj, "*.cpp")
 env.modules_sources += module_obj
 
+Export("env_tg")
+
+SConscript("sandbox/SCsub")
+
 # Needed to force rebuilding the module files when the thirdparty library is updated.
 env.Depends(module_obj, thirdparty_obj)

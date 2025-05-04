@@ -777,11 +777,13 @@ if not env.msvc:
     # Specifying GNU extensions support explicitly, which are supported by
     # both GCC and Clang. Both currently default to gnu11 and gnu++14.
     env.Prepend(CFLAGS=["-std=gnu11"])
-    env.Prepend(CXXFLAGS=["-std=gnu++17"])
+    env.Prepend(CXXFLAGS=["-std=gnu++20"])
+    print("Using gnu++20")
 else:
     # MSVC doesn't have clear C standard support, /std only covers C++.
     # We apply it to CCFLAGS (both C and C++ code) in case it impacts C features.
-    env.Prepend(CCFLAGS=["/std:c++17"])
+    env.Prepend(CCFLAGS=["/std:c++20"])
+    print("Using /std:c++20")
 
 # Disable exception handling. Godot doesn't use exceptions anywhere, and this
 # saves around 20% of binary size and very significant build time (GH-80513).
