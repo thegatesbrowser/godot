@@ -38,9 +38,11 @@ def configure(env):
         env.Replace(CC = "clang-cl")
         env.Replace(CXX = "clang-cl")
         
-        # Enable required instruction sets for both our module and thirdparty code
-        env.Prepend(CCFLAGS=['/arch:AVX2'])  # This includes SSE3/SSSE3 support
-        
+        # Enable required instruction sets for libwebp
+        # TODO: remove this as it was discussed here https://github.com/godotengine/godot/pull/36580/files
+        env.Append(CCFLAGS=['-mssse3'])
+        env.Append(CCFLAGS=["-msse4.1"])
+
         # Disable assembly optimizations in R128 library and use standard C implementation
         env.Prepend(CPPDEFINES=['R128_STDC_ONLY'])
         
