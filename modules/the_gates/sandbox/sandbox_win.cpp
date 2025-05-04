@@ -1,15 +1,9 @@
-#include <sandbox/win/src/sandbox.h>
-#include <sandbox/win/src/sandbox_factory.h>
-#include <iostream>
-#include <shellapi.h>  // For CommandLineToArgvW
-#include "BrokerServicesDelegateImpl.h"
+#include "sandbox_win.h"
 
-using namespace std;
-
-int run_parent(int argc, wchar_t* argv[], sandbox::BrokerServices* broker_service) {
+int SandboxingWin::run_parent(int argc, wchar_t* argv[], sandbox::BrokerServices* broker_service) {
     std::unique_ptr<BrokerServicesDelegateImpl> delegate = std::make_unique<BrokerServicesDelegateImpl>();
     if (sandbox::SBOX_ALL_OK != broker_service->Init(std::move(delegate))) {
-        wcout << L"Failed to initialize the BrokerServices object" << endl;
+        std::wcout << L"Failed to initialize the BrokerServices object" << std::endl;
         return 1;
     }
 
@@ -20,19 +14,19 @@ int run_parent(int argc, wchar_t* argv[], sandbox::BrokerServices* broker_servic
 
     sandbox::ResultCode ret = config->SetJobLevel(sandbox::JobLevel::kLockdown, 0);
     if (ret != sandbox::SBOX_ALL_OK) {
-        wcout << L"Failed to set job level" << endl;
+        std::wcout << L"Failed to set job level" << std::endl;
         return 1;
     }
 
     ret = config->SetTokenLevel(sandbox::TokenLevel::USER_RESTRICTED_SAME_ACCESS, sandbox::TokenLevel::USER_LOCKDOWN);
     if (ret != sandbox::SBOX_ALL_OK) {
-        wcout << L"Failed to set token level" << endl;
+        std::wcout << L"Failed to set token level" << std::endl;
         return 1;
     }
     
     ret = broker_service->CreateAlternateDesktop(sandbox::Desktop::kAlternateDesktop);
     if (ret != sandbox::SBOX_ALL_OK) {
-        wcout << L"Failed to create alternate desktop" << endl;
+        std::wcout << L"Failed to create alternate desktop" << std::endl;
         return 1;
     }
 
@@ -42,26 +36,26 @@ int run_parent(int argc, wchar_t* argv[], sandbox::BrokerServices* broker_servic
     // Add additional rules here (ie: file access exceptions) like so:
     ret = config->AllowFileAccess(sandbox::FileSemantics::kAllowAny, L"C:\\Users\\Nordup\\Documents\\Projects\\C++\\sandboxing\\build\\Debug\\sandbox_log.txt");
     if (ret != sandbox::SBOX_ALL_OK) {
-        wcout << L"Failed to set file access" << endl;
+        std::wcout << L"Failed to set file access" << std::endl;
         return 1;
     }
 
     DWORD error_code = 0;
     sandbox::ResultCode result = broker_service->SpawnTarget(argv[0], GetCommandLineW(), std::move(policy), &error_code, &pi);
     if (sandbox::SBOX_ALL_OK != result) {
-        wcout << L"Sandbox failed to launch with the following result: " << result << endl;
+        std::wcout << L"Sandbox failed to launch with the following result: " << result << std::endl;
         return 2;
     }
     ::ResumeThread(pi.hThread);
 
-    wcout << L"Successfully launched sandboxed process" << endl;
+    std::wcout << L"Successfully launched sandboxed process" << std::endl;
 
     // Wait for the child process to complete
     WaitForSingleObject(pi.hProcess, INFINITE);
 
     DWORD exitCode;
     if (GetExitCodeProcess(pi.hProcess, &exitCode)) {
-        wcout << L"Child process exited with code: " << exitCode << endl;
+        std::wcout << L"Child process exited with code: " << exitCode << std::endl;
     }
 
     // Just like CreateProcess, you need to close these yourself unless you need to reference them later
@@ -71,7 +65,7 @@ int run_parent(int argc, wchar_t* argv[], sandbox::BrokerServices* broker_servic
     return 0;
 }
 
-void try_doing_something_bad(FILE* logFile) {
+int try_doing_something_bad(FILE* logFile) {
     // Try to write to a protected directory
     FILE* file = nullptr;
     errno_t err = fopen_s(&file, "C:\\Users\\Nordup\\Documents\\Projects\\C++\\sandboxing\\build\\Debug\\test.txt", "w");
@@ -84,7 +78,7 @@ void try_doing_something_bad(FILE* logFile) {
     }
 }
 
-int run_child(int argc, wchar_t* argv[]) {
+int SandboxingWin::run_child(int argc, wchar_t* argv[]) {
     FILE* logFile = nullptr;
     errno_t err = fopen_s(&logFile, "sandbox_log.txt", "w");
     if (err != 0 || !logFile) {
@@ -118,7 +112,7 @@ int run_child(int argc, wchar_t* argv[]) {
     return 0;
 }
 
-int sandbox_main(int argc, wchar_t* argv[]) {
+int SandboxingWin::sandbox_main(int argc, wchar_t* argv[]) {
     sandbox::BrokerServices* broker_service = sandbox::SandboxFactory::GetBrokerServices();
 
     // A non-NULL broker_service means that we are not running in the sandbox, 
