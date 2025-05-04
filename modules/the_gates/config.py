@@ -41,14 +41,8 @@ def configure(env):
         # Enable required instruction sets for both our module and thirdparty code
         env.Prepend(CCFLAGS=['/arch:AVX2'])  # This includes SSE3/SSSE3 support
         
-        # Add Windows intrinsic support
-        env.Prepend(CPPDEFINES=[
-            ('_CRT_INTERNAL_NONSTDC_NAMES', 1),
-            ('_CRT_INTERNAL_NONSTDC_NAMES_WITH_EXCEPTIONS', 1)
-        ])
-        
-        # Add Windows headers for intrinsics
-        env.Prepend(CPPPATH=['C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt'])
+        # Disable assembly optimizations in R128 library and use standard C implementation
+        env.Prepend(CPPDEFINES=['R128_STDC_ONLY'])
         
         # Add module-specific include paths
         env.Prepend(CPPPATH=[
