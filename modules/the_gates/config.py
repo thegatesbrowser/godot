@@ -72,7 +72,7 @@ def configure(env):
             "C:/src/chromium/src/out/sandbox_build/obj/sandbox"
         ])
 
-        env.Append(LIBS=[
+        env.Append(LINKFLAGS=[
             "base.dll.lib",
             "sandbox.lib",
             "libc++.dll.lib",
@@ -92,7 +92,7 @@ def configure(env):
             "common.lib",
             "service_resolver.lib"
         ])
-    
+
     elif env["platform"] == "linuxbsd":
         if os.system("pkg-config --exists libzmq"):
             print("Error: ZeroMQ librarie not found. Aborting.")
