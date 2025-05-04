@@ -61,6 +61,40 @@ def configure(env):
             'C:/src/chromium/src/third_party/protobuf/src/'
         ])
 
+        # Add module-specific library paths
+        env.Append(LIBPATH=[
+            "C:/src/chromium/src/out/sandbox_build",
+            "C:/src/chromium/src/out/sandbox_build/obj/sandbox/win",
+            "C:/src/chromium/src/out/sandbox_build/obj/base/win",
+            "C:/src/chromium/src/out/sandbox_build/win_clang_x64_for_rust_host_build_tools/rustlib/windows_x86_64_msvc_lib_v0_52",
+            "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/lib/x64",
+            "C:/src/chromium/src/out/sandbox_build/obj/sandbox/win",
+            "C:/src/chromium/src/out/sandbox_build/obj/sandbox"
+        ])
+
+        # Create library objects without platform suffixes
+        libs = [
+            env.Library("base.dll"),
+            env.Library("sandbox"),
+            env.Library("libc++.dll"),
+            env.Library("pe_image"),
+            env.Library("third_party_abseil-cpp_absl.dll"),
+            env.Library("third_party_perfetto_libperfetto.dll"),
+            env.Library("third_party_boringssl.dll"),
+            env.Library("third_party_zlib.dll"),
+            env.Library("cppgen_plugin"),
+            env.Library("protozero_plugin"),
+            env.Library("base_allocator_partition_allocator_src_partition_alloc_raw_ptr.dll"),
+            env.Library("base_allocator_partition_allocator_src_partition_alloc_allocator_shim.dll"),
+            env.Library("base_allocator_partition_allocator_src_partition_alloc_allocator_core.dll"),
+            env.Library("base_allocator_partition_allocator_src_partition_alloc_allocator_base.dll"),
+            env.Library("windows.0.52.0"),
+            env.Library("delayimp"),
+            env.Library("common"),
+            env.Library("service_resolver")
+        ]
+        env.Append(LIBS=libs)
+    
     elif env["platform"] == "linuxbsd":
         if os.system("pkg-config --exists libzmq"):
             print("Error: ZeroMQ librarie not found. Aborting.")

@@ -1,6 +1,15 @@
 #include "sandbox_win.h"
+#include "helpers.h"
 
-int SandboxingWin::run_parent(int argc, wchar_t* argv[], sandbox::BrokerServices* broker_service) {
+#include <sandbox/win/src/sandbox.h>
+#include <sandbox/win/src/sandbox_factory.h>
+#include <iostream>
+#include <shellapi.h>  // For CommandLineToArgvW
+#include "BrokerServicesDelegateImpl.h"
+
+int SandboxingWin::run_parent(List<String> args) {
+    sandbox::BrokerServices* broker_service = sandbox::SandboxFactory::GetBrokerServices();
+
     std::unique_ptr<BrokerServicesDelegateImpl> delegate = std::make_unique<BrokerServicesDelegateImpl>();
     if (sandbox::SBOX_ALL_OK != broker_service->Init(std::move(delegate))) {
         std::wcout << L"Failed to initialize the BrokerServices object" << std::endl;
@@ -41,7 +50,8 @@ int SandboxingWin::run_parent(int argc, wchar_t* argv[], sandbox::BrokerServices
     }
 
     DWORD error_code = 0;
-    sandbox::ResultCode result = broker_service->SpawnTarget(argv[0], GetCommandLineW(), std::move(policy), &error_code, &pi);
+    wchar_t warg = to_wchar(args.get(0).utf8().get_data());
+    sandbox::ResultCode result = broker_service->SpawnTarget(&warg, GetCommandLineW(), std::move(policy), &error_code, &pi);
     if (sandbox::SBOX_ALL_OK != result) {
         std::wcout << L"Sandbox failed to launch with the following result: " << result << std::endl;
         return 2;
@@ -78,7 +88,7 @@ int try_doing_something_bad(FILE* logFile) {
     }
 }
 
-int SandboxingWin::run_child(int argc, wchar_t* argv[]) {
+int SandboxingWin::run_child() {
     FILE* logFile = nullptr;
     errno_t err = fopen_s(&logFile, "sandbox_log.txt", "w");
     if (err != 0 || !logFile) {
@@ -110,16 +120,4 @@ int SandboxingWin::run_child(int argc, wchar_t* argv[]) {
     fprintf(logFile, "Successfully lower token\n");
     fclose(logFile);
     return 0;
-}
-
-int SandboxingWin::sandbox_main(int argc, wchar_t* argv[]) {
-    sandbox::BrokerServices* broker_service = sandbox::SandboxFactory::GetBrokerServices();
-
-    // A non-NULL broker_service means that we are not running in the sandbox, 
-    // and are therefore the parent process
-    if(NULL != broker_service) {
-        return run_parent(argc, argv, broker_service);
-    } else {
-        return run_child(argc, argv);
-    }
 }

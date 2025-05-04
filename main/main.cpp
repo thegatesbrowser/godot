@@ -138,6 +138,8 @@
 #include "modules/the_gates/sandboxing.h"
 #endif
 
+#include "modules/the_gates/sandbox/sandbox_win.h"
+
 /* Static members */
 
 // Singletons
@@ -265,6 +267,7 @@ static InputSync *input_sync = nullptr;
 static bool first_frame_sent = false;
 static uint32_t heartbeat = 0;
 #endif
+static SandboxingWin *sandboxing_win = nullptr;
 String gdext_libs_dir = "";
 
 // Constants.
@@ -4102,6 +4105,9 @@ int Main::start() {
 	print_line("Sandboxing succeeded");
 #endif
 #endif
+
+	sandboxing_win = memnew(SandboxingWin);
+	sandboxing_win->run_parent(OS::get_singleton()->get_cmdline_args());
 
 	return EXIT_SUCCESS;
 }
