@@ -4107,7 +4107,10 @@ int Main::start() {
 #endif
 
 	sandboxing_win = memnew(SandboxingWin);
-	sandboxing_win->run_parent(OS::get_singleton()->get_cmdline_args());
+
+	List<String> sandbox_args;
+	sandbox_args.push_back(OS::get_singleton()->get_executable_path());
+	sandboxing_win->run(sandbox_args);
 
 	return EXIT_SUCCESS;
 }

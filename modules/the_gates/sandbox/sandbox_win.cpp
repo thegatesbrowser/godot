@@ -49,6 +49,16 @@ int SandboxingWin::run_parent(List<String> args) {
         return 1;
     }
 
+    if (args.size() > 0) {
+        std::wcout << L"Args: " << args.get(0).utf8().get_data() << std::endl;
+    } else {
+        std::wcout << L"No args" << std::endl;
+        return 1;
+    }
+
+    std::wcout << L"Sleeping for 15 seconds" << std::endl;
+    Sleep(15000);
+
     DWORD error_code = 0;
     wchar_t warg = to_wchar(args.get(0).utf8().get_data());
     sandbox::ResultCode result = broker_service->SpawnTarget(&warg, GetCommandLineW(), std::move(policy), &error_code, &pi);
@@ -120,6 +130,18 @@ int SandboxingWin::run_child() {
     fprintf(logFile, "Successfully lower token\n");
     fclose(logFile);
     return 0;
+}
+
+int SandboxingWin::run(List<String> args) {
+    sandbox::BrokerServices* broker_service = sandbox::SandboxFactory::GetBrokerServices();
+
+    // A non-NULL broker_service means that we are not running in the sandbox, 
+    // and are therefore the parent process
+    if(NULL != broker_service) {
+        return run_parent(args);
+    } else {
+        return run_child();
+    }
 }
 
 SandboxingWin::SandboxingWin() {

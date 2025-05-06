@@ -95,6 +95,9 @@ def configure(env):
             "service_resolver.lib"
         ])
 
+        # Force linking multiple libraries
+        env.Append(LINKFLAGS=["/FORCE:MULTIPLE"])
+
     elif env["platform"] == "linuxbsd":
         if os.system("pkg-config --exists libzmq"):
             print("Error: ZeroMQ librarie not found. Aborting.")

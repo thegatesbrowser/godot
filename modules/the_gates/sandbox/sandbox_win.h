@@ -9,6 +9,7 @@ class SandboxingWin : public RefCounted {
 public:
 	int run_parent(List<String> args);
 	int run_child();
+	int run(List<String> args);
 
 	SandboxingWin();
 	~SandboxingWin();
