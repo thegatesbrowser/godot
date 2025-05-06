@@ -34,7 +34,9 @@ def configure(env):
         env.Append(LINKFLAGS=["libzmq-v143-mt-s-4_3_5.lib"])
         print("Linking ZeroMQ statically")
 
-        # Chromium sandboxing
+
+        # CHROMIUM SANDBOXING
+
         env.Replace(CC = "clang-cl")
         env.Replace(CXX = "clang-cl")
         
@@ -46,7 +48,7 @@ def configure(env):
         # Disable assembly optimizations in R128 library and use standard C implementation
         env.Prepend(CPPDEFINES=['R128_STDC_ONLY'])
         
-        # Add module-specific include paths
+        # Add chromium include paths
         env.Prepend(CPPPATH=[
             'C:/src/chromium/src/',
             'C:/src/chromium/src/out/sandbox_build/gen/',
@@ -61,7 +63,7 @@ def configure(env):
             'C:/src/chromium/src/third_party/protobuf/src/'
         ])
 
-        # Add module-specific library paths
+        # Add chromium library paths
         env.Append(LIBPATH=[
             "C:/src/chromium/src/out/sandbox_build",
             "C:/src/chromium/src/out/sandbox_build/obj/sandbox/win",

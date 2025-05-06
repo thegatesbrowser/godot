@@ -121,3 +121,9 @@ int SandboxingWin::run_child() {
     fclose(logFile);
     return 0;
 }
+
+SandboxingWin::SandboxingWin() {
+}
+
+SandboxingWin::~SandboxingWin() {
+}
