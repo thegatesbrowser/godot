@@ -65,38 +65,41 @@ def configure(env):
 
         # Add chromium library paths
         env.Append(LIBPATH=[
-            "C:/src/chromium/src/out/sandbox_build",
-            "C:/src/chromium/src/out/sandbox_build/obj/sandbox/win",
-            "C:/src/chromium/src/out/sandbox_build/obj/base/win",
-            "C:/src/chromium/src/out/sandbox_build/win_clang_x64_for_rust_host_build_tools/rustlib/windows_x86_64_msvc_lib_v0_52",
             "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/lib/x64",
-            "C:/src/chromium/src/out/sandbox_build/obj/sandbox/win",
-            "C:/src/chromium/src/out/sandbox_build/obj/sandbox"
+            "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64",
+            "C:/Users/Nordup/Downloads/cef_binary_136.1.4+g89c0a8c+chromium-136.0.7103.93_windows64_minimal/cef_binary_136.1.4+g89c0a8c+chromium-136.0.7103.93_windows64_minimal/Release"
         ])
 
         env.Append(LINKFLAGS=[
-            "base.dll.lib",
-            "sandbox.lib",
-            "libc++.dll.lib",
-            "pe_image.lib",
-            "third_party_abseil-cpp_absl.dll.lib",
-            "third_party_perfetto_libperfetto.dll.lib",
-            "third_party_boringssl.dll.lib",
-            "third_party_zlib.dll.lib",
-            "cppgen_plugin.lib",
-            "protozero_plugin.lib",
-            "base_allocator_partition_allocator_src_partition_alloc_raw_ptr.dll.lib",
-            "base_allocator_partition_allocator_src_partition_alloc_allocator_shim.dll.lib",
-            "base_allocator_partition_allocator_src_partition_alloc_allocator_core.dll.lib",
-            "base_allocator_partition_allocator_src_partition_alloc_allocator_base.dll.lib",
-            "windows.0.52.0.lib",
+            # Chromium Embedded Framework (CEF). Download from https://cef-builds.spotifycdn.com/index.html#windows64
+            "cef_sandbox.lib",
+            # Core Windows libraries
+            "kernel32.lib",
+            "user32.lib",
+            "gdi32.lib",
+            "advapi32.lib",
+            "shell32.lib",
+            "ole32.lib",
+            "oleaut32.lib",
+            "uuid.lib",
+            # Additional Windows libraries
+            "winmm.lib",
+            "shlwapi.lib",
+            "propsys.lib",
+            "powrprof.lib",
+            "shcore.lib",
+            "ntdll.lib",
+            "setupapi.lib",
+            "cfgmgr32.lib",
+            "version.lib",
+            "ws2_32.lib",
+            "runtimeobject.lib",
+            "dbghelp.lib",
+            "userenv.lib",
             "delayimp.lib",
-            "common.lib",
-            "service_resolver.lib"
+            "wbemuuid.lib",
+            "mincore.lib",
         ])
-
-        # Force linking multiple libraries
-        env.Append(LINKFLAGS=["/FORCE:MULTIPLE"])
 
     elif env["platform"] == "linuxbsd":
         if os.system("pkg-config --exists libzmq"):
