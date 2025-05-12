@@ -60,12 +60,13 @@ int SandboxingWin::run_parent(List<String> args) {
     Sleep(15000);
 
     DWORD error_code = 0;
-    wchar_t warg = to_wchar(args.get(0).utf8().get_data());
-    sandbox::ResultCode result = broker_service->SpawnTarget(&warg, GetCommandLineW(), std::move(policy), &error_code, &pi);
+    wchar_t* warg = to_wchar(args.get(0).utf8().get_data());
+    sandbox::ResultCode result = broker_service->SpawnTarget(warg, GetCommandLineW(), std::move(policy), &error_code, &pi);
     if (sandbox::SBOX_ALL_OK != result) {
         std::wcout << L"Sandbox failed to launch with the following result: " << result << std::endl;
         return 2;
     }
+    delete[] warg;
     ::ResumeThread(pi.hThread);
 
     std::wcout << L"Successfully launched sandboxed process" << std::endl;
