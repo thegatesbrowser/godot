@@ -3,8 +3,8 @@
 
 #include <sandbox/win/src/sandbox.h>
 #include <sandbox/win/src/sandbox_factory.h>
+#include <base/win/scoped_process_information.h>
 #include <iostream>
-#include <shellapi.h>  // For CommandLineToArgvW
 #include "BrokerServicesDelegateImpl.h"
 
 int SandboxingWin::run_parent(List<String> args) {
@@ -17,6 +17,7 @@ int SandboxingWin::run_parent(List<String> args) {
     }
 
     PROCESS_INFORMATION pi;
+    base::win::ScopedProcessInformation target;
 
     std::unique_ptr<sandbox::TargetPolicy> policy = broker_service->CreatePolicy();
     sandbox::TargetConfig* config = policy->GetConfig();
@@ -56,9 +57,6 @@ int SandboxingWin::run_parent(List<String> args) {
         return 1;
     }
 
-    std::wcout << L"Sleeping for 15 seconds" << std::endl;
-    Sleep(15000);
-
     DWORD error_code = 0;
     wchar_t* warg = to_wchar(args.get(0).utf8().get_data());
     sandbox::ResultCode result = broker_service->SpawnTarget(warg, GetCommandLineW(), std::move(policy), &error_code, &pi);
@@ -66,27 +64,28 @@ int SandboxingWin::run_parent(List<String> args) {
         std::wcout << L"Sandbox failed to launch with the following result: " << result << std::endl;
         return 2;
     }
-    delete[] warg;
-    ::ResumeThread(pi.hThread);
-
     std::wcout << L"Successfully launched sandboxed process" << std::endl;
 
+    delete[] warg;
+    target.Set(pi);
+
+    std::wcout << L"Sleeping for 15 seconds" << std::endl;
+    Sleep(15000);
+
+    ResumeThread(target.thread_handle());
+
     // Wait for the child process to complete
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    WaitForSingleObject(target.process_handle(), INFINITE);
 
     DWORD exitCode;
-    if (GetExitCodeProcess(pi.hProcess, &exitCode)) {
+    if (GetExitCodeProcess(target.process_handle(), &exitCode)) {
         std::wcout << L"Child process exited with code: " << exitCode << std::endl;
     }
-
-    // Just like CreateProcess, you need to close these yourself unless you need to reference them later
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
 
     return 0;
 }
 
-int try_doing_something_bad(FILE* logFile) {
+void try_doing_something_bad(FILE* logFile) {
     // Try to write to a protected directory
     FILE* file = nullptr;
     errno_t err = fopen_s(&file, "C:\\Users\\Nordup\\Documents\\Projects\\C++\\sandboxing\\build\\Debug\\test.txt", "w");
