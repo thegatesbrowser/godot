@@ -33,7 +33,7 @@ int SandboxingWin::run_parent(List<String> args) {
         std::wcout << L"Failed to set token level" << std::endl;
         return 1;
     }
-    
+
     ret = broker_service->CreateAlternateDesktop(sandbox::Desktop::kAlternateDesktop);
     if (ret != sandbox::SBOX_ALL_OK) {
         std::wcout << L"Failed to create alternate desktop" << std::endl;
@@ -41,10 +41,10 @@ int SandboxingWin::run_parent(List<String> args) {
     }
 
     config->SetDesktop(sandbox::Desktop::kAlternateDesktop);
-    config->SetDelayedIntegrityLevel(sandbox::IntegrityLevel::INTEGRITY_LEVEL_LOW);
+    config->SetDelayedIntegrityLevel(sandbox::IntegrityLevel::INTEGRITY_LEVEL_UNTRUSTED);
 
     // Add additional rules here (ie: file access exceptions) like so:
-    ret = config->AllowFileAccess(sandbox::FileSemantics::kAllowAny, L"C:\\Users\\Nordup\\Documents\\Projects\\C++\\sandboxing\\build\\Debug\\sandbox_log.txt");
+    ret = config->AllowFileAccess(sandbox::FileSemantics::kAllowAny, L"C:\\Users\\Nordup\\Documents\\Projects\\thegates\\godot\\bin\\sandbox_log.txt");
     if (ret != sandbox::SBOX_ALL_OK) {
         std::wcout << L"Failed to set file access" << std::endl;
         return 1;
@@ -59,7 +59,7 @@ int SandboxingWin::run_parent(List<String> args) {
 
     DWORD error_code = 0;
     wchar_t* warg = to_wchar(args.get(0).utf8().get_data());
-    sandbox::ResultCode result = broker_service->SpawnTarget(warg, GetCommandLineW(), std::move(policy), &error_code, &pi);
+    sandbox::ResultCode result = broker_service->SpawnTarget(warg, to_wchar("sandbox"), std::move(policy), &error_code, &pi);
     if (sandbox::SBOX_ALL_OK != result) {
         std::wcout << L"Sandbox failed to launch with the following result: " << result << std::endl;
         return 2;
@@ -69,8 +69,8 @@ int SandboxingWin::run_parent(List<String> args) {
     delete[] warg;
     target.Set(pi);
 
-    std::wcout << L"Sleeping for 15 seconds" << std::endl;
-    Sleep(15000);
+    // std::wcout << L"Sleeping for 15 seconds" << std::endl;
+    // Sleep(15000);
 
     ResumeThread(target.thread_handle());
 
@@ -88,7 +88,7 @@ int SandboxingWin::run_parent(List<String> args) {
 void try_doing_something_bad(FILE* logFile) {
     // Try to write to a protected directory
     FILE* file = nullptr;
-    errno_t err = fopen_s(&file, "C:\\Users\\Nordup\\Documents\\Projects\\C++\\sandboxing\\build\\Debug\\test.txt", "w");
+    errno_t err = fopen_s(&file, "C:\\Users\\Nordup\\Documents\\Projects\\thegates\\godot\\bin\\test.txt", "w");
     if (err == 0 && file) {
         fprintf(file, "This should be blocked by the sandbox\n");
         fclose(file);
@@ -100,7 +100,7 @@ void try_doing_something_bad(FILE* logFile) {
 
 int SandboxingWin::run_child() {
     FILE* logFile = nullptr;
-    errno_t err = fopen_s(&logFile, "sandbox_log.txt", "w");
+    errno_t err = fopen_s(&logFile, "C:\\Users\\Nordup\\Documents\\Projects\\thegates\\godot\\bin\\sandbox_log.txt", "w");
     if (err != 0 || !logFile) {
         return 1;  // Failed to open log file
     }
@@ -114,7 +114,7 @@ int SandboxingWin::run_child() {
     }
 
     if (sandbox::SBOX_ALL_OK != target_service->Init()) {
-        fprintf(logFile, "failed to initialize target service\n");
+        fprintf(logFile, "Failed to initialize target service\n");
         fclose(logFile);
         return 3;
     }

@@ -64,7 +64,29 @@ JoypadWindows::JoypadWindows(HWND *hwnd) {
 		attached_joypads[i] = false;
 	}
 
-	HRESULT result = DirectInput8Create(GetModuleHandle(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8, (void **)&dinput, nullptr);
+	// Using DirectInput8Create directly, causes Windows to try to load and resolve the function at program startup
+	// DirectInput8Create tries to delay load InputHost.dll from a new thread, which crashes in the sandbox
+	// So we load the dlls dynamically and call the function manually
+	HRESULT result = DIERR_NOTFOUND;
+	HMODULE dinput8_dll = LoadLibrary("dinput8.dll");
+	HMODULE inputhost_dll = LoadLibrary("InputHost.dll");
+
+	if (!dinput8_dll) {
+		ERR_PRINT("Failed to load dinput8.dll. Error code: " + itos(GetLastError()));
+	} else if (!inputhost_dll) {
+		ERR_PRINT("Failed to load InputHost.dll. Error code: " + itos(GetLastError()));
+	} else {
+		typedef HRESULT (WINAPI *DirectInput8Create_t)(HINSTANCE hinst, DWORD dwVersion, REFIID riidltf, LPVOID *ppvOut, LPUNKNOWN punkOuter);
+		DirectInput8Create_t pDirectInput8Create = (DirectInput8Create_t)GetProcAddress(dinput8_dll, "DirectInput8Create");
+
+		if (!pDirectInput8Create) {
+			ERR_PRINT("Failed to get DirectInput8Create function address. Error code: " + itos(GetLastError()));
+		} else {
+			result = pDirectInput8Create(GetModuleHandle(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8, (void **)&dinput, nullptr);
+			print_line("DirectInput8Create result: " + itos(result));
+		}
+	}
+
 	if (result == DI_OK) {
 		probe_joypads();
 	} else {
