@@ -16,3 +16,6 @@ env_sandbox.Prepend(CXXFLAGS=[
     '/DUNICODE',              # Unicode for our module
     '/D_UNICODE'              # Unicode for our module
 ])
+
+# Disable chromium debugging code
+env_sandbox.Prepend(CPPDEFINES=["NDEBUG"])
