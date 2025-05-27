@@ -39,15 +39,18 @@ def configure(env):
 
         env.Replace(CC = "clang-cl")
         env.Replace(CXX = "clang-cl")
-        
+
         # Enable required instruction sets for libwebp
         # TODO: remove this as it was discussed here https://github.com/godotengine/godot/pull/36580/files
         env.Append(CCFLAGS=['-mssse3'])
         env.Append(CCFLAGS=["-msse4.1"])
 
+        # Disable chromium debugging code
+        env.Prepend(CPPDEFINES=["NDEBUG"])
+
         # Disable assembly optimizations in R128 library and use standard C implementation
         env.Prepend(CPPDEFINES=['R128_STDC_ONLY'])
-        
+
         # Add chromium include paths
         env.Prepend(CPPPATH=[
             'C:/src/chromium/src/',

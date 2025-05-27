@@ -83,7 +83,6 @@ JoypadWindows::JoypadWindows(HWND *hwnd) {
 			ERR_PRINT("Failed to get DirectInput8Create function address. Error code: " + itos(GetLastError()));
 		} else {
 			result = pDirectInput8Create(GetModuleHandle(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8, (void **)&dinput, nullptr);
-			print_line("DirectInput8Create result: " + itos(result));
 		}
 	}
 

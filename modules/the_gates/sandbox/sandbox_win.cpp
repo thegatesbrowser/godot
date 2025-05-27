@@ -7,6 +7,40 @@
 #include <iostream>
 #include "BrokerServicesDelegateImpl.h"
 
+VOID CALLBACK on_process_exit(PVOID lpParameter, BOOLEAN TimerOrWaitFired) {
+    PROCESS_INFORMATION* pi = static_cast<PROCESS_INFORMATION*>(lpParameter);
+    DWORD exitCode;
+    if (GetExitCodeProcess(pi->hProcess, &exitCode)) {
+        std::wcout << L"Child process exited with code: " << exitCode << std::endl;
+    }
+
+    CloseHandle(pi->hThread);
+    CloseHandle(pi->hProcess);
+    delete pi;
+}
+
+void on_spawn_target_complete(base::win::ScopedProcessInformation process_info, DWORD error_code, sandbox::ResultCode result) {
+    if (sandbox::SBOX_ALL_OK != result) {
+        std::wcout << L"Sandbox failed to launch with the following result: " << result << std::endl;
+        return;
+    }
+    std::wcout << L"Successfully launched sandboxed process" << std::endl;
+
+    ResumeThread(process_info.thread_handle());
+
+    // Create a copy of pi to pass to the callback
+    PROCESS_INFORMATION* piCopy = new PROCESS_INFORMATION(process_info.process_handle(), process_info.thread_handle());
+
+    // Register for asynchronous wait
+    HANDLE waitHandle;
+    if (!RegisterWaitForSingleObject(&waitHandle, process_info.process_handle(), on_process_exit, piCopy, INFINITE, WT_EXECUTEONLYONCE)) {
+        std::wcout << L"Failed to register wait callback" << std::endl;
+        delete piCopy;
+        CloseHandle(process_info.process_handle());
+        CloseHandle(process_info.thread_handle());
+    }
+}
+
 int SandboxingWin::run_parent(List<String> args) {
     sandbox::BrokerServices* broker_service = sandbox::SandboxFactory::GetBrokerServices();
 
@@ -15,9 +49,6 @@ int SandboxingWin::run_parent(List<String> args) {
         std::wcout << L"Failed to initialize the BrokerServices object" << std::endl;
         return 1;
     }
-
-    PROCESS_INFORMATION pi;
-    base::win::ScopedProcessInformation target;
 
     std::unique_ptr<sandbox::TargetPolicy> policy = broker_service->CreatePolicy();
     sandbox::TargetConfig* config = policy->GetConfig();
@@ -57,30 +88,9 @@ int SandboxingWin::run_parent(List<String> args) {
         return 1;
     }
 
-    DWORD error_code = 0;
     wchar_t* warg = to_wchar(args.get(0).utf8().get_data());
-    sandbox::ResultCode result = broker_service->SpawnTarget(warg, to_wchar("sandbox"), std::move(policy), &error_code, &pi);
-    if (sandbox::SBOX_ALL_OK != result) {
-        std::wcout << L"Sandbox failed to launch with the following result: " << result << std::endl;
-        return 2;
-    }
-    std::wcout << L"Successfully launched sandboxed process" << std::endl;
-
+    broker_service->SpawnTargetAsync(warg, to_wchar("sandbox"), std::move(policy), base::BindOnce(&on_spawn_target_complete));
     delete[] warg;
-    target.Set(pi);
-
-    // std::wcout << L"Sleeping for 15 seconds" << std::endl;
-    // Sleep(15000);
-
-    ResumeThread(target.thread_handle());
-
-    // Wait for the child process to complete
-    WaitForSingleObject(target.process_handle(), INFINITE);
-
-    DWORD exitCode;
-    if (GetExitCodeProcess(target.process_handle(), &exitCode)) {
-        std::wcout << L"Child process exited with code: " << exitCode << std::endl;
-    }
 
     return 0;
 }
