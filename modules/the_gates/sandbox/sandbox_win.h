@@ -3,13 +3,23 @@
 
 #include "core/object/ref_counted.h"
 
+namespace sandbox {
+	class BrokerServices;
+}
+
 class SandboxingWin : public RefCounted {
 	GDCLASS(SandboxingWin, RefCounted);
 
+	sandbox::BrokerServices* broker_service;
+
+protected:
+	static void _bind_methods();
+
 public:
-	int run_parent(List<String> args);
-	int run_child();
-	int run(List<String> args);
+	Error spawn_target(const Vector<String> &p_arguments);
+	Error lower_token();
+
+	bool is_target() { return broker_service == nullptr; }
 
 	SandboxingWin();
 	~SandboxingWin();

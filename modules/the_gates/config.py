@@ -27,10 +27,10 @@ def configure(env):
 
         # 1. Build libzmq https://www.youtube.com/watch?v=OiGf9T_TPa8
         # 2. Fix linking mismatch https://stackoverflow.com/questions/28887001/lnk2038-mismatch-detected-for-runtimelibrary-value-mt-staticrelease-doesn
-        # 3. Place inside C:/Program Files (x86)/ZeroMQ/
+        # 3. Place inside C:/Libs/ZeroMQ/
         env.Prepend(CPPDEFINES=["ZMQ_STATIC"])
-        env.Prepend(CPPPATH=["C:/Program Files (x86)/ZeroMQ/include"])
-        env.Append(LIBPATH=["C:/Program Files (x86)/ZeroMQ/lib"])
+        env.Prepend(CPPPATH=["C:/Libs/ZeroMQ/include"])
+        env.Append(LIBPATH=["C:/Libs/ZeroMQ/lib"])
         env.Append(LINKFLAGS=["libzmq-v143-mt-s-4_3_5.lib"])
         print("Linking ZeroMQ statically")
 
@@ -67,7 +67,7 @@ def configure(env):
         env.Append(LIBPATH=[
             "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/lib/x64",
             "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64",
-            "C:/Users/Nordup/Downloads/cef_binary_136.1.4+g89c0a8c+chromium-136.0.7103.93_windows64_minimal/cef_binary_136.1.4+g89c0a8c+chromium-136.0.7103.93_windows64_minimal/Release"
+            "C:/Libs/cef_binary/Release"
         ])
 
         env.Append(LINKFLAGS=[

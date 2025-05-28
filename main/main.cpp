@@ -4074,7 +4074,7 @@ int Main::start() {
 	ext_texture = memnew(ExternalTexture);
 	bool success = ext_texture->recv_filehandle(FILEHANDLE_PATH); // WARNING: BLOCKING COMMAND
 	if (!success) {
-		return false;
+		return EXIT_FAILURE;
 	}
 
 	RenderingDevice::TextureView view;
@@ -4089,7 +4089,7 @@ int Main::start() {
 
 	err = ext_texture->import(format, view);
 	if (err != OK) {
-		return false;
+		return EXIT_FAILURE;
 	}
 
 	// InputSync
@@ -4100,17 +4100,17 @@ int Main::start() {
 	// Sandboxing
 	err = Sandboxing::sandbox();
 	if (err != OK) {
-		return false;
+		return EXIT_FAILURE;
 	}
 	print_line("Sandboxing succeeded");
 #endif
 #endif
 
 	sandboxing_win = memnew(SandboxingWin);
-
-	List<String> sandbox_args;
-	sandbox_args.push_back(OS::get_singleton()->get_executable_path());
-	sandboxing_win->run(sandbox_args);
+	if (sandboxing_win->is_target()) {
+		Error err = sandboxing_win->lower_token();
+		ERR_FAIL_COND_V_MSG(err != OK, EXIT_FAILURE, "Failed to lower token");
+	}
 
 	return EXIT_SUCCESS;
 }
