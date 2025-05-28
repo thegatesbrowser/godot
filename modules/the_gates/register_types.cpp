@@ -6,6 +6,7 @@
 #include "command_sync.h"
 #include "command.h"
 #include "sandboxing.h"
+#include "sandbox/sandbox_win.h"
 
 void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -23,6 +24,7 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	}
 
 	GDREGISTER_CLASS(Sandboxing);
+	GDREGISTER_CLASS(SandboxingWin);
 	GDREGISTER_CLASS(InputSync);
 	GDREGISTER_CLASS(Command);
 	GDREGISTER_CLASS(CommandSync);

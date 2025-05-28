@@ -1,12 +1,19 @@
 #include "sandbox_win.h"
 #include "helpers.h"
+#include "BrokerServicesDelegateImpl.h"
+
 #include "core/os/os.h"
+#include "core/crypto/crypto_core.h"
+#include "core/string/string_builder.h"
 
 #include <sandbox/win/src/sandbox.h>
 #include <sandbox/win/src/sandbox_factory.h>
+#include <sandbox/win/src/app_container.h>
+#include <sandbox/policy/win/lpac_capability.h>
 #include <base/win/scoped_process_information.h>
-#include <iostream>
-#include "BrokerServicesDelegateImpl.h"
+#include <base/win/windows_version.h>
+
+#include <windows.h>
 
 void CALLBACK on_process_exit(PVOID lpParameter, BOOLEAN TimerOrWaitFired) {
     DWORD exitCode;
@@ -65,11 +72,66 @@ Error SandboxingWin::spawn_target(const Vector<String> &p_arguments) {
     ret = config->AllowFileAccess(sandbox::FileSemantics::kAllowAny, L"C:\\Users\\Nordup\\Documents\\Projects\\thegates\\godot\\bin\\sandbox_log.txt");
 	ERR_FAIL_COND_V_MSG(ret != sandbox::SBOX_ALL_OK, FAILED, "Failed to set file access");
 
+    Error err = add_app_container_profile_to_config(config);
+    ERR_FAIL_COND_V_MSG(err != OK, err, "Failed to configure app container");
+
     String exe_path = OS::get_singleton()->get_executable_path();
-    String args_str = String(" ").join(p_arguments);
-    broker_service->SpawnTargetAsync(to_wchar(exe_path.utf8().get_data()), to_wchar(args_str.utf8().get_data()), std::move(policy), base::BindOnce(&on_spawn_target_complete));
+    String args_str = exe_path + " " + String(" ").join(p_arguments);
+    broker_service->SpawnTargetAsync(to_wchar(exe_path), to_wchar(args_str), std::move(policy), base::BindOnce(&on_spawn_target_complete));
 
     return OK;
+}
+
+Error SandboxingWin::add_app_container_profile_to_config(sandbox::TargetConfig* config) {
+    ERR_FAIL_COND_V_MSG(config->IsConfigured(), ERR_ALREADY_IN_USE, "Config is already configured");
+
+    String profile_name = get_app_container_profile_name(OS::get_singleton()->get_executable_path());
+    ERR_FAIL_COND_V_MSG(profile_name.is_empty(), FAILED, "Failed to get app container profile name");
+
+    print_line("Adding app container profile: " + profile_name);
+    static const bool supported = base::win::GetVersion() >= base::win::Version::WIN10_RS5;
+    base::win::OSInfo::VersionNumber number = base::win::OSInfo::GetInstance()->version_number();
+    print_line("Windows version: " + itos(number.major) + "." + itos(number.minor) + "." + itos(number.build));
+
+    _OSVERSIONINFOEXW version_info = {sizeof(version_info)};
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    // GetVersionEx() is deprecated, and the suggested replacement are
+    // the IsWindows*OrGreater() functions in VersionHelpers.h. We can't
+    // use that because:
+    // - For Windows 10, there's IsWindows10OrGreater(), but nothing more
+    //   granular. We need to be able to detect different Windows 10 releases
+    //   since they sometimes change behavior in ways that matter.
+    // - There is no IsWindows11OrGreater() function yet.
+    ::GetVersionEx(reinterpret_cast<_OSVERSIONINFOW*>(&version_info));
+#pragma clang diagnostic pop
+    print_line("Windows version: " + itos(version_info.dwMajorVersion) + "." + itos(version_info.dwMinorVersion) + "." + itos(version_info.dwBuildNumber));
+
+    ERR_FAIL_COND_V_MSG(!supported, FAILED, "App container profile is not supported on this version of Windows " + itos((int)base::win::GetVersion()));
+
+    sandbox::ResultCode result = config->AddAppContainerProfile(to_wchar(profile_name));
+    ERR_FAIL_COND_V_MSG(result != sandbox::SBOX_ALL_OK, FAILED, "Failed to add app container profile " + itos(result));
+
+    sandbox::AppContainer* app_container = config->GetAppContainer();
+    ERR_FAIL_COND_V_MSG(app_container == nullptr, FAILED, "Failed to get app container");
+
+    app_container->AddCapability(sandbox::policy::kRegistryRead);
+
+    return OK;
+}
+
+String SandboxingWin::get_app_container_profile_name(const String& appcontainer_id) {
+    unsigned char hash[20];
+
+    Error err = CryptoCore::sha1((unsigned char*)appcontainer_id.utf8().get_data(), appcontainer_id.length(), hash);
+    ERR_FAIL_COND_V_MSG(err != OK, "", "Failed to generate SHA1 hash");
+
+    StringBuilder hex_hash;
+    for (int i = 0; i < 20; i++) {
+        hex_hash.append(String::num_int64(hash[i], 16).pad_zeros(2));
+    }
+
+    return "tg.sb." + hex_hash.as_string();
 }
 
 Error test_sandbox() {
