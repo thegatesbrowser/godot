@@ -5,16 +5,12 @@
 
 namespace sandbox {
 	class BrokerServices;
-	class TargetConfig;
 }
 
 class SandboxingWin : public RefCounted {
 	GDCLASS(SandboxingWin, RefCounted);
 
 	sandbox::BrokerServices* broker_service;
-
-	Error add_app_container_profile_to_config(sandbox::TargetConfig* config);
-	String get_app_container_profile_name(const String& appcontainer_id);
 
 protected:
 	static void _bind_methods();
