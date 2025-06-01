@@ -90,23 +90,6 @@ Error SandboxingWin::add_app_container_profile_to_config(sandbox::TargetConfig* 
 
     print_line("Adding app container profile: " + profile_name);
     static const bool supported = base::win::GetVersion() >= base::win::Version::WIN10_RS5;
-    base::win::OSInfo::VersionNumber number = base::win::OSInfo::GetInstance()->version_number();
-    print_line("Windows version: " + itos(number.major) + "." + itos(number.minor) + "." + itos(number.build));
-
-    _OSVERSIONINFOEXW version_info = {sizeof(version_info)};
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    // GetVersionEx() is deprecated, and the suggested replacement are
-    // the IsWindows*OrGreater() functions in VersionHelpers.h. We can't
-    // use that because:
-    // - For Windows 10, there's IsWindows10OrGreater(), but nothing more
-    //   granular. We need to be able to detect different Windows 10 releases
-    //   since they sometimes change behavior in ways that matter.
-    // - There is no IsWindows11OrGreater() function yet.
-    ::GetVersionEx(reinterpret_cast<_OSVERSIONINFOW*>(&version_info));
-#pragma clang diagnostic pop
-    print_line("Windows version: " + itos(version_info.dwMajorVersion) + "." + itos(version_info.dwMinorVersion) + "." + itos(version_info.dwBuildNumber));
-
     ERR_FAIL_COND_V_MSG(!supported, FAILED, "App container profile is not supported on this version of Windows " + itos((int)base::win::GetVersion()));
 
     sandbox::ResultCode result = config->AddAppContainerProfile(to_wchar(profile_name));
@@ -115,7 +98,24 @@ Error SandboxingWin::add_app_container_profile_to_config(sandbox::TargetConfig* 
     sandbox::AppContainer* app_container = config->GetAppContainer();
     ERR_FAIL_COND_V_MSG(app_container == nullptr, FAILED, "Failed to get app container");
 
+    // Please refer to the following design doc on why we add the capabilities:
+    // https://docs.google.com/document/d/19Y4Js5v3BlzA5uSuiVTvcvPNIOwmxcMSFJWtuc1A-w8/edit#heading=h.iqvhsrml3gl9
     app_container->AddCapability(sandbox::policy::kRegistryRead);
+    app_container->AddCapability(base::win::WellKnownCapability::kPrivateNetworkClientServer);
+    app_container->AddCapability(base::win::WellKnownCapability::kInternetClient);
+    app_container->AddCapability(sandbox::policy::kLpacCom);
+    app_container->AddCapability(sandbox::policy::kLpacIdentityServices);
+    app_container->AddCapability(sandbox::policy::kLpacMedia);
+    app_container->AddCapability(sandbox::policy::kLpacPnPNotifications);
+    app_container->AddCapability(sandbox::policy::kLpacServicesManagement);
+    app_container->AddCapability(sandbox::policy::kLpacSessionManagement);
+    app_container->AddCapability(sandbox::policy::kLpacAppExperience);
+    app_container->AddCapability(sandbox::policy::kLpacInstrumentation);
+    app_container->AddCapability(sandbox::policy::kLpacCryptoServices);
+    app_container->AddCapability(sandbox::policy::kLpacEnterprisePolicyChangeNotifications);
+    app_container->AddCapability(sandbox::policy::kMediaFoundationCdmFiles);
+    app_container->AddCapability(sandbox::policy::kMediaFoundationCdmData);
+    app_container->AddCapability(base::win::WellKnownCapability::kEnterpriseAuthentication);
 
     return OK;
 }
