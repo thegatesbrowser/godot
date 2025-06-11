@@ -3056,7 +3056,7 @@ void DisplayServerX11::window_set_ime_active(const bool p_active, WindowID p_win
 		XWindowAttributes xwa;
 		XSync(x11_display, False);
 		XGetWindowAttributes(x11_display, wd.x11_xim_window, &xwa);
-		if (xwa.map_state == IsViewable) {
+		if (xwa.map_state == IsViewable && _window_focus_check()) {
 			_set_input_focus(wd.x11_xim_window, RevertToParent);
 		}
 		XSetICFocus(wd.xic);
@@ -4325,7 +4325,7 @@ bool DisplayServerX11::_window_focus_check() {
 
 	bool has_focus = false;
 	for (const KeyValue<int, DisplayServerX11::WindowData> &wid : windows) {
-		if (wid.value.x11_window == focused_window) {
+		if (wid.value.x11_window == focused_window || (wid.value.xic && wid.value.ime_active && wid.value.x11_xim_window == focused_window)) {
 			has_focus = true;
 			break;
 		}

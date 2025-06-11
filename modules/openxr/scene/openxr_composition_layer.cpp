@@ -51,6 +51,10 @@ OpenXRCompositionLayer::OpenXRCompositionLayer() {
 	openxr_api = OpenXRAPI::get_singleton();
 	composition_layer_extension = OpenXRCompositionLayerExtension::get_singleton();
 
+	if (openxr_api) {
+		openxr_session_running = openxr_api->is_running();
+	}
+
 	Ref<OpenXRInterface> openxr_interface = XRServer::get_singleton()->find_interface("OpenXR");
 	if (openxr_interface.is_valid()) {
 		openxr_interface->connect("session_begun", callable_mp(this, &OpenXRCompositionLayer::_on_openxr_session_begun));
@@ -338,7 +342,7 @@ void OpenXRCompositionLayer::_notification(int p_what) {
 			}
 		} break;
 		case NOTIFICATION_VISIBILITY_CHANGED: {
-			if (!fallback && openxr_session_running && is_inside_tree()) {
+			if (is_natively_supported() && openxr_session_running && is_inside_tree()) {
 				if (layer_viewport && is_visible()) {
 					openxr_layer_provider->set_viewport(layer_viewport->get_viewport_rid(), layer_viewport->get_size());
 				} else {

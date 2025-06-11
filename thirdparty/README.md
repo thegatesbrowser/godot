@@ -87,8 +87,13 @@ Files extracted from upstream source:
 ## certs
 
 - Upstream: Mozilla, via https://github.com/bagder/ca-bundle
-- Version: git (c5a419971b1bec220368c619aaafd0b818aa119f, 2024)
+- Version: git (4d3fe6683f651d96be1bbef316b201e9b33b274d, 2024),
+  generated from mozilla-release changeset b8ea2342548b8571e58f9176d9555ccdb5ec199f
 - License: MPL 2.0
+
+Files extracted from upstream source:
+
+- `ca-bundle.crt` renamed to `ca-certificates.crt`
 
 
 ## clipper2
@@ -605,7 +610,7 @@ to solve some MSVC warnings. See the patches in the `patches` directory.
 ## miniupnpc
 
 - Upstream: https://github.com/miniupnp/miniupnp
-- Version: 2.2.7 (d4d5ec7d48c093b37b2ea5d7171ede21ce9d7ff2, 2024)
+- Version: 2.2.8 (b55145ec095652289a59c33603f3abafee898273, 2024)
 - License: BSD-3-Clause
 
 Files extracted from upstream source:
