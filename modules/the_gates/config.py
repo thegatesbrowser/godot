@@ -50,28 +50,28 @@ def configure(env):
 
         # Add chromium include paths
         env.Prepend(CPPPATH=[
-            'C:/src/chromium/src/',
-            'C:/src/chromium/src/out/sandbox_build/gen/',
-            'C:/src/chromium/src/buildtools/third_party/libc++/',
-            'C:/src/chromium/src/third_party/perfetto/include/',
-            'C:/src/chromium/src/out/sandbox_build/gen/third_party/perfetto/build_config/',
-            'C:/src/chromium/src/out/sandbox_build/gen/third_party/perfetto/',
-            'C:/src/chromium/src/base/allocator/partition_allocator/src/',
-            'C:/src/chromium/src/out/sandbox_build/gen/base/allocator/partition_allocator/src/',
-            'C:/src/chromium/src/third_party/abseil-cpp/',
-            'C:/src/chromium/src/third_party/boringssl/src/include/',
-            'C:/src/chromium/src/third_party/protobuf/src/'
+            'C:/code/chromium_git/chromium/src/',
+            'C:/code/chromium_git/chromium/src/out/Release_GN_x64_sandbox/gen/',
+            'C:/code/chromium_git/chromium/src/buildtools/third_party/libc++/',
+            'C:/code/chromium_git/chromium/src/third_party/perfetto/include/',
+            'C:/code/chromium_git/chromium/src/out/Release_GN_x64_sandbox/gen/third_party/perfetto/build_config/',
+            'C:/code/chromium_git/chromium/src/out/Release_GN_x64_sandbox/gen/third_party/perfetto/',
+            'C:/code/chromium_git/chromium/src/base/allocator/partition_allocator/src/',
+            'C:/code/chromium_git/chromium/src/out/Release_GN_x64_sandbox/gen/base/allocator/partition_allocator/src/',
+            'C:/code/chromium_git/chromium/src/third_party/abseil-cpp/',
+            'C:/code/chromium_git/chromium/src/third_party/boringssl/src/include/',
+            'C:/code/chromium_git/chromium/src/third_party/protobuf/src/'
         ])
 
         # Add chromium library paths
         env.Append(LIBPATH=[
             "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/lib/x64",
             "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64",
-            "C:/Libs/cef_binary/Release"
+            "C:/code/chromium_git/chromium/src/cef/binary_distrib/cef_binary_137.0.10+g7e14fe1+chromium-137.0.7151.69_windows64_sandbox/Release"
         ])
 
         env.Append(LINKFLAGS=[
-            # Chromium Embedded Framework (CEF). Download from https://cef-builds.spotifycdn.com/index.html#windows64
+            # Chromium Embedded Framework (CEF). Build from https://github.com/thegatesbrowser/chromium
             "cef_sandbox.lib",
             # Core Windows libraries
             "kernel32.lib",
