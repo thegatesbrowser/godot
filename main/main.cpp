@@ -4092,15 +4092,6 @@ int Main::start() {
 	// InputSync
 	input_sync = memnew(InputSync);
 	input_sync->connect();
-
-#ifdef LINUXBSD_ENABLED
-	// Sandboxing
-	err = Sandboxing::sandbox();
-	if (err != OK) {
-		return false;
-	}
-	print_line("Sandboxing succeeded");
-#endif
 #endif
 
 	return EXIT_SUCCESS;
