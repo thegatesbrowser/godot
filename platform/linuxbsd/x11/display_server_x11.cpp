@@ -444,9 +444,9 @@ void DisplayServerX11::mouse_set_mode(MouseMode p_mode) {
 		WindowData &window = windows[window_id];
 
 		NO_SANDBOX(if (XGrabPointer(
-					x11_display, window.x11_window, True,
-					ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-					GrabModeAsync, GrabModeAsync, window.x11_window, None, CurrentTime) != GrabSuccess) {
+							   x11_display, window.x11_window, True,
+							   ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+							   GrabModeAsync, GrabModeAsync, window.x11_window, None, CurrentTime) != GrabSuccess) {
 			ERR_PRINT("NO GRAB");
 		})
 
