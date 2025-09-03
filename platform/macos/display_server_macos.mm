@@ -1267,33 +1267,33 @@ void DisplayServerMacOS::mouse_set_mode(MouseMode p_mode) {
 		// "This parameter is not used. By default, you may pass kCGDirectMainDisplay."
 		// https://developer.apple.com/library/mac/documentation/graphicsimaging/reference/Quartz_Services_Ref/Reference/reference.html
 		if (previously_shown) {
-			CGDisplayHideCursor(kCGDirectMainDisplay);
+			NO_SANDBOX(CGDisplayHideCursor(kCGDirectMainDisplay);)
 		}
-		CGAssociateMouseAndMouseCursorPosition(false);
+		NO_SANDBOX(CGAssociateMouseAndMouseCursorPosition(false);)
 		[wd.window_object setMovable:NO];
 		const NSRect contentRect = [wd.window_view frame];
 		NSRect pointInWindowRect = NSMakeRect(contentRect.size.width / 2, contentRect.size.height / 2, 0, 0);
 		NSPoint pointOnScreen = [[wd.window_view window] convertRectToScreen:pointInWindowRect].origin;
 		CGPoint lMouseWarpPos = { pointOnScreen.x, CGDisplayBounds(CGMainDisplayID()).size.height - pointOnScreen.y };
-		CGWarpMouseCursorPosition(lMouseWarpPos);
+		NO_SANDBOX(CGWarpMouseCursorPosition(lMouseWarpPos);)
 	} else if (p_mode == MOUSE_MODE_HIDDEN) {
 		if (previously_shown) {
-			CGDisplayHideCursor(kCGDirectMainDisplay);
+			NO_SANDBOX(CGDisplayHideCursor(kCGDirectMainDisplay);)
 		}
 		[wd.window_object setMovable:YES];
-		CGAssociateMouseAndMouseCursorPosition(true);
+		NO_SANDBOX(CGAssociateMouseAndMouseCursorPosition(true);)
 	} else if (p_mode == MOUSE_MODE_CONFINED) {
-		CGDisplayShowCursor(kCGDirectMainDisplay);
+		NO_SANDBOX(CGDisplayShowCursor(kCGDirectMainDisplay);)
 		[wd.window_object setMovable:NO];
-		CGAssociateMouseAndMouseCursorPosition(false);
+		NO_SANDBOX(CGAssociateMouseAndMouseCursorPosition(false);)
 	} else if (p_mode == MOUSE_MODE_CONFINED_HIDDEN) {
 		if (previously_shown) {
-			CGDisplayHideCursor(kCGDirectMainDisplay);
+			NO_SANDBOX(CGDisplayHideCursor(kCGDirectMainDisplay);)
 		}
 		[wd.window_object setMovable:NO];
-		CGAssociateMouseAndMouseCursorPosition(false);
+		NO_SANDBOX(CGAssociateMouseAndMouseCursorPosition(false);)
 	} else { // MOUSE_MODE_VISIBLE
-		CGDisplayShowCursor(kCGDirectMainDisplay);
+		NO_SANDBOX(CGDisplayShowCursor(kCGDirectMainDisplay);)
 		[wd.window_object setMovable:YES];
 		CGAssociateMouseAndMouseCursorPosition(true);
 	}

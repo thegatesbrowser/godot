@@ -136,9 +136,9 @@ void DisplayServerWindows::_set_mouse_mode_impl(MouseMode p_mode) {
 	if (p_mode == MOUSE_MODE_HIDDEN || p_mode == MOUSE_MODE_CAPTURED || p_mode == MOUSE_MODE_CONFINED_HIDDEN) {
 		// Hide cursor before moving.
 		if (hCursor == nullptr) {
-			hCursor = SetCursor(nullptr);
+			NO_SANDBOX(hCursor = SetCursor(nullptr);)
 		} else {
-			SetCursor(nullptr);
+			NO_SANDBOX(SetCursor(nullptr);)
 		}
 	}
 
@@ -160,15 +160,15 @@ void DisplayServerWindows::_set_mouse_mode_impl(MouseMode p_mode) {
 			center = window_get_size() / 2;
 			POINT pos = { (int)center.x, (int)center.y };
 			ClientToScreen(wd.hWnd, &pos);
-			SetCursorPos(pos.x, pos.y);
-			SetCapture(wd.hWnd);
+			NO_SANDBOX(SetCursorPos(pos.x, pos.y);)
+			NO_SANDBOX(SetCapture(wd.hWnd);)
 
 			_register_raw_input_devices(window_id);
 		}
 	} else {
 		// Mouse is free to move around (not captured or confined).
-		ReleaseCapture();
-		ClipCursor(nullptr);
+		NO_SANDBOX(ReleaseCapture();)
+		NO_SANDBOX(ClipCursor(nullptr);)
 
 		_register_raw_input_devices(INVALID_WINDOW_ID);
 	}
@@ -2554,9 +2554,9 @@ void DisplayServerWindows::cursor_set_shape(CursorShape p_shape) {
 	};
 
 	if (cursors_cache.has(p_shape)) {
-		SetCursor(cursors[p_shape]);
+		NO_SANDBOX(SetCursor(cursors[p_shape]);)
 	} else {
-		SetCursor(LoadCursor(hInstance, win_cursors[p_shape]));
+		NO_SANDBOX(SetCursor(LoadCursor(hInstance, win_cursors[p_shape]));)
 	}
 
 	cursor_shape = p_shape;
@@ -2644,7 +2644,7 @@ void DisplayServerWindows::cursor_set_custom_image(const Ref<Resource> &p_cursor
 
 		if (p_shape == cursor_shape) {
 			if (mouse_mode == MOUSE_MODE_VISIBLE || mouse_mode == MOUSE_MODE_CONFINED) {
-				SetCursor(cursors[p_shape]);
+				NO_SANDBOX(SetCursor(cursors[p_shape]);)
 			}
 		}
 
