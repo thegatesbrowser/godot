@@ -38,6 +38,17 @@
 
 #include "display/native_menu.h"
 
+// Convenience macros to omit code in sandbox builds.
+// Usage: NO_SANDBOX( some_statement_or_block );
+// In non-sandbox builds, the contents are emitted; in sandbox builds, they are omitted.
+#if defined(THE_GATES_SANDBOX)
+#define NO_SANDBOX(...)
+#define DONT_CALL_ON_SANDBOX(...)
+#else
+#define NO_SANDBOX(...) __VA_ARGS__
+#define DONT_CALL_ON_SANDBOX(...) __VA_ARGS__
+#endif
+
 class Texture2D;
 class Image;
 class CommandSync;
