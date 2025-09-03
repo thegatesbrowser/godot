@@ -4265,7 +4265,7 @@ bool Main::iteration() {
 	}
 
 	heartbeat += ticks_elapsed;
-	if (heartbeat > 1000000) {
+	if (heartbeat > 1000000 && first_frame_sent) {
 		command_sync->send_command("heartbeat", Array());
 		heartbeat %= 1000000;
 	}
