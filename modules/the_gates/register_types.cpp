@@ -35,7 +35,6 @@
 #include "external_texture.h"
 #include "input_sync.h"
 #include "sandboxing.h"
-#include "socket_peer_monitor.h"
 #include "zmq_context.h"
 
 void initialize_the_gates_module(ModuleInitializationLevel p_level) {
@@ -45,7 +44,6 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 
 	try {
 		ctx = zmqpp::context();
-		print_line("ZeroMQ initialized");
 	} catch (const std::exception &e) {
 		ERR_PRINT("ZeroMQ initialization failure.");
 	}
@@ -54,7 +52,6 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(InputSync);
 	GDREGISTER_CLASS(Command);
 	GDREGISTER_CLASS(CommandSync);
-	GDREGISTER_CLASS(SocketPeerMonitor);
 	GDREGISTER_CLASS(ExternalTexture);
 }
 

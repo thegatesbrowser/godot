@@ -136,7 +136,6 @@
 #include "modules/the_gates/external_texture.h"
 #include "modules/the_gates/input_sync.h"
 #include "modules/the_gates/sandboxing.h"
-#include "modules/the_gates/socket_peer_monitor.h"
 #endif
 
 /* Static members */
@@ -263,7 +262,6 @@ bool profile_gpu = false;
 static ExternalTexture *ext_texture = nullptr;
 static CommandSync *command_sync = nullptr;
 static InputSync *input_sync = nullptr;
-static SocketPeerMonitor *socket_peer_monitor = nullptr;
 static bool first_frame_sent = false;
 static uint32_t heartbeat = 0;
 #endif
@@ -4010,7 +4008,7 @@ int Main::start() {
 	// CommandSync
 	command_sync = memnew(CommandSync);
 	command_sync->bind_commands();
-	command_sync->connect();
+	command_sync->socket_connect();
 
 	// Set texture format RGBA8 or BGRA8
 	Array arg;
@@ -4050,11 +4048,7 @@ int Main::start() {
 
 	// InputSync
 	input_sync = memnew(InputSync);
-	input_sync->connect();
-
-	// SocketPeerMonitor
-	socket_peer_monitor = memnew(SocketPeerMonitor);
-	socket_peer_monitor->connect();
+	input_sync->socket_connect();
 #endif
 
 	return EXIT_SUCCESS;
@@ -4282,10 +4276,10 @@ bool Main::iteration() {
 	// Input sync
 	input_sync->receive_input_events();
 
-	// If our socket peer monitor detects a disconnect, request exit.
-	socket_peer_monitor->poll_monitor();
-	if (!socket_peer_monitor->is_peer_connected()) {
-		print_line("Socket peer disconnected. Exiting child.");
+	// If our command socket lost its peer (parent), request exit.
+	command_sync->poll_monitor();
+	if (!command_sync->is_peer_connected()) {
+		print_line("CommandSync peer disconnected. Exiting child.");
 		exit = true;
 	}
 #endif
