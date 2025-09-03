@@ -1,7 +1,38 @@
+/**************************************************************************/
+/*  command_sync.cpp                                                      */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
 #include "command_sync.h"
-#include "zmq_context.h"
-#include "variant_tools.h"
 #include "core/input/input.h"
+#include "thirdparty/zmqpp/message.hpp"
+#include "variant_tools.h"
+#include "zmq_context.h"
 
 CommandSync *CommandSync::singleton = nullptr;
 
@@ -9,8 +40,38 @@ void CommandSync::bind(const String &p_address) {
 	sock.bind(p_address.utf8().get_data());
 }
 
+void CommandSync::poll_monitor() {
+	zmqpp::message msg;
+
+	while (monitor_sock.receive(msg, true)) {
+		if (msg.parts() >= 1) {
+			std::string part0;
+			msg.get(part0, 0);
+			if (part0.size() >= 6) {
+				const uint8_t *data = reinterpret_cast<const uint8_t *>(part0.data());
+				uint16_t event_id = 0;
+				uint32_t value = 0;
+				memcpy(&event_id, data, sizeof(uint16_t));
+				memcpy(&value, data + sizeof(uint16_t), sizeof(uint32_t));
+
+				if (event_id == ZMQ_EVENT_DISCONNECTED || event_id == ZMQ_EVENT_CLOSED || event_id == ZMQ_EVENT_CLOSE_FAILED) {
+					peer_disconnected = true;
+				}
+
+				if (event_id == ZMQ_EVENT_CONNECTED || event_id == ZMQ_EVENT_ACCEPTED || event_id == ZMQ_EVENT_LISTENING) {
+					peer_disconnected = false;
+				}
+			}
+		}
+	}
+}
+
 void CommandSync::connect(const String &p_address) {
 	sock.connect(p_address.utf8().get_data());
+
+	std::string monitor_endpoint = COMMAND_SYNC_MONITOR_ADDRESS.utf8().get_data();
+	sock.monitor(monitor_endpoint, zmqpp::event::all);
+	monitor_sock.connect(monitor_endpoint);
 }
 
 void CommandSync::send_command(const Ref<Command> &p_command) {
@@ -42,7 +103,7 @@ Variant CommandSync::call_execute_function(const Ref<Command> &p_command) {
 }
 
 void CommandSync::bind_commands() {
-	auto _input_set_mouse_mode = [] (Input::MouseMode p_mode) {
+	auto _input_set_mouse_mode = [](Input::MouseMode p_mode) {
 		print_line("_input_set_mouse_mode " + itos((int)p_mode));
 		DisplayServer::_input_set_mouse_mode(p_mode);
 
@@ -52,8 +113,7 @@ void CommandSync::bind_commands() {
 	};
 	Input::set_mouse_mode_func = _input_set_mouse_mode;
 
-	auto _scene_tree_send_command = [] (const String &p_name, const Array &p_args) {
-
+	auto _scene_tree_send_command = [](const String &p_name, const Array &p_args) {
 		singleton->send_command(p_name, p_args);
 	};
 	SceneTree::send_command_func = _scene_tree_send_command;
@@ -69,6 +129,7 @@ void CommandSync::receive_commands() {
 
 void CommandSync::close() {
 	sock.close();
+	monitor_sock.close();
 }
 
 void CommandSync::_bind_methods() {
@@ -82,8 +143,8 @@ void CommandSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("close"), &CommandSync::close);
 }
 
-CommandSync::CommandSync(zmqpp::socket_type type)
-	: sock(zmqpp::socket(ctx, type)) {
+CommandSync::CommandSync(zmqpp::socket_type type) :
+		sock(zmqpp::socket(ctx, type)), monitor_sock(zmqpp::socket(ctx, zmqpp::socket_type::pair)) {
 	if (singleton == nullptr) {
 		singleton = this;
 	}

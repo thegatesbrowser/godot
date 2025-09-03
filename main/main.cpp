@@ -4275,6 +4275,15 @@ bool Main::iteration() {
 
 	// Input sync
 	input_sync->receive_input_events();
+
+	// If our command socket lost its peer (parent), request exit.
+	if (command_sync) {
+		command_sync->poll_monitor();
+		if (!command_sync->is_peer_connected()) {
+			print_line("CommandSync peer disconnected. Exiting child.");
+			exit = true;
+		}
+	}
 #endif
 
 	iterating--;
