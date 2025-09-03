@@ -9,6 +9,7 @@ import os
 import sys
 import subprocess
 import shutil
+import json
 from pathlib import Path
 
 def detect_editor():
@@ -23,14 +24,90 @@ def detect_editor():
 			continue
 	return None
 
+def get_cpu_count():
+	"""Get the number of CPU cores for parallel builds"""
+	try:
+		import multiprocessing
+		return str(multiprocessing.cpu_count())
+	except:
+		return "4"  # fallback
+
+def parse_tasks_json(project_root):
+	"""Parse tasks.json and extract build tasks excluding 'build' and 'build sandbox'"""
+	tasks_file = project_root / ".vscode" / "tasks.json"
+	
+	if not tasks_file.exists():
+		print(f"Error: tasks.json not found at {tasks_file}")
+		sys.exit(1)
+	
+	try:
+		# Read file content and remove comments
+		with open(tasks_file, 'r') as f:
+			content = f.read()
+		
+		# Remove single-line comments
+		lines = content.split('\n')
+		cleaned_lines = []
+		for line in lines:
+			# Remove comments starting with //
+			if '//' in line:
+				line = line.split('//')[0]
+			cleaned_lines.append(line)
+		
+		# Join lines back together
+		cleaned_content = '\n'.join(cleaned_lines)
+		
+		# Parse as JSON
+		tasks_data = json.loads(cleaned_content)
+		
+	except json.JSONDecodeError as e:
+		print(f"Error parsing tasks.json: {e}")
+		sys.exit(1)
+	except Exception as e:
+		print(f"Error reading tasks.json: {e}")
+		sys.exit(1)
+	
+	build_tasks = []
+	# Only include these specific tasks (excluding "build" and "build sandbox")
+	included_tasks = [
+		"build (template_release)",
+		"build sandbox (template_release)",
+		"build (template_release, x86_64)",
+		"build sandbox (template_release, x86_64)"
+	]
+	
+	for task in tasks_data.get("tasks", []):
+		task_label = task.get("label", "")
+		if task_label in included_tasks:
+			# Extract command and args
+			command = task.get("command", "")
+			args = task.get("args", [])
+			
+			build_tasks.append({
+				"name": task_label,
+				"command": [command],
+				"args": args
+			})
+	
+	return build_tasks
+
 def run_command(command, description):
 	"""Run a command and handle errors"""
 	print(f"Running: {description}")
+	
+	# Handle shell expansions like $(nproc)
+	processed_command = []
+	for arg in command:
+		if arg == "$(nproc)":
+			processed_command.append(get_cpu_count())
+		else:
+			processed_command.append(str(arg))
+	
 	# Convert Path objects to strings for display
-	command_str = ' '.join(str(arg) for arg in command)
+	command_str = ' '.join(processed_command)
 	print(f"Command: {command_str}")
 	
-	result = subprocess.run(command, capture_output=True, text=True)
+	result = subprocess.run(processed_command, capture_output=True, text=True)
 	
 	if result.returncode != 0:
 		print(f"Error running {description}:")
@@ -77,18 +154,21 @@ def main():
 	
 	print(f"Using editor: {editor}")
 	
-	# Build tasks (excluding "build" and "build sandbox")
-	build_tasks = [
-		"build (template_release)",
-		"build sandbox (template_release)",
-		"build (template_release, x86_64)",
-		"build sandbox (template_release, x86_64)"
-	]
+	# Parse build tasks from tasks.json
+	build_tasks = parse_tasks_json(project_root)
+	
+	if not build_tasks:
+		print("Error: No build tasks found in tasks.json")
+		sys.exit(1)
+	
+	print(f"Found {len(build_tasks)} build tasks:")
+	for task in build_tasks:
+		print(f"  - {task['name']}")
 	
 	print("\n=== Building Tasks ===")
 	for task in build_tasks:
-		command = [editor, "--command", f"workbench.action.tasks.runTask", "--args", task]
-		run_command(command, f"Building {task}")
+		command = task["command"] + task["args"]
+		run_command(command, f"Building {task['name']}")
 	
 	print("\n=== Creating Universal Binaries ===")
 	
