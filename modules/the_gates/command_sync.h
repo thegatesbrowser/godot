@@ -41,6 +41,8 @@ static const String COMMAND_SYNC_ADDRESS("ipc://sandbox/command_sync");
 static const String COMMAND_SYNC_ADDRESS("ipc:///tmp/command_sync");
 #endif
 
+static const String COMMAND_SYNC_MONITOR_ADDRESS("inproc://command_sync_monitor");
+
 class CommandSync : public Node {
 	GDCLASS(CommandSync, Node);
 
@@ -49,15 +51,24 @@ class CommandSync : public Node {
 	zmqpp::socket sock;
 	Callable execute_function;
 
+	// Monitoring
+	zmqpp::socket monitor_sock;
+	bool peer_disconnected = false;
+
 protected:
 	static void _bind_methods();
 
 public:
-	void bind(const String &p_address = COMMAND_SYNC_ADDRESS);
-	void connect(const String &p_address = COMMAND_SYNC_ADDRESS);
+	void socket_bind(const String &p_address = COMMAND_SYNC_ADDRESS);
+	void socket_connect(const String &p_address = COMMAND_SYNC_ADDRESS);
+
 	void send_command(const Ref<Command> &p_command);
 	void send_command(const String &p_name);
 	void send_command(const String &p_name, const Array &p_args);
+
+	// Monitor peer connection and report status.
+	void poll_monitor();
+	bool is_peer_connected() const { return !peer_disconnected; }
 
 	Variant call_execute_function(const Ref<Command> &p_command);
 	void set_execute_function(Callable p_execute_function) { execute_function = p_execute_function; }
