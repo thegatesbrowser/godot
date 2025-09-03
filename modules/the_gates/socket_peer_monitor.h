@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  command_sync.h                                                        */
+/*  socket_peer_monitor.h                                                 */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,48 +28,42 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifndef COMMAND_SYNC_H
-#define COMMAND_SYNC_H
+#ifndef SOCKET_PEER_MONITOR_H
+#define SOCKET_PEER_MONITOR_H
 
-#include "command.h"
 #include "scene/main/node.h"
 #include "thirdparty/zmqpp/socket.hpp"
 
 #ifdef WINDOWS_ENABLED
-static const String COMMAND_SYNC_ADDRESS("ipc://sandbox/command_sync");
+static const String SOCKET_PEER_MONITOR_ADDRESS("ipc://sandbox/socket_peer_monitor");
 #else
-static const String COMMAND_SYNC_ADDRESS("ipc:///tmp/command_sync");
+static const String SOCKET_PEER_MONITOR_ADDRESS("ipc:///tmp/socket_peer_monitor");
 #endif
 
-class CommandSync : public Node {
-	GDCLASS(CommandSync, Node);
+static const String SOCKET_PEER_MONITOR_PARENT_ENDPOINT("inproc://socket_peer_monitor.parent");
+static const String SOCKET_PEER_MONITOR_CHILD_ENDPOINT("inproc://socket_peer_monitor.child");
 
-	static CommandSync *singleton;
+class SocketPeerMonitor : public Node {
+	GDCLASS(SocketPeerMonitor, Node);
 
 	zmqpp::socket sock;
-	Callable execute_function;
+	zmqpp::socket monitor_sock;
+	bool peer_disconnected = false;
 
 protected:
 	static void _bind_methods();
 
 public:
-	void bind(const String &p_address = COMMAND_SYNC_ADDRESS);
-	void connect(const String &p_address = COMMAND_SYNC_ADDRESS);
-	void send_command(const Ref<Command> &p_command);
-	void send_command(const String &p_name);
-	void send_command(const String &p_name, const Array &p_args);
+	void bind(const String &p_address = SOCKET_PEER_MONITOR_ADDRESS, const String &p_monitor_endpoint = SOCKET_PEER_MONITOR_PARENT_ENDPOINT);
+	void connect(const String &p_address = SOCKET_PEER_MONITOR_ADDRESS, const String &p_monitor_endpoint = SOCKET_PEER_MONITOR_CHILD_ENDPOINT);
 
-	Variant call_execute_function(const Ref<Command> &p_command);
-	void set_execute_function(Callable p_execute_function) { execute_function = p_execute_function; }
-	Callable get_execute_function() const { return execute_function; }
-
-	void bind_commands();
-	void receive_commands();
+	void poll_monitor();
+	bool is_peer_connected() const { return !peer_disconnected; }
 
 	void close();
 
-	CommandSync(zmqpp::socket_type type = zmqpp::socket_type::pair);
-	~CommandSync();
+	SocketPeerMonitor(zmqpp::socket_type type = zmqpp::socket_type::pair);
+	~SocketPeerMonitor();
 };
 
-#endif // COMMAND_SYNC_H
+#endif // SOCKET_PEER_MONITOR_H

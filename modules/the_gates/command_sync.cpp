@@ -30,7 +30,6 @@
 
 #include "command_sync.h"
 #include "core/input/input.h"
-#include "thirdparty/zmqpp/message.hpp"
 #include "variant_tools.h"
 #include "zmq_context.h"
 
@@ -40,38 +39,8 @@ void CommandSync::bind(const String &p_address) {
 	sock.bind(p_address.utf8().get_data());
 }
 
-void CommandSync::poll_monitor() {
-	zmqpp::message msg;
-
-	while (monitor_sock.receive(msg, true)) {
-		if (msg.parts() >= 1) {
-			std::string part0;
-			msg.get(part0, 0);
-			if (part0.size() >= 6) {
-				const uint8_t *data = reinterpret_cast<const uint8_t *>(part0.data());
-				uint16_t event_id = 0;
-				uint32_t value = 0;
-				memcpy(&event_id, data, sizeof(uint16_t));
-				memcpy(&value, data + sizeof(uint16_t), sizeof(uint32_t));
-
-				if (event_id == ZMQ_EVENT_DISCONNECTED || event_id == ZMQ_EVENT_CLOSED || event_id == ZMQ_EVENT_CLOSE_FAILED) {
-					peer_disconnected = true;
-				}
-
-				if (event_id == ZMQ_EVENT_CONNECTED || event_id == ZMQ_EVENT_ACCEPTED || event_id == ZMQ_EVENT_LISTENING) {
-					peer_disconnected = false;
-				}
-			}
-		}
-	}
-}
-
 void CommandSync::connect(const String &p_address) {
 	sock.connect(p_address.utf8().get_data());
-
-	std::string monitor_endpoint = COMMAND_SYNC_MONITOR_ADDRESS.utf8().get_data();
-	sock.monitor(monitor_endpoint, zmqpp::event::all);
-	monitor_sock.connect(monitor_endpoint);
 }
 
 void CommandSync::send_command(const Ref<Command> &p_command) {
@@ -129,7 +98,6 @@ void CommandSync::receive_commands() {
 
 void CommandSync::close() {
 	sock.close();
-	monitor_sock.close();
 }
 
 void CommandSync::_bind_methods() {
@@ -144,7 +112,7 @@ void CommandSync::_bind_methods() {
 }
 
 CommandSync::CommandSync(zmqpp::socket_type type) :
-		sock(zmqpp::socket(ctx, type)), monitor_sock(zmqpp::socket(ctx, zmqpp::socket_type::pair)) {
+		sock(zmqpp::socket(ctx, type)) {
 	if (singleton == nullptr) {
 		singleton = this;
 	}
