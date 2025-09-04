@@ -94,6 +94,11 @@
 }
 
 - (void)forceUnbundledWindowActivationHackStep1 {
+	#ifdef THE_GATES_SANDBOX
+		print_verbose("forceUnbundledWindowActivationHackStep1: return. Sandbox mode");
+		return;
+	#endif
+
 	// Step 1: Switch focus to macOS SystemUIServer process.
 	// Required to perform step 2, TransformProcessType will fail if app is already the in focus.
 	for (NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.systemuiserver"]) {
@@ -106,11 +111,6 @@
 }
 
 - (void)forceUnbundledWindowActivationHackStep2 {
-#ifdef THE_GATES_SANDBOX
-	print_verbose("forceUnbundledWindowActivationHackStep2: return. Sandbox mode");
-	return;
-#endif
-
 	// Step 2: Register app as foreground process.
 	ProcessSerialNumber psn = { 0, kCurrentProcess };
 	(void)TransformProcessType(&psn, kProcessTransformToForegroundApplication);
