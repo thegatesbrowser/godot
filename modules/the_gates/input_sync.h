@@ -33,7 +33,7 @@
 
 #include "core/input/input.h"
 #include "core/object/ref_counted.h"
-#include "thirdparty/zmqpp/socket.hpp"
+#include "thirdparty/cppzmq/zmq.hpp"
 
 #ifdef WINDOWS_ENABLED
 static const String INPUT_SYNC_ADDRESS("ipc://sandbox/input_sync");
@@ -44,7 +44,7 @@ static const String INPUT_SYNC_ADDRESS("ipc:///tmp/input_sync");
 class InputSync : public RefCounted {
 	GDCLASS(InputSync, RefCounted);
 
-	zmqpp::socket sock;
+	zmq::socket_t sock;
 
 protected:
 	static void _bind_methods();

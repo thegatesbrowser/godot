@@ -3,15 +3,13 @@
 #ifdef WINDOWS_ENABLED
 #include "Windows.h"
 #include "zmq_context.h"
-#include "socket.hpp"
-#include "message.hpp"
+#include "thirdparty/cppzmq/zmq.hpp"
 #endif
 
 #if MACOS_ENABLED
 #include <IOSurface/IOSurface.h>
 #include "zmq_context.h"
-#include "socket.hpp"
-#include "message.hpp"
+#include "thirdparty/cppzmq/zmq.hpp"
 #endif
 
 #if LINUXBSD_ENABLED
@@ -35,14 +33,15 @@ bool ExternalTexture::send_filehandle(const String &p_path) {
 	ERR_FAIL_COND_V_MSG(!success, false, "Unable to DuplicateHandle. Error code: " + itos(GetLastError()));
 
 	// Send handle
-	zmqpp::socket sock(zmqpp::socket(ctx, zmqpp::socket_type::pair));
+	zmq::socket_t sock(ctx, zmq::socket_type::pair);
 	sock.connect(split[0].utf8().get_data());
 
 	filehandle = (FileHandle)hDuplicateHandle;
-	zmqpp::message msg;
+	zmq::message_t msg;
 	int64_t data = reinterpret_cast<int64_t>(filehandle);
-	msg << data;
-	success = sock.send(msg, true);
+	msg.rebuild(sizeof(int64_t));
+	memcpy(msg.data(), &data, sizeof(int64_t));
+	success = sock.send(msg, zmq::send_flags::none).has_value();
 	sock.close();
 
 	// Clean up
@@ -56,12 +55,13 @@ bool ExternalTexture::send_filehandle(const String &p_path) {
 	uint32_t surfaceID = IOSurfaceGetID(filehandle);
 
 	// Send IOSurfaceID
-	zmqpp::socket sock(zmqpp::socket(ctx, zmqpp::socket_type::pair));
+	zmq::socket_t sock(ctx, zmq::socket_type::pair);
 	sock.connect(p_path.utf8().get_data());
 
-	zmqpp::message msg;
-	msg << surfaceID;
-	bool success = sock.send(msg, true);
+	zmq::message_t msg;
+	msg.rebuild(sizeof(uint32_t));
+	memcpy(msg.data(), &surfaceID, sizeof(uint32_t));
+	bool success = sock.send(msg, zmq::send_flags::none).has_value();
 	sock.close();
 
 	return success;
@@ -72,24 +72,28 @@ bool ExternalTexture::send_filehandle(const String &p_path) {
 
 bool ExternalTexture::recv_filehandle(const String &p_path) {
 #ifdef WINDOWS_ENABLED
-	zmqpp::socket sock(zmqpp::socket(ctx, zmqpp::socket_type::pair));
+	zmq::socket_t sock(ctx, zmq::socket_type::pair);
 	sock.bind(p_path.utf8().get_data());
 
-	zmqpp::message msg;
-	sock.receive(msg, false); // WARNING: BLOCKING COMMAND
+	zmq::message_t msg;
+	if (!sock.recv(msg)) { // WARNING: BLOCKING COMMAND
+		return false;
+	}
 	int64_t data;
-	msg >> data;
+	memcpy(&data, msg.data(), sizeof(int64_t));
 	sock.close();
 
 	filehandle = reinterpret_cast<void*>(data);
 #elif MACOS_ENABLED
-	zmqpp::socket sock(zmqpp::socket(ctx, zmqpp::socket_type::pair));
+	zmq::socket_t sock(ctx, zmq::socket_type::pair);
 	sock.bind(p_path.utf8().get_data());
 
-	zmqpp::message msg;
-	sock.receive(msg, false); // WARNING: BLOCKING COMMAND
+	zmq::message_t msg;
+	if (!sock.recv(msg)) { // WARNING: BLOCKING COMMAND
+		return false;
+	}
 	uint32_t surfaceID;
-	msg >> surfaceID;
+	memcpy(&surfaceID, msg.data(), sizeof(uint32_t));
 	sock.close();
 
 	filehandle = IOSurfaceLookup(surfaceID);

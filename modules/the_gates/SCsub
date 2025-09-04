@@ -8,6 +8,10 @@ env_tg = env_modules.Clone()
 # Thirdparty source files
 
 thirdparty_obj = []
+thirdparty_sources = []
+
+# cppzmq
+env_tg.Prepend(CPPPATH=["#thirdparty/cppzmq"])
 
 # flingfd
 if env["platform"] == "linuxbsd":
