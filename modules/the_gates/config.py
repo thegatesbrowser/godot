@@ -31,7 +31,7 @@ def configure(env):
         env.Prepend(CPPDEFINES=["ZMQ_STATIC"])
         env.Prepend(CPPPATH=["C:/Libs/ZeroMQ/include"])
         env.Append(LIBPATH=["C:/Libs/ZeroMQ/lib"])
-        env.Append(LINKFLAGS=["libzmq-v143-mt-s-4_3_5.lib"])
+        env.Append(LINKFLAGS=["libzmq-v143-mt-s-4_3_6.lib"])
         print("Linking ZeroMQ statically")
 
     elif env["platform"] == "linuxbsd":

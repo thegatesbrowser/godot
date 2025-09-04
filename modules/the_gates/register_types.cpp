@@ -36,6 +36,7 @@
 #include "input_sync.h"
 #include "sandboxing.h"
 #include "zmq_context.h"
+#include "zmqpp.hpp"
 
 void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -44,8 +45,9 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 
 	try {
 		ctx = zmqpp::context();
+		print_line("ZeroMQ version: " + String(zmqpp::version().c_str()));
 	} catch (const std::exception &e) {
-		ERR_PRINT("ZeroMQ initialization failure.");
+		ERR_PRINT("ZeroMQ initialization failure. Error: " + String(e.what()));
 	}
 
 	GDREGISTER_CLASS(Sandboxing);
@@ -63,6 +65,6 @@ void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
 	try {
 		ctx.terminate();
 	} catch (const std::exception &e) {
-		ERR_PRINT("ZeroMQ termination failure.");
+		ERR_PRINT("ZeroMQ termination failure. Error: " + String(e.what()));
 	}
 }

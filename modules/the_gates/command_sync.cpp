@@ -37,13 +37,18 @@
 CommandSync *CommandSync::singleton = nullptr;
 
 void CommandSync::socket_bind(const String &p_address) {
+	sock.set(zmqpp::socket_option::heartbeat_interval, COMMAND_SYNC_HEARTBEAT_IVL);
+	// Don't set timeout for child process
 	sock.bind(p_address.utf8().get_data());
 }
 
-void CommandSync::socket_connect(const String &p_address) {
+void CommandSync::socket_connect(const String &p_address, const String &p_monitor_endpoint) {
+	sock.set(zmqpp::socket_option::heartbeat_interval, COMMAND_SYNC_HEARTBEAT_IVL);
+	sock.set(zmqpp::socket_option::heartbeat_timeout, COMMAND_SYNC_HEARTBEAT_TIMEOUT);
+
 	sock.connect(p_address.utf8().get_data());
 
-	std::string monitor_endpoint = COMMAND_SYNC_MONITOR_ADDRESS.utf8().get_data();
+	std::string monitor_endpoint = p_monitor_endpoint.utf8().get_data();
 	sock.monitor(monitor_endpoint, zmqpp::event::all);
 	monitor_sock.connect(monitor_endpoint);
 }
@@ -73,18 +78,22 @@ void CommandSync::poll_monitor() {
 			std::string part0;
 			msg.get(part0, 0);
 			if (part0.size() >= 6) {
-				const uint8_t *data = reinterpret_cast<const uint8_t *>(part0.data());
+				const uint8_t *part0_data = reinterpret_cast<const uint8_t *>(part0.data());
 				uint16_t event_id = 0;
 				uint32_t value = 0;
-				memcpy(&event_id, data, sizeof(uint16_t));
-				memcpy(&value, data + sizeof(uint16_t), sizeof(uint32_t));
+				memcpy(&event_id, part0_data, sizeof(uint16_t));
+				memcpy(&value, part0_data + sizeof(uint16_t), sizeof(uint32_t));
+
+				print_line(vformat("ZMQ Monitor Event: %d, Value: %d", event_id, value));
 
 				if (event_id == ZMQ_EVENT_DISCONNECTED || event_id == ZMQ_EVENT_CLOSED || event_id == ZMQ_EVENT_CLOSE_FAILED) {
 					peer_disconnected = true;
+					print_line("ZMQ Peer disconnected detected");
 				}
 
 				if (event_id == ZMQ_EVENT_CONNECTED || event_id == ZMQ_EVENT_ACCEPTED || event_id == ZMQ_EVENT_LISTENING) {
 					peer_disconnected = false;
+					print_line("ZMQ Peer connected detected");
 				}
 			}
 		}
@@ -143,8 +152,8 @@ void CommandSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("close"), &CommandSync::close);
 }
 
-CommandSync::CommandSync(zmqpp::socket_type type) :
-		sock(zmqpp::socket(ctx, type)), monitor_sock(zmqpp::socket(ctx, zmqpp::socket_type::pair)) {
+CommandSync::CommandSync(zmqpp::socket_type type, zmqpp::socket_type monitor_type) :
+		sock(zmqpp::socket(ctx, type)), monitor_sock(zmqpp::socket(ctx, monitor_type)) {
 	if (singleton == nullptr) {
 		singleton = this;
 	}
