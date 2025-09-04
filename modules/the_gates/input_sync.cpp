@@ -31,7 +31,7 @@
 #include "input_sync.h"
 #include "core/core_string_names.h"
 #include "core/input/input.h"
-#include "socket.hpp"
+#include "thirdparty/cppzmq/zmq.hpp"
 #include "variant_tools.h"
 #include "zmq_context.h"
 
@@ -44,14 +44,20 @@ void InputSync::socket_connect(const String &p_address) {
 }
 
 void InputSync::send_input_event(const Ref<InputEvent> &p_event) {
-	sock.send(var_to_str(p_event).utf8().get_data(), true);
+	std::string msg_str = var_to_str(p_event).utf8().get_data();
+	zmq::message_t msg(msg_str);
+	auto result = sock.send(msg, zmq::send_flags::none);
+	if (!result) {
+		print_line("Failed to send input event");
+	}
 }
 
 void InputSync::receive_input_events() {
-	std::string msg;
+	zmq::message_t msg;
 
-	while (sock.receive(msg, true)) {
-		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(msg.c_str()));
+	while (sock.recv(msg, zmq::recv_flags::dontwait)) {
+		std::string msg_str(static_cast<const char *>(msg.data()), msg.size());
+		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(msg_str.c_str()));
 	}
 }
 
@@ -66,7 +72,7 @@ void InputSync::_bind_methods() {
 }
 
 InputSync::InputSync() :
-		sock(zmqpp::socket(ctx, zmqpp::socket_type::pair)) {
+		sock(ctx, zmq::socket_type::pair) {
 }
 
 InputSync::~InputSync() {

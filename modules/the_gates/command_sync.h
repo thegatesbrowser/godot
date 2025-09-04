@@ -33,7 +33,7 @@
 
 #include "command.h"
 #include "scene/main/node.h"
-#include "thirdparty/zmqpp/socket.hpp"
+#include "thirdparty/cppzmq/zmq.hpp"
 
 #ifdef WINDOWS_ENABLED
 static const String COMMAND_SYNC_ADDRESS("ipc://sandbox/command_sync");
@@ -51,11 +51,11 @@ class CommandSync : public Node {
 
 	static CommandSync *singleton;
 
-	zmqpp::socket sock;
+	zmq::socket_t sock;
 	Callable execute_function;
 
 	// Monitoring
-	zmqpp::socket monitor_sock;
+	zmq::socket_t monitor_sock;
 	bool peer_disconnected = false;
 
 protected:
@@ -82,7 +82,7 @@ public:
 
 	void close();
 
-	CommandSync(zmqpp::socket_type type = zmqpp::socket_type::pair, zmqpp::socket_type monitor_type = zmqpp::socket_type::pair);
+	CommandSync(zmq::socket_type type = zmq::socket_type::pair, zmq::socket_type monitor_type = zmq::socket_type::pair);
 	~CommandSync();
 };
 

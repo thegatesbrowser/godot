@@ -30,31 +30,37 @@
 
 #include "command_sync.h"
 #include "core/input/input.h"
-#include "thirdparty/zmqpp/message.hpp"
+#include "thirdparty/cppzmq/zmq_addon.hpp"
 #include "variant_tools.h"
 #include "zmq_context.h"
+#include <zmq.h>
 
 CommandSync *CommandSync::singleton = nullptr;
 
 void CommandSync::socket_bind(const String &p_address) {
-	sock.set(zmqpp::socket_option::heartbeat_interval, COMMAND_SYNC_HEARTBEAT_IVL);
-	// Don't set timeout for child process
+	sock.set(zmq::sockopt::heartbeat_ivl, COMMAND_SYNC_HEARTBEAT_IVL);
+	sock.set(zmq::sockopt::heartbeat_timeout, COMMAND_SYNC_HEARTBEAT_TIMEOUT);
 	sock.bind(p_address.utf8().get_data());
 }
 
 void CommandSync::socket_connect(const String &p_address, const String &p_monitor_endpoint) {
-	sock.set(zmqpp::socket_option::heartbeat_interval, COMMAND_SYNC_HEARTBEAT_IVL);
-	sock.set(zmqpp::socket_option::heartbeat_timeout, COMMAND_SYNC_HEARTBEAT_TIMEOUT);
+	sock.set(zmq::sockopt::heartbeat_ivl, COMMAND_SYNC_HEARTBEAT_IVL);
+	sock.set(zmq::sockopt::heartbeat_timeout, COMMAND_SYNC_HEARTBEAT_TIMEOUT);
 
 	sock.connect(p_address.utf8().get_data());
 
 	std::string monitor_endpoint = p_monitor_endpoint.utf8().get_data();
-	sock.monitor(monitor_endpoint, zmqpp::event::all);
+	// Use zmq_socket_monitor directly since it's not exposed in the C++ API
+	zmq_socket_monitor(sock.handle(), monitor_endpoint.c_str(), ZMQ_EVENT_ALL);
 	monitor_sock.connect(monitor_endpoint);
 }
 
 void CommandSync::send_command(const Ref<Command> &p_command) {
-	sock.send(var_to_str(p_command).utf8().get_data(), true);
+	std::string msg_str = var_to_str(p_command).utf8().get_data();
+	zmq::message_t msg(msg_str);
+	if (!sock.send(msg, zmq::send_flags::none)) {
+		print_line("Failed to send command");
+	}
 }
 
 void CommandSync::send_command(const String &p_name) {
@@ -71,30 +77,26 @@ void CommandSync::send_command(const String &p_name, const Array &p_args) {
 }
 
 void CommandSync::poll_monitor() {
-	zmqpp::message msg;
+	zmq::message_t msg;
 
-	while (monitor_sock.receive(msg, true)) {
-		if (msg.parts() >= 1) {
-			std::string part0;
-			msg.get(part0, 0);
-			if (part0.size() >= 6) {
-				const uint8_t *part0_data = reinterpret_cast<const uint8_t *>(part0.data());
-				uint16_t event_id = 0;
-				uint32_t value = 0;
-				memcpy(&event_id, part0_data, sizeof(uint16_t));
-				memcpy(&value, part0_data + sizeof(uint16_t), sizeof(uint32_t));
+	while (monitor_sock.recv(msg, zmq::recv_flags::dontwait)) {
+		if (msg.size() >= 6) {
+			const uint8_t *msg_data = static_cast<const uint8_t *>(msg.data());
+			uint16_t event_id = 0;
+			uint32_t value = 0;
+			memcpy(&event_id, msg_data, sizeof(uint16_t));
+			memcpy(&value, msg_data + sizeof(uint16_t), sizeof(uint32_t));
 
-				print_line(vformat("ZMQ Monitor Event: %d, Value: %d", event_id, value));
+			print_line(vformat("ZMQ Monitor Event: %d, Value: %d", event_id, value));
 
-				if (event_id == ZMQ_EVENT_DISCONNECTED || event_id == ZMQ_EVENT_CLOSED || event_id == ZMQ_EVENT_CLOSE_FAILED) {
-					peer_disconnected = true;
-					print_line("ZMQ Peer disconnected detected");
-				}
+			if (event_id == ZMQ_EVENT_DISCONNECTED || event_id == ZMQ_EVENT_CLOSED || event_id == ZMQ_EVENT_CLOSE_FAILED) {
+				peer_disconnected = true;
+				print_line("ZMQ Peer disconnected detected");
+			}
 
-				if (event_id == ZMQ_EVENT_CONNECTED || event_id == ZMQ_EVENT_ACCEPTED || event_id == ZMQ_EVENT_LISTENING) {
-					peer_disconnected = false;
-					print_line("ZMQ Peer connected detected");
-				}
+			if (event_id == ZMQ_EVENT_CONNECTED || event_id == ZMQ_EVENT_ACCEPTED || event_id == ZMQ_EVENT_LISTENING) {
+				peer_disconnected = false;
+				print_line("ZMQ Peer connected detected");
 			}
 		}
 	}
@@ -129,10 +131,11 @@ void CommandSync::bind_commands() {
 }
 
 void CommandSync::receive_commands() {
-	std::string msg;
+	zmq::message_t msg;
 
-	while (sock.receive(msg, true)) {
-		Variant res = call_execute_function((Ref<Command>)str_to_var(msg.c_str()));
+	while (sock.recv(msg, zmq::recv_flags::dontwait)) {
+		std::string msg_str(static_cast<const char *>(msg.data()), msg.size());
+		Variant res = call_execute_function((Ref<Command>)str_to_var(msg_str.c_str()));
 	}
 }
 
@@ -152,8 +155,8 @@ void CommandSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("close"), &CommandSync::close);
 }
 
-CommandSync::CommandSync(zmqpp::socket_type type, zmqpp::socket_type monitor_type) :
-		sock(zmqpp::socket(ctx, type)), monitor_sock(zmqpp::socket(ctx, monitor_type)) {
+CommandSync::CommandSync(zmq::socket_type type, zmq::socket_type monitor_type) :
+		sock(ctx, type), monitor_sock(ctx, monitor_type) {
 	if (singleton == nullptr) {
 		singleton = this;
 	}

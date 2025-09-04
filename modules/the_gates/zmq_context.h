@@ -1,8 +1,8 @@
 #ifndef ZMQ_CONTEXT_H
 #define ZMQ_CONTEXT_H
 
-#include "context.hpp"
+#include "thirdparty/cppzmq/zmq.hpp"
 
-inline zmqpp::context ctx;
+inline zmq::context_t ctx;
 
 #endif // ZMQ_CONTEXT_H

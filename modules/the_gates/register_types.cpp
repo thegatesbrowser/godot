@@ -36,7 +36,7 @@
 #include "input_sync.h"
 #include "sandboxing.h"
 #include "zmq_context.h"
-#include "zmqpp.hpp"
+#include "thirdparty/cppzmq/zmq.hpp"
 
 void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -44,8 +44,10 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	}
 
 	try {
-		ctx = zmqpp::context();
-		print_line("ZeroMQ version: " + String(zmqpp::version().c_str()));
+		// Context is already initialized as a global variable
+		int major, minor, patch;
+		zmq_version(&major, &minor, &patch);
+		print_line(vformat("ZeroMQ version: %d.%d.%d", major, minor, patch));
 	} catch (const std::exception &e) {
 		ERR_PRINT("ZeroMQ initialization failure. Error: " + String(e.what()));
 	}
@@ -63,7 +65,7 @@ void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
 	}
 
 	try {
-		ctx.terminate();
+		ctx.close();
 	} catch (const std::exception &e) {
 		ERR_PRINT("ZeroMQ termination failure. Error: " + String(e.what()));
 	}
