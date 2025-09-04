@@ -9,29 +9,6 @@ env_tg = env_modules.Clone()
 
 thirdparty_obj = []
 
-# zmqpp
-thirdparty_dir = "#thirdparty/zmqpp/"
-thirdparty_sources = [
-    "actor.cpp",
-    "auth.cpp",
-    "context.cpp",
-    "curve.cpp",
-    "frame.cpp",
-    "loop.cpp",
-    "message.cpp",
-    "poller.cpp",
-    "proxy.cpp",
-    "proxy_steerable.cpp",
-    "reactor.cpp",
-    "signal.cpp",
-    "socket.cpp",
-    "z85.cpp",
-    "zap_request.cpp",
-    "zmqpp.cpp",
-]
-thirdparty_sources = [thirdparty_dir + file for file in thirdparty_sources]
-env_tg.Prepend(CPPPATH=[thirdparty_dir])
-
 # flingfd
 if env["platform"] == "linuxbsd":
     thirdparty_flingfd_dir = "#thirdparty/flingfd/"
