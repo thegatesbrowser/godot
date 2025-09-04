@@ -41,7 +41,10 @@ static const String COMMAND_SYNC_ADDRESS("ipc://sandbox/command_sync");
 static const String COMMAND_SYNC_ADDRESS("ipc:///tmp/command_sync");
 #endif
 
-static const String COMMAND_SYNC_MONITOR_ADDRESS("inproc://command_sync_monitor");
+static const String COMMAND_SYNC_MONITOR_ENDPOINT("inproc://command_sync_monitor");
+
+static const int COMMAND_SYNC_HEARTBEAT_IVL = 2000;
+static const int COMMAND_SYNC_HEARTBEAT_TIMEOUT = 15000;
 
 class CommandSync : public Node {
 	GDCLASS(CommandSync, Node);
@@ -60,7 +63,7 @@ protected:
 
 public:
 	void socket_bind(const String &p_address = COMMAND_SYNC_ADDRESS);
-	void socket_connect(const String &p_address = COMMAND_SYNC_ADDRESS);
+	void socket_connect(const String &p_address = COMMAND_SYNC_ADDRESS, const String &p_monitor_endpoint = COMMAND_SYNC_MONITOR_ENDPOINT);
 
 	void send_command(const Ref<Command> &p_command);
 	void send_command(const String &p_name);
@@ -79,7 +82,7 @@ public:
 
 	void close();
 
-	CommandSync(zmqpp::socket_type type = zmqpp::socket_type::pair);
+	CommandSync(zmqpp::socket_type type = zmqpp::socket_type::pair, zmqpp::socket_type monitor_type = zmqpp::socket_type::pair);
 	~CommandSync();
 };
 
