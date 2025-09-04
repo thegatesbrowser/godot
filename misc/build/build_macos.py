@@ -267,6 +267,30 @@ def main():
 	shutil.move(str(working_template_dir), str(final_app_template))
 	print("✓ Moved working template to bin/macos_template.app")
 	
+	print("\n=== Creating macOS Template Archive ===")
+	
+	# Create zip file of the app template
+	import zipfile
+	
+	zip_path = bin_dir / "macos.zip"
+	
+	# Remove existing zip if it exists
+	if zip_path.exists():
+		zip_path.unlink()
+		print("✓ Removed existing macos.zip")
+	
+	# Create zip file
+	with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+		# Walk through the app template directory
+		for root, dirs, files in os.walk(final_app_template):
+			for file in files:
+				file_path = Path(root) / file
+				# Calculate relative path from the app template root
+				arcname = file_path.relative_to(final_app_template)
+				zipf.write(file_path, arcname)
+	
+	print(f"✓ Created macOS template archive: {zip_path}")
+	
 	print("\n=== Build Complete ===")
 	print("Universal binaries created:")
 	for binary in binaries:
@@ -274,6 +298,7 @@ def main():
 			print(f"  - {binary['universal']}")
 	
 	print(f"App template available at: {final_app_template}")
+	print(f"macOS template archive: {zip_path}")
 
 if __name__ == "__main__":
 	main()
