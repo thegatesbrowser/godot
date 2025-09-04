@@ -4322,10 +4322,14 @@ bool Main::iteration() {
 	// If our command socket lost its peer (parent), request exit.
 	command_sync->poll_monitor();
 	if (!command_sync->is_peer_connected()) {
+#ifdef WINDOWS_ENABLED
+		CRASH_NOW_MSG("CommandSync peer disconnected. Exiting child."); // hack to avoid hanging because of uncleaned pipes created by OS::execute_with_pipe
+#else
 		print_line("CommandSync peer disconnected. Exiting child.");
 		exit = true;
-	}
 #endif
+	}
+#endif // THE_GATES_SANDBOX
 
 	iterating--;
 

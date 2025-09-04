@@ -38,19 +38,13 @@
 CommandSync *CommandSync::singleton = nullptr;
 
 void CommandSync::socket_bind(const String &p_address) {
-	sock.set(zmq::sockopt::heartbeat_ivl, COMMAND_SYNC_HEARTBEAT_IVL);
-	sock.set(zmq::sockopt::heartbeat_timeout, COMMAND_SYNC_HEARTBEAT_TIMEOUT);
 	sock.bind(p_address.utf8().get_data());
 }
 
 void CommandSync::socket_connect(const String &p_address, const String &p_monitor_endpoint) {
-	sock.set(zmq::sockopt::heartbeat_ivl, COMMAND_SYNC_HEARTBEAT_IVL);
-	sock.set(zmq::sockopt::heartbeat_timeout, COMMAND_SYNC_HEARTBEAT_TIMEOUT);
-
 	sock.connect(p_address.utf8().get_data());
 
 	std::string monitor_endpoint = p_monitor_endpoint.utf8().get_data();
-	// Use zmq_socket_monitor directly since it's not exposed in the C++ API
 	zmq_socket_monitor(sock.handle(), monitor_endpoint.c_str(), ZMQ_EVENT_ALL);
 	monitor_sock.connect(monitor_endpoint);
 }
