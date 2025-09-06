@@ -75,6 +75,7 @@ private:
 
 	bool request_sent = false;
 	Ref<HTTPClient> client;
+	bool client_owned = true;
 	PackedByteArray body;
 	SafeFlag use_threads;
 	bool accept_gzip = true;
@@ -162,6 +163,10 @@ public:
 	void set_https_proxy(const String &p_host, int p_port);
 
 	void set_tls_options(const Ref<TLSOptions> &p_options);
+
+	// Overridable from GDScript to supply a client (may be pooled/connected).
+	GDVIRTUAL3RC(Ref<HTTPClient>, _get_http_client, String, int64_t, bool)
+	Ref<HTTPClient> _get_http_client();
 
 	HTTPRequest();
 };
