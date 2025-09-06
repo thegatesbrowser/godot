@@ -33,6 +33,18 @@
 #include "scene/main/timer.h"
 
 Error HTTPRequest::_request() {
+	client = _get_http_client();
+	ERR_FAIL_COND_V_MSG(!client.is_valid(), ERR_UNCONFIGURED, "HTTPClient is not valid.");
+
+	HTTPClient::Status status = client->get_status();
+	if (status == HTTPClient::STATUS_CANT_CONNECT || status == HTTPClient::STATUS_CANT_RESOLVE) {
+		return ERR_CANT_CONNECT;
+	}
+
+	if (status != HTTPClient::STATUS_DISCONNECTED) {
+		return OK;
+	}
+
 	return client->connect_to_host(url, port, use_tls ? tls_options : nullptr);
 }
 
@@ -199,12 +211,16 @@ void HTTPRequest::cancel_request() {
 
 	file.unref();
 	decompressor.unref();
-	client->close();
+	if (client_owned) {
+		client->close();
+	}
 	body.clear();
 	got_response = false;
 	response_code = -1;
 	request_sent = false;
 	requesting = false;
+
+	emit_signal(SNAME("request_cancelled"));
 }
 
 bool HTTPRequest::_handle_response(bool *ret_value) {
@@ -246,7 +262,9 @@ bool HTTPRequest::_handle_response(bool *ret_value) {
 
 		if (!new_request.is_empty()) {
 			// Process redirect.
-			client->close();
+			if (client_owned) {
+				client->close();
+			}
 			int new_redirs = redirections + 1; // Because _request() will clear it.
 			Error err;
 			if (new_request.begins_with("http")) {
@@ -599,6 +617,16 @@ void HTTPRequest::set_tls_options(const Ref<TLSOptions> &p_options) {
 	tls_options = p_options;
 }
 
+Ref<HTTPClient> HTTPRequest::_get_http_client() {
+	Ref<HTTPClient> ret = client;
+	if (GDVIRTUAL_CALL(_get_http_client, url, (int64_t)port, use_tls, ret)) {
+		client_owned = false;
+	} else {
+		client_owned = true;
+	}
+	return ret;
+}
+
 void HTTPRequest::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("request", "url", "custom_headers", "method", "request_data"), &HTTPRequest::request, DEFVAL(PackedStringArray()), DEFVAL(HTTPClient::METHOD_GET), DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("request_raw", "url", "custom_headers", "method", "request_data_raw"), &HTTPRequest::request_raw, DEFVAL(PackedStringArray()), DEFVAL(HTTPClient::METHOD_GET), DEFVAL(PackedByteArray()));
@@ -643,6 +671,7 @@ void HTTPRequest::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "timeout", PROPERTY_HINT_RANGE, "0,3600,0.1,or_greater,suffix:s"), "set_timeout", "get_timeout");
 
 	ADD_SIGNAL(MethodInfo("request_completed", PropertyInfo(Variant::INT, "result"), PropertyInfo(Variant::INT, "response_code"), PropertyInfo(Variant::PACKED_STRING_ARRAY, "headers"), PropertyInfo(Variant::PACKED_BYTE_ARRAY, "body")));
+	ADD_SIGNAL(MethodInfo("request_cancelled"));
 
 	BIND_ENUM_CONSTANT(RESULT_SUCCESS);
 	BIND_ENUM_CONSTANT(RESULT_CHUNKED_BODY_SIZE_MISMATCH);
@@ -658,10 +687,13 @@ void HTTPRequest::_bind_methods() {
 	BIND_ENUM_CONSTANT(RESULT_DOWNLOAD_FILE_WRITE_ERROR);
 	BIND_ENUM_CONSTANT(RESULT_REDIRECT_LIMIT_REACHED);
 	BIND_ENUM_CONSTANT(RESULT_TIMEOUT);
+
+	GDVIRTUAL_BIND(_get_http_client, "host", "port", "use_tls");
 }
 
 HTTPRequest::HTTPRequest() {
 	client = Ref<HTTPClient>(HTTPClient::create());
+	client_owned = true;
 	tls_options = TLSOptions::client();
 	timer = memnew(Timer);
 	timer->set_one_shot(true);
