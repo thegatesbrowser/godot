@@ -23,8 +23,6 @@
 #ifndef _TVG_TASK_SCHEDULER_H_
 #define _TVG_TASK_SCHEDULER_H_
 
-#define _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR
-
 #include <mutex>
 #include <condition_variable>
 
@@ -105,7 +103,6 @@ struct TaskScheduler
     static void init(uint32_t threads);
     static void term();
     static void request(Task* task);
-    static void async(bool on);
 };
 
 }  //namespace
