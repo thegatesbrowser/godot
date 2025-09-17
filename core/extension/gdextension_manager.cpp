@@ -320,8 +320,7 @@ String GDExtensionManager::change_libraries_path(const String &p_config_path, co
 	ERR_FAIL_COND_V_MSG(err != OK, "", "Error loading GDExtension configuration file: " + p_config_path);
 
 	if (config->has_section("libraries")) {
-		List<String> libraries;
-		config->get_section_keys("libraries", &libraries);
+		Vector<String> libraries = config->get_section_keys("libraries");
 
 		for (const String &E : libraries) {
 			String library_path = config->get_value("libraries", E);
