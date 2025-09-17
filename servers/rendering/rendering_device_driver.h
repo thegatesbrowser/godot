@@ -260,8 +260,8 @@ public:
 		uint64_t layer_pitch = 0;
 	};
 
-	virtual TextureID external_texture_create(const TextureFormat &p_format, const TextureView &p_view, FileHandle *p_filehandle) = 0;
-	virtual TextureID external_texture_import(const TextureFormat &p_format, const TextureView &p_view, FileHandle p_filehandle) = 0;
+	virtual TextureID external_texture_create(const TextureFormat &p_format, const TextureView &p_view, FileHandle *p_filehandle) { return TextureID(); }
+	virtual TextureID external_texture_import(const TextureFormat &p_format, const TextureView &p_view, FileHandle p_filehandle) { return TextureID(); }
 
 	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) = 0;
 	virtual TextureID texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil, uint32_t p_mipmaps) = 0;
@@ -446,10 +446,10 @@ public:
 	virtual RenderPassID swap_chain_get_render_pass(SwapChainID p_swap_chain) = 0;
 
 	// Retrieve swap chain images to create textures and copy from them.
-	virtual TightLocalVector<uint64_t> swap_chain_get_images(SwapChainID p_swap_chain) = 0;
+	virtual TightLocalVector<uint64_t> swap_chain_get_images(SwapChainID p_swap_chain) { return TightLocalVector<uint64_t>(); }
 
 	// Retrieve current image index of swap chain.
-	virtual uint32_t swap_chain_get_image_index(SwapChainID p_swap_chain) = 0;
+	virtual uint32_t swap_chain_get_image_index(SwapChainID p_swap_chain) { return 0; }
 
 	// Retrieve the rotation in degrees to apply as a pre-transform. Usually 0 on PC. May be 0, 90, 180 & 270 on Android.
 	virtual int swap_chain_get_pre_rotation_degrees(SwapChainID p_swap_chain) { return 0; }
