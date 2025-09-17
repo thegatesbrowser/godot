@@ -1030,8 +1030,10 @@ RID RenderingDevice::external_texture_create(const TextureFormat &p_format, cons
 #endif
 
 	if (p_data.size()) {
-		for (uint32_t i = 0; i < p_format.array_layers; i++) {
-			_texture_update(id, i, p_data[i], true, false);
+		const bool use_general_in_copy_queues = driver->api_trait_get(RDD::API_TRAIT_USE_GENERAL_IN_COPY_QUEUES);
+		const RDD::TextureLayout dst_layout = use_general_in_copy_queues ? RDD::TEXTURE_LAYOUT_GENERAL : RDD::TEXTURE_LAYOUT_COPY_DST_OPTIMAL;
+		for (uint32_t i = 0; i < format.array_layers; i++) {
+			_texture_initialize(id, i, p_data[i], dst_layout, true);
 		}
 
 		if (texture.draw_tracker != nullptr) {
@@ -1202,8 +1204,10 @@ RID RenderingDevice::external_texture_import(const TextureFormat &p_format, cons
 #endif
 
 	if (p_data.size()) {
-		for (uint32_t i = 0; i < p_format.array_layers; i++) {
-			_texture_update(id, i, p_data[i], true, false);
+		const bool use_general_in_copy_queues = driver->api_trait_get(RDD::API_TRAIT_USE_GENERAL_IN_COPY_QUEUES);
+		const RDD::TextureLayout dst_layout = use_general_in_copy_queues ? RDD::TEXTURE_LAYOUT_GENERAL : RDD::TEXTURE_LAYOUT_COPY_DST_OPTIMAL;
+		for (uint32_t i = 0; i < format.array_layers; i++) {
+			_texture_initialize(id, i, p_data[i], dst_layout, true);
 		}
 
 		if (texture.draw_tracker != nullptr) {

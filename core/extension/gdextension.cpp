@@ -782,7 +782,7 @@ void GDExtension::deinitialize_library(InitializationLevel p_level) {
 }
 
 String GDExtension::_find_extension_library(const String &p_path, Ref<ConfigFile> p_config) {
-	return GDExtension::find_extension_library(p_path, p_config, [](String p_feature) { return OS::get_singleton()->has_feature(p_feature); });
+	return GDExtensionLibraryLoader::find_extension_library(p_path, p_config, [](String p_feature) { return OS::get_singleton()->has_feature(p_feature); });
 }
 
 void GDExtension::_bind_methods() {
