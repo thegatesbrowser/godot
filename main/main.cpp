@@ -294,7 +294,7 @@ bool profile_gpu = false;
 
 // TheGates
 #ifdef THE_GATES_SANDBOX
-static ExternalTexture *ext_texture = nullptr;
+static TGExternalTexture *ext_texture = nullptr;
 static CommandSync *command_sync = nullptr;
 static InputSync *input_sync = nullptr;
 static bool first_frame_sent = false;
@@ -4691,7 +4691,7 @@ int Main::start() {
 	arg.append(RD::get_singleton()->screen_get_format());
 	command_sync->send_command("ext_texture_format", arg);
 
-	// ExternalTexture
+	// TGExternalTexture
 	arg.clear();
 #ifdef WINDOWS_ENABLED
 	arg.append(FILEHANDLE_PATH + "|" + itos(OS::get_singleton()->get_process_id()));
@@ -4700,8 +4700,8 @@ int Main::start() {
 #endif
 	command_sync->send_command("send_filehandle", arg);
 
-	print_line("ExternalTexture: waiting for filehandle");
-	ext_texture = memnew(ExternalTexture);
+	print_line("TGExternalTexture: waiting for filehandle");
+	ext_texture = memnew(TGExternalTexture);
 	bool success = ext_texture->recv_filehandle(FILEHANDLE_PATH); // WARNING: BLOCKING COMMAND
 	if (!success) {
 		return false;
