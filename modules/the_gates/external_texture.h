@@ -13,8 +13,8 @@ static const String FILEHANDLE_PATH("ipc:///tmp/external_texture");
 static const String FILEHANDLE_PATH("/tmp/external_texture");
 #endif
 
-class ExternalTexture : public RefCounted {
-	GDCLASS(ExternalTexture, RefCounted);
+class TGExternalTexture : public RefCounted {
+    GDCLASS(TGExternalTexture, RefCounted);
 
     RID rid;
     RD::TextureView view;
@@ -24,24 +24,24 @@ class ExternalTexture : public RefCounted {
     Error _copy(RID p_texture, bool p_from);
 
 protected:
-	static void _bind_methods();
-	Error _create(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data);
-	Error _import(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view);
+    static void _bind_methods();
+    Error _create(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data);
+    Error _import(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view);
 
 public:
     Error create(const RD::TextureFormat &p_format, const RD::TextureView &p_view, const Vector<Vector<uint8_t>> &p_data = Vector<Vector<uint8_t>>());
-	Error import(const RD::TextureFormat &p_format, const RD::TextureView &p_view);
-	bool send_filehandle(const String &p_path = FILEHANDLE_PATH);
-	bool recv_filehandle(const String &p_path = FILEHANDLE_PATH);
+    Error import(const RD::TextureFormat &p_format, const RD::TextureView &p_view);
+    bool send_filehandle(const String &p_path = FILEHANDLE_PATH);
+    bool recv_filehandle(const String &p_path = FILEHANDLE_PATH);
 
     Error copy_to(RID p_texture) { return _copy(p_texture, false); };
     Error copy_from(RID p_texture) { return _copy(p_texture, true); };
-	Error copy_from_screen();
+    Error copy_from_screen();
 
-	RID get_rid() const { return rid; };
+    RID get_rid() const { return rid; };
 
-	ExternalTexture();
-	~ExternalTexture();
+    TGExternalTexture();
+    ~TGExternalTexture();
 };
 
 #endif // EXTERNAL_TEXTURE_H

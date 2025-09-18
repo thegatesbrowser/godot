@@ -16,7 +16,7 @@
 #include "flingfd.h"
 #endif
 
-bool ExternalTexture::send_filehandle(const String &p_path) {
+bool TGExternalTexture::send_filehandle(const String &p_path) {
 	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, false, "Sending invalid filehandle. First create external texture");
 
 #ifdef WINDOWS_ENABLED
@@ -70,7 +70,7 @@ bool ExternalTexture::send_filehandle(const String &p_path) {
 #endif
 }
 
-bool ExternalTexture::recv_filehandle(const String &p_path) {
+bool TGExternalTexture::recv_filehandle(const String &p_path) {
 #ifdef WINDOWS_ENABLED
 	zmq::socket_t sock(ctx, zmq::socket_type::pair);
 	sock.bind(p_path.utf8().get_data());
@@ -105,7 +105,7 @@ bool ExternalTexture::recv_filehandle(const String &p_path) {
 	return true;
 }
 
-Error ExternalTexture::create(const RD::TextureFormat &p_format, const RD::TextureView &p_view, const Vector<Vector<uint8_t>> &p_data) {
+Error TGExternalTexture::create(const RD::TextureFormat &p_format, const RD::TextureView &p_view, const Vector<Vector<uint8_t>> &p_data) {
 	view = p_view;
 	format = p_format;
 	rid = RD::get_singleton()->external_texture_create(p_format, p_view, &filehandle, p_data);
@@ -115,7 +115,7 @@ Error ExternalTexture::create(const RD::TextureFormat &p_format, const RD::Textu
     return OK;
 }
 
-Error ExternalTexture::import(const RD::TextureFormat &p_format, const RD::TextureView &p_view) {
+Error TGExternalTexture::import(const RD::TextureFormat &p_format, const RD::TextureView &p_view) {
 	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, ERR_UNAVAILABLE, "filehandle is no valid. Receive filehandle first");
 
 	view = p_view;
@@ -126,7 +126,7 @@ Error ExternalTexture::import(const RD::TextureFormat &p_format, const RD::Textu
     return OK;
 }
 
-Error ExternalTexture::copy_from_screen() {
+Error TGExternalTexture::copy_from_screen() {
 	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_UNAVAILABLE, "ExternalTexture is not valid. Create or import first");
 
 	Vector3 size = {
@@ -139,7 +139,7 @@ Error ExternalTexture::copy_from_screen() {
 	return RD::get_singleton()->screen_copy(rid, zero, size, 0, 0);
 }
 
-Error ExternalTexture::_create(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data) {
+Error TGExternalTexture::_create(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data) {
 	ERR_FAIL_COND_V(p_format.is_null(), ERR_INVALID_PARAMETER);
 	ERR_FAIL_COND_V(p_view.is_null(), ERR_INVALID_PARAMETER);
 
@@ -153,14 +153,14 @@ Error ExternalTexture::_create(const Ref<RDTextureFormat> &p_format, const Ref<R
 	return create(RD::_get_base(p_format), RD::_get_base(p_view), data);
 }
 
-Error ExternalTexture::_import(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view) {
+Error TGExternalTexture::_import(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view) {
 	ERR_FAIL_COND_V(p_format.is_null(), ERR_INVALID_PARAMETER);
 	ERR_FAIL_COND_V(p_view.is_null(), ERR_INVALID_PARAMETER);
 
 	return import(RD::_get_base(p_format), RD::_get_base(p_view));
 }
 
-Error ExternalTexture::_copy(RID p_texture, bool p_from) {
+Error TGExternalTexture::_copy(RID p_texture, bool p_from) {
 	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_UNAVAILABLE, "ExternalTexture is not valid. Create or import first");
 	ERR_FAIL_COND_V_MSG(!p_texture.is_valid(), ERR_INVALID_PARAMETER, "Parameter texture is not valid");
 
@@ -178,18 +178,18 @@ Error ExternalTexture::_copy(RID p_texture, bool p_from) {
 	}
 }
 
-void ExternalTexture::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("create", "format", "view"), &ExternalTexture::_create, DEFVAL(Array()));
-	ClassDB::bind_method(D_METHOD("send_filehandle", "path"), &ExternalTexture::send_filehandle);
-	ClassDB::bind_method(D_METHOD("copy_to", "texture"), &ExternalTexture::copy_to);
-	ClassDB::bind_method(D_METHOD("copy_from", "texture"), &ExternalTexture::copy_from);
-	ClassDB::bind_method(D_METHOD("get_rid"), &ExternalTexture::get_rid);
+void TGExternalTexture::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("create", "format", "view"), &TGExternalTexture::_create, DEFVAL(Array()));
+    ClassDB::bind_method(D_METHOD("send_filehandle", "path"), &TGExternalTexture::send_filehandle);
+    ClassDB::bind_method(D_METHOD("copy_to", "texture"), &TGExternalTexture::copy_to);
+    ClassDB::bind_method(D_METHOD("copy_from", "texture"), &TGExternalTexture::copy_from);
+    ClassDB::bind_method(D_METHOD("get_rid"), &TGExternalTexture::get_rid);
 }
 
-ExternalTexture::ExternalTexture() {
+TGExternalTexture::TGExternalTexture() {
 }
 
-ExternalTexture::~ExternalTexture() {
+TGExternalTexture::~TGExternalTexture() {
 	if (rid.is_valid()) {
 		RD::get_singleton()->free(rid);
 		print_line("Texture freed " + itos(rid.get_id()));
