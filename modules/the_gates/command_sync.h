@@ -28,15 +28,14 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifndef COMMAND_SYNC_H
-#define COMMAND_SYNC_H
+#pragma once
 
 #include "command.h"
 #include "scene/main/node.h"
 #include "thirdparty/cppzmq/zmq.hpp"
 
 #ifdef WINDOWS_ENABLED
-static const String COMMAND_SYNC_ADDRESS("ipc://sandbox/command_sync");
+static const String COMMAND_SYNC_ADDRESS("ipc://renderer/command_sync");
 #else
 static const String COMMAND_SYNC_ADDRESS("ipc:///tmp/command_sync");
 #endif
@@ -85,5 +84,3 @@ public:
 	CommandSync(zmq::socket_type type = zmq::socket_type::pair, zmq::socket_type monitor_type = zmq::socket_type::pair);
 	~CommandSync();
 };
-
-#endif // COMMAND_SYNC_H

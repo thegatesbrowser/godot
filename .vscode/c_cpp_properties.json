@@ -8,7 +8,7 @@
             "defines": [
                 "X11_ENABLED",
                 "VULKAN_ENABLED",
-                "THE_GATES_SANDBOX"
+                "TG_RENDERER"
             ],
             "compilerPath": "/usr/bin/gcc",
             "intelliSenseMode": "gcc-x64",

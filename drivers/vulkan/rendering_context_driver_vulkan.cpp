@@ -453,7 +453,7 @@ Error RenderingContextDriverVulkan::_initialize_instance_extensions() {
 		_register_requested_instance_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false);
 	}
 
-	// Needed for exchanging framebuffers with sandbox process
+	// Needed for exchanging framebuffers with renderer process
 	_register_requested_instance_extension(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME, true);
 	_register_requested_instance_extension(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME, true);
 

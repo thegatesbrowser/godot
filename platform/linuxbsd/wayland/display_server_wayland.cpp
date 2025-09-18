@@ -379,7 +379,7 @@ void DisplayServerWayland::_mouse_update_mode() {
 
 	bool show_cursor = (wanted_mouse_mode == MOUSE_MODE_VISIBLE || wanted_mouse_mode == MOUSE_MODE_CONFINED);
 
-	NO_SANDBOX(wayland_thread.cursor_set_visible(show_cursor);)
+	NO_RENDERER(wayland_thread.cursor_set_visible(show_cursor);)
 
 	WaylandThread::PointerConstraint constraint = WaylandThread::PointerConstraint::NONE;
 
@@ -397,7 +397,7 @@ void DisplayServerWayland::_mouse_update_mode() {
 		}
 	}
 
-	NO_SANDBOX(wayland_thread.pointer_set_constraint(constraint);)
+	NO_RENDERER(wayland_thread.pointer_set_constraint(constraint);)
 
 	if (wanted_mouse_mode == DisplayServer::MOUSE_MODE_CAPTURED) {
 		WindowData *pointed_win = windows.getptr(wayland_thread.pointer_get_pointed_window_id());
@@ -1448,7 +1448,7 @@ void DisplayServerWayland::cursor_set_shape(CursorShape p_shape) {
 		return;
 	}
 
-	NO_SANDBOX(wayland_thread.cursor_set_shape(p_shape);)
+	NO_RENDERER(wayland_thread.cursor_set_shape(p_shape);)
 }
 
 DisplayServerWayland::CursorShape DisplayServerWayland::cursor_get_shape() const {
@@ -1468,7 +1468,7 @@ void DisplayServerWayland::cursor_set_custom_image(const Ref<Resource> &p_cursor
 		if (cursor_c) {
 			if (cursor_c->value.resource == p_cursor && cursor_c->value.hotspot == p_hotspot) {
 				// We have a cached cursor. Nice.
-				NO_SANDBOX(wayland_thread.cursor_set_shape(p_shape);)
+				NO_RENDERER(wayland_thread.cursor_set_shape(p_shape);)
 				return;
 			}
 
@@ -1487,13 +1487,13 @@ void DisplayServerWayland::cursor_set_custom_image(const Ref<Resource> &p_cursor
 
 		wayland_thread.cursor_shape_set_custom_image(p_shape, image, p_hotspot);
 
-		NO_SANDBOX(wayland_thread.cursor_set_shape(p_shape);)
+		NO_RENDERER(wayland_thread.cursor_set_shape(p_shape);)
 	} else {
 		// Clear cache and reset to default system cursor.
 		wayland_thread.cursor_shape_clear_custom_image(p_shape);
 
 		if (cursor_shape == p_shape) {
-			NO_SANDBOX(wayland_thread.cursor_set_shape(p_shape);)
+			NO_RENDERER(wayland_thread.cursor_set_shape(p_shape);)
 		}
 
 		if (custom_cursors.has(p_shape)) {

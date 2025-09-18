@@ -28,15 +28,14 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifndef INPUT_SYNC_H
-#define INPUT_SYNC_H
+#pragma once
 
 #include "core/input/input.h"
 #include "core/object/ref_counted.h"
 #include "thirdparty/cppzmq/zmq.hpp"
 
 #ifdef WINDOWS_ENABLED
-static const String INPUT_SYNC_ADDRESS("ipc://sandbox/input_sync");
+static const String INPUT_SYNC_ADDRESS("ipc://renderer/input_sync");
 #else
 static const String INPUT_SYNC_ADDRESS("ipc:///tmp/input_sync");
 #endif
@@ -61,5 +60,3 @@ public:
 	InputSync();
 	~InputSync();
 };
-
-#endif // INPUT_SYNC_H
