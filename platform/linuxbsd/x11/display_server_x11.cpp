@@ -499,7 +499,7 @@ void DisplayServerX11::_mouse_update_mode() {
 	}
 
 	if (mouse_mode == MOUSE_MODE_CAPTURED || mouse_mode == MOUSE_MODE_CONFINED || mouse_mode == MOUSE_MODE_CONFINED_HIDDEN) {
-		NO_SANDBOX(XUngrabPointer(x11_display, CurrentTime);)
+		NO_RENDERER(XUngrabPointer(x11_display, CurrentTime);)
 	}
 
 	// The only modes that show a cursor are VISIBLE and CONFINED
@@ -519,9 +519,9 @@ void DisplayServerX11::_mouse_update_mode() {
 
 	for (const KeyValue<WindowID, WindowData> &E : windows) {
 		if (show_cursor) {
-			NO_SANDBOX(XDefineCursor(x11_display, E.value.x11_window, cursors[current_cursor]);) // show cursor
+			NO_RENDERER(XDefineCursor(x11_display, E.value.x11_window, cursors[current_cursor]);) // show cursor
 		} else {
-			NO_SANDBOX(XDefineCursor(x11_display, E.value.x11_window, null_cursor);) // hide cursor
+			NO_RENDERER(XDefineCursor(x11_display, E.value.x11_window, null_cursor);) // hide cursor
 		}
 	}
 	mouse_mode = wanted_mouse_mode;
@@ -535,10 +535,10 @@ void DisplayServerX11::_mouse_update_mode() {
 		}
 		WindowData &window = windows[window_id];
 
-		NO_SANDBOX(if (XGrabPointer(
-							   x11_display, window.x11_window, True,
-							   ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-							   GrabModeAsync, GrabModeAsync, window.x11_window, None, CurrentTime) != GrabSuccess) {
+		NO_RENDERER(if (XGrabPointer(
+								x11_display, window.x11_window, True,
+								ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+								GrabModeAsync, GrabModeAsync, window.x11_window, None, CurrentTime) != GrabSuccess) {
 			ERR_PRINT("NO GRAB");
 		})
 
@@ -546,7 +546,7 @@ void DisplayServerX11::_mouse_update_mode() {
 			center.x = window.size.width / 2;
 			center.y = window.size.height / 2;
 
-			NO_SANDBOX(XWarpPointer(x11_display, None, window.x11_window,
+			NO_RENDERER(XWarpPointer(x11_display, None, window.x11_window,
 					0, 0, 0, 0, (int)center.x, (int)center.y);)
 
 			Input::get_singleton()->set_mouse_position(center);
@@ -607,7 +607,7 @@ void DisplayServerX11::warp_mouse(const Point2i &p_position) {
 			window_id = MAIN_WINDOW_ID;
 		}
 
-		NO_SANDBOX(XWarpPointer(x11_display, None, windows[window_id].x11_window,
+		NO_RENDERER(XWarpPointer(x11_display, None, windows[window_id].x11_window,
 				0, 0, 0, 0, (int)p_position.x, (int)p_position.y);)
 	}
 }
@@ -1910,7 +1910,7 @@ DisplayServer::WindowID DisplayServerX11::create_sub_window(WindowMode p_mode, V
 void DisplayServerX11::show_window(WindowID p_id) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("show_window: return. Sandbox mode");
 	return;
 #endif
@@ -3376,7 +3376,7 @@ bool DisplayServerX11::can_any_window_draw() const {
 void DisplayServerX11::window_set_ime_active(const bool p_active, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("window_set_ime_active: return. Sandbox mode");
 	return;
 #endif
@@ -3483,11 +3483,11 @@ void DisplayServerX11::cursor_set_shape(CursorShape p_shape) {
 	if (mouse_mode == MOUSE_MODE_VISIBLE || mouse_mode == MOUSE_MODE_CONFINED) {
 		if (cursors[p_shape] != None) {
 			for (const KeyValue<WindowID, WindowData> &E : windows) {
-				NO_SANDBOX(XDefineCursor(x11_display, E.value.x11_window, cursors[p_shape]);)
+				NO_RENDERER(XDefineCursor(x11_display, E.value.x11_window, cursors[p_shape]);)
 			}
 		} else if (cursors[CURSOR_ARROW] != None) {
 			for (const KeyValue<WindowID, WindowData> &E : windows) {
-				NO_SANDBOX(XDefineCursor(x11_display, E.value.x11_window, cursors[CURSOR_ARROW]);)
+				NO_RENDERER(XDefineCursor(x11_display, E.value.x11_window, cursors[CURSOR_ARROW]);)
 			}
 		}
 	}
@@ -5191,7 +5191,7 @@ void DisplayServerX11::process_events() {
 							XUndefineCursor(x11_display, E.value.x11_window);
 						}
 					}
-					NO_SANDBOX(XUngrabPointer(x11_display, CurrentTime);)
+					NO_RENDERER(XUngrabPointer(x11_display, CurrentTime);)
 				}
 #ifdef TOUCH_ENABLED
 				// Ungrab touch devices so input works as usual while we are unfocused
@@ -5620,7 +5620,7 @@ void DisplayServerX11::process_events() {
 	XFlush(x11_display);
 
 	if (do_mouse_warp) {
-		NO_SANDBOX(XWarpPointer(x11_display, None, windows[MAIN_WINDOW_ID].x11_window,
+		NO_RENDERER(XWarpPointer(x11_display, None, windows[MAIN_WINDOW_ID].x11_window,
 				0, 0, 0, 0, (int)windows[MAIN_WINDOW_ID].size.width / 2, (int)windows[MAIN_WINDOW_ID].size.height / 2);)
 
 		/*

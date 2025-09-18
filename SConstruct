@@ -185,7 +185,7 @@ opts.Add(
 )
 opts.Add(BoolVariable("production", "Set defaults to build Godot for use in production", False))
 opts.Add(BoolVariable("threads", "Enable threading support", True))
-opts.Add(BoolVariable("the_gates_sandbox", "TheGates sandbox build", False))
+opts.Add(BoolVariable("tg_renderer", "TheGates renderer build", False))
 
 # Components
 opts.Add(BoolVariable("deprecated", "Enable compatibility code for deprecated and removed features", True))
@@ -494,7 +494,7 @@ env.platform_apis = platform_apis
 env.editor_build = env["target"] == "editor"
 env.dev_build = env["dev_build"]
 env.debug_features = env["target"] in ["editor", "template_debug"]
-env.the_gates_sandbox = env["the_gates_sandbox"]
+env.tg_renderer = env["tg_renderer"]
 
 if env["optimize"] == "auto":
     if env.dev_build:
@@ -523,9 +523,9 @@ else:
     # Disable assert() for production targets (only used in thirdparty code).
     env.Append(CPPDEFINES=["NDEBUG"])
 
-if env.the_gates_sandbox:
-    # Run in TheGates sandbox mode
-    env.Append(CPPDEFINES=["THE_GATES_SANDBOX"])
+if env.tg_renderer:
+    # Run in TheGates renderer mode
+    env.Append(CPPDEFINES=["TG_RENDERER"])
 
 # This is not part of fast_unsafe because the only downside it has compared to
 # the default is that SCons won't mark files that were changed in the last second
@@ -663,8 +663,8 @@ print(f'Building for platform "{platform_string}", architecture "{env["arch"]}",
 if env.dev_build:
     print_info("Developer build, with debug optimization level and debug symbols (unless overridden).")
 
-if env.the_gates_sandbox:
-    print("NOTE: TheGates sandbox build.")
+if env.tg_renderer:
+    print("NOTE: TheGates renderer build.")
 
 # Enforce our minimal compiler version requirements
 cc_version = methods.get_compiler_version(env)
@@ -996,8 +996,8 @@ suffix += "." + env["target"]
 if env.dev_build:
     suffix += ".dev"
 
-if env.the_gates_sandbox:
-    suffix += ".sandbox"
+if env.tg_renderer:
+    suffix += ".renderer"
 
 if env["precision"] == "double":
     suffix += ".double"

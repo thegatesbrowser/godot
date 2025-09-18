@@ -147,7 +147,7 @@
 #endif // TOOLS_ENABLED && !GDSCRIPT_NO_LSP
 #endif // MODULE_GDSCRIPT_ENABLED
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 #include "modules/the_gates/command_sync.h"
 #include "modules/the_gates/external_texture.h"
 #include "modules/the_gates/input_sync.h"
@@ -293,7 +293,7 @@ static String validate_extension_api_file;
 bool profile_gpu = false;
 
 // TheGates
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 static TGExternalTexture *ext_texture = nullptr;
 static CommandSync *command_sync = nullptr;
 static InputSync *input_sync = nullptr;
@@ -3232,7 +3232,7 @@ Error Main::setup2(bool p_show_boot_logo) {
 
 		// rendering_driver now held in static global String in main and initialized in setup()
 		Error err;
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 		window_flags = DisplayServer::WINDOW_FLAG_BORDERLESS_BIT;
 		window_mode = DisplayServer::WindowMode::WINDOW_MODE_WINDOWED;
 		print_line("window_size " + String(window_size));
@@ -4315,7 +4315,7 @@ int Main::start() {
 
 		bool embed_subwindows = GLOBAL_GET("display/window/subwindows/embed_subwindows");
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 		embed_subwindows = true;
 #endif
 
@@ -4678,7 +4678,7 @@ int Main::start() {
 	OS::get_singleton()->benchmark_end_measure("Startup", "Main::Start");
 	OS::get_singleton()->benchmark_dump();
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	Error err;
 
 	// CommandSync
@@ -4962,7 +4962,7 @@ bool Main::iteration() {
 		frames = 0;
 	}
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	if (!first_frame_sent && Engine::get_singleton()->frames_drawn > 2) {
 		// Send first frame drawn
 		command_sync->send_command("first_frame", Array());
@@ -4991,7 +4991,7 @@ bool Main::iteration() {
 		exit = true;
 #endif
 	}
-#endif // THE_GATES_SANDBOX
+#endif // TG_RENDERER
 
 	iterating--;
 

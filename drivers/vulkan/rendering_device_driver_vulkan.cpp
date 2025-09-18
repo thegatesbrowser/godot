@@ -549,7 +549,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 #endif
 	_register_requested_device_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, false);
 
-	// For exchanging framebuffers with sandbox process
+	// For exchanging framebuffers with renderer process
 #ifdef LINUXBSD_ENABLED
 	_register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, true);
 	_register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME, true);

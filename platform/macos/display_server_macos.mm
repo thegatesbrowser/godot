@@ -1320,35 +1320,35 @@ void DisplayServerMacOS::_mouse_update_mode() {
 		// "This parameter is not used. By default, you may pass kCGDirectMainDisplay."
 		// https://developer.apple.com/library/mac/documentation/graphicsimaging/reference/Quartz_Services_Ref/Reference/reference.html
 		if (previously_shown) {
-			NO_SANDBOX(CGDisplayHideCursor(kCGDirectMainDisplay);)
+			NO_RENDERER(CGDisplayHideCursor(kCGDirectMainDisplay);)
 		}
-		NO_SANDBOX(CGAssociateMouseAndMouseCursorPosition(false);)
+		NO_RENDERER(CGAssociateMouseAndMouseCursorPosition(false);)
 		[wd.window_object setMovable:NO];
 		const NSRect contentRect = [wd.window_view frame];
 		NSRect pointInWindowRect = NSMakeRect(contentRect.size.width / 2, contentRect.size.height / 2, 0, 0);
 		NSPoint pointOnScreen = [[wd.window_view window] convertRectToScreen:pointInWindowRect].origin;
 		CGPoint lMouseWarpPos = { pointOnScreen.x, CGDisplayBounds(CGMainDisplayID()).size.height - pointOnScreen.y };
-		NO_SANDBOX(CGWarpMouseCursorPosition(lMouseWarpPos);)
+		NO_RENDERER(CGWarpMouseCursorPosition(lMouseWarpPos);)
 	} else if (wanted_mouse_mode == MOUSE_MODE_HIDDEN) {
 		if (previously_shown) {
-			NO_SANDBOX(CGDisplayHideCursor(kCGDirectMainDisplay);)
+			NO_RENDERER(CGDisplayHideCursor(kCGDirectMainDisplay);)
 		}
 		[wd.window_object setMovable:YES];
-		NO_SANDBOX(CGAssociateMouseAndMouseCursorPosition(true);)
+		NO_RENDERER(CGAssociateMouseAndMouseCursorPosition(true);)
 	} else if (wanted_mouse_mode == MOUSE_MODE_CONFINED) {
-		NO_SANDBOX(CGDisplayShowCursor(kCGDirectMainDisplay);)
+		NO_RENDERER(CGDisplayShowCursor(kCGDirectMainDisplay);)
 		[wd.window_object setMovable:NO];
-		NO_SANDBOX(CGAssociateMouseAndMouseCursorPosition(false);)
+		NO_RENDERER(CGAssociateMouseAndMouseCursorPosition(false);)
 	} else if (wanted_mouse_mode == MOUSE_MODE_CONFINED_HIDDEN) {
 		if (previously_shown) {
-			NO_SANDBOX(CGDisplayHideCursor(kCGDirectMainDisplay);)
+			NO_RENDERER(CGDisplayHideCursor(kCGDirectMainDisplay);)
 		}
 		[wd.window_object setMovable:NO];
-		NO_SANDBOX(CGAssociateMouseAndMouseCursorPosition(false);)
+		NO_RENDERER(CGAssociateMouseAndMouseCursorPosition(false);)
 	} else { // MOUSE_MODE_VISIBLE
-		NO_SANDBOX(CGDisplayShowCursor(kCGDirectMainDisplay);)
+		NO_RENDERER(CGDisplayShowCursor(kCGDirectMainDisplay);)
 		[wd.window_object setMovable:YES];
-		NO_SANDBOX(CGAssociateMouseAndMouseCursorPosition(true);)
+		NO_RENDERER(CGAssociateMouseAndMouseCursorPosition(true);)
 	}
 
 	last_warp = [[NSProcessInfo processInfo] systemUptime];
@@ -1857,7 +1857,7 @@ DisplayServer::WindowID DisplayServerMacOS::create_sub_window(WindowMode p_mode,
 }
 
 void DisplayServerMacOS::show_window(WindowID p_id) {
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("show_window: return. Sandbox mode");
 	return;
 #endif
@@ -2334,7 +2334,7 @@ Size2i DisplayServerMacOS::window_get_size_with_decorations(WindowID p_window) c
 void DisplayServerMacOS::window_set_mode(WindowMode p_mode, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("window_set_mode: return. Sandbox mode");
 	return;
 #endif
@@ -2578,7 +2578,7 @@ void DisplayServerMacOS::window_set_custom_window_buttons(WindowData &p_wd, bool
 void DisplayServerMacOS::window_set_flag(WindowFlags p_flag, bool p_enabled, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("window_set_mode: return. Sandbox mode");
 	return;
 #endif

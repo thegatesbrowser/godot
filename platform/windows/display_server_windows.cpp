@@ -194,13 +194,13 @@ void DisplayServerWindows::_set_mouse_mode_impl(MouseMode p_mode) {
 		clipRect.right -= off_x;
 		ClientToScreen(wd.hWnd, (POINT *)&clipRect.left);
 		ClientToScreen(wd.hWnd, (POINT *)&clipRect.right);
-		NO_SANDBOX(ClipCursor(&clipRect);)
+		NO_RENDERER(ClipCursor(&clipRect);)
 		if (p_mode == MOUSE_MODE_CAPTURED) {
 			center = window_get_size() / 2;
 			POINT pos = { (int)center.x, (int)center.y };
 			ClientToScreen(wd.hWnd, &pos);
-			NO_SANDBOX(SetCursorPos(pos.x, pos.y);)
-			NO_SANDBOX(SetCapture(wd.hWnd);)
+			NO_RENDERER(SetCursorPos(pos.x, pos.y);)
+			NO_RENDERER(SetCapture(wd.hWnd);)
 
 			_register_raw_input_devices(window_id);
 		}
@@ -210,9 +210,9 @@ void DisplayServerWindows::_set_mouse_mode_impl(MouseMode p_mode) {
 		// the window movement to stop and if the user tries to move the Windows when it's not activated,
 		// it will prevent the window movement. It's probably impossible to move the Window while it's captured anyway.
 		if (!_has_moving_window()) {
-			NO_SANDBOX(ReleaseCapture();)
+			NO_RENDERER(ReleaseCapture();)
 		}
-		NO_SANDBOX(ClipCursor(nullptr);)
+		NO_RENDERER(ClipCursor(nullptr);)
 
 		_register_raw_input_devices(INVALID_WINDOW_ID);
 	}
@@ -917,7 +917,7 @@ void DisplayServerWindows::warp_mouse(const Point2i &p_position) {
 		p.y = p_position.y;
 		ClientToScreen(windows[window_id].hWnd, &p);
 
-		NO_SANDBOX(SetCursorPos(p.x, p.y);)
+		NO_RENDERER(SetCursorPos(p.x, p.y);)
 	}
 }
 
@@ -1696,7 +1696,7 @@ bool DisplayServerWindows::_is_always_on_top_recursive(WindowID p_window) const 
 }
 
 void DisplayServerWindows::show_window(WindowID p_id) {
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("show_window: return. Sandbox mode");
 	return;
 #endif
@@ -2424,7 +2424,7 @@ void DisplayServerWindows::_update_window_style(WindowID p_window, bool p_repain
 void DisplayServerWindows::window_set_mode(WindowMode p_mode, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("window_set_mode: return. Sandbox mode");
 	return;
 #endif
@@ -2608,7 +2608,7 @@ bool DisplayServerWindows::window_is_maximize_allowed(WindowID p_window) const {
 void DisplayServerWindows::window_set_flag(WindowFlags p_flag, bool p_enabled, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("window_set_flag: return. Sandbox mode");
 	return;
 #endif
@@ -2984,9 +2984,9 @@ void DisplayServerWindows::cursor_set_shape(CursorShape p_shape) {
 	};
 
 	if (cursors_cache.has(p_shape)) {
-		NO_SANDBOX(SetCursor(cursors[p_shape]);)
+		NO_RENDERER(SetCursor(cursors[p_shape]);)
 	} else {
-		NO_SANDBOX(SetCursor(LoadCursor(hInstance, win_cursors[p_shape]));)
+		NO_RENDERER(SetCursor(LoadCursor(hInstance, win_cursors[p_shape]));)
 	}
 
 	cursor_shape = p_shape;
@@ -3074,7 +3074,7 @@ void DisplayServerWindows::cursor_set_custom_image(const Ref<Resource> &p_cursor
 
 		if (p_shape == cursor_shape) {
 			if (mouse_mode == MOUSE_MODE_VISIBLE || mouse_mode == MOUSE_MODE_CONFINED) {
-				NO_SANDBOX(SetCursor(cursors[p_shape]);)
+				NO_RENDERER(SetCursor(cursors[p_shape]);)
 			}
 		}
 
@@ -5004,7 +5004,7 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 				// Centering just so it works as before.
 				POINT pos = { (int)c.x, (int)c.y };
 				ClientToScreen(windows[window_id].hWnd, &pos);
-				NO_SANDBOX(SetCursorPos(pos.x, pos.y);)
+				NO_RENDERER(SetCursorPos(pos.x, pos.y);)
 
 				mm->set_position(c);
 				mm->set_global_position(c);
@@ -5120,7 +5120,7 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 						center = ncenter;
 						POINT pos = { (int)c.x, (int)c.y };
 						ClientToScreen(windows[window_id].hWnd, &pos);
-						NO_SANDBOX(SetCursorPos(pos.x, pos.y);)
+						NO_RENDERER(SetCursorPos(pos.x, pos.y);)
 					}
 
 					mm->set_velocity(Input::get_singleton()->get_last_mouse_velocity());
@@ -5403,7 +5403,7 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 				center = ncenter;
 				POINT pos = { (int)c.x, (int)c.y };
 				ClientToScreen(hWnd, &pos);
-				NO_SANDBOX(SetCursorPos(pos.x, pos.y);)
+				NO_RENDERER(SetCursorPos(pos.x, pos.y);)
 			}
 
 			mm->set_velocity(Input::get_singleton()->get_last_mouse_velocity());
@@ -5530,7 +5530,7 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 				center = ncenter;
 				POINT pos = { (int)c.x, (int)c.y };
 				ClientToScreen(windows[window_id].hWnd, &pos);
-				NO_SANDBOX(SetCursorPos(pos.x, pos.y);)
+				NO_RENDERER(SetCursorPos(pos.x, pos.y);)
 			}
 
 			mm->set_velocity(Input::get_singleton()->get_last_mouse_velocity());
@@ -5704,12 +5704,12 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			if (uMsg != WM_MOUSEWHEEL && uMsg != WM_MOUSEHWHEEL) {
 				if (mb->is_pressed()) {
 					if (++pressrc > 0 && mouse_mode != MOUSE_MODE_CAPTURED) {
-						NO_SANDBOX(SetCapture(hWnd);)
+						NO_RENDERER(SetCapture(hWnd);)
 					}
 				} else {
 					if (--pressrc <= 0 || mouse_get_button_state().is_empty()) {
 						if (mouse_mode != MOUSE_MODE_CAPTURED) {
-							NO_SANDBOX(ReleaseCapture();)
+							NO_RENDERER(ReleaseCapture();)
 						}
 						pressrc = 0;
 					}
@@ -5849,7 +5849,7 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 					crect.right -= off_x;
 					ClientToScreen(window.hWnd, (POINT *)&crect.left);
 					ClientToScreen(window.hWnd, (POINT *)&crect.right);
-					NO_SANDBOX(ClipCursor(&crect);)
+					NO_RENDERER(ClipCursor(&crect);)
 				}
 
 				if (!window.minimized && window.was_fullscreen_pre_min) {
@@ -6049,9 +6049,9 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 				if (windows[window_id].window_focused && (mouse_mode == MOUSE_MODE_HIDDEN || mouse_mode == MOUSE_MODE_CAPTURED || mouse_mode == MOUSE_MODE_CONFINED_HIDDEN)) {
 					// Hide the cursor.
 					if (hCursor == nullptr) {
-						NO_SANDBOX(hCursor = SetCursor(nullptr);)
+						NO_RENDERER(hCursor = SetCursor(nullptr);)
 					} else {
-						NO_SANDBOX(SetCursor(nullptr);)
+						NO_RENDERER(SetCursor(nullptr);)
 					}
 				} else {
 					if (hCursor != nullptr) {
@@ -6106,7 +6106,7 @@ void DisplayServerWindows::_process_activate_event(WindowID p_window_id) {
 		// it will prevent the window movement. If we are here and a window is moving, it's because we had multiple
 		// opened windows in the editor and we are definitively not in a middle of dragging.
 		if (!_has_moving_window()) {
-			NO_SANDBOX(ReleaseCapture();)
+			NO_RENDERER(ReleaseCapture();)
 		}
 		wd.window_focused = false;
 #ifdef ACCESSKIT_ENABLED
@@ -6401,7 +6401,7 @@ DisplayServer::WindowID DisplayServerWindows::_create_window(WindowMode p_mode, 
 
 		WindowData &wd = windows[id];
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 		dwStyle = dwStyle & ~WS_VISIBLE; // Exclude visible flag
 		print_verbose("CreateWindowExW(..., NOT WS_VISIBLE, ...) Sandbox mode");
 #endif

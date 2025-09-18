@@ -1152,7 +1152,7 @@ OS_MacOS_NSApp::OS_MacOS_NSApp(const char *p_execpath, int p_argc, char **p_argv
 	// Implicitly create shared NSApplication instance.
 	[GodotApplication sharedApplication];
 
-#ifndef THE_GATES_SANDBOX
+#ifndef TG_RENDERER
 	// In case we are unbundled, make us a proper UI application.
 	[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 #endif
