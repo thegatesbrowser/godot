@@ -1911,7 +1911,7 @@ void DisplayServerX11::show_window(WindowID p_id) {
 	_THREAD_SAFE_METHOD_
 
 #ifdef TG_RENDERER
-	print_verbose("show_window: return. Sandbox mode");
+	print_verbose("show_window: return. Renderer mode");
 	return;
 #endif
 
@@ -3377,7 +3377,7 @@ void DisplayServerX11::window_set_ime_active(const bool p_active, WindowID p_win
 	_THREAD_SAFE_METHOD_
 
 #ifdef TG_RENDERER
-	print_verbose("window_set_ime_active: return. Sandbox mode");
+	print_verbose("window_set_ime_active: return. Renderer mode");
 	return;
 #endif
 

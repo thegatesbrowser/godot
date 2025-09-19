@@ -1697,7 +1697,7 @@ bool DisplayServerWindows::_is_always_on_top_recursive(WindowID p_window) const 
 
 void DisplayServerWindows::show_window(WindowID p_id) {
 #ifdef TG_RENDERER
-	print_verbose("show_window: return. Sandbox mode");
+	print_verbose("show_window: return. Renderer mode");
 	return;
 #endif
 
@@ -2425,7 +2425,7 @@ void DisplayServerWindows::window_set_mode(WindowMode p_mode, WindowID p_window)
 	_THREAD_SAFE_METHOD_
 
 #ifdef TG_RENDERER
-	print_verbose("window_set_mode: return. Sandbox mode");
+	print_verbose("window_set_mode: return. Renderer mode");
 	return;
 #endif
 
@@ -2609,7 +2609,7 @@ void DisplayServerWindows::window_set_flag(WindowFlags p_flag, bool p_enabled, W
 	_THREAD_SAFE_METHOD_
 
 #ifdef TG_RENDERER
-	print_verbose("window_set_flag: return. Sandbox mode");
+	print_verbose("window_set_flag: return. Renderer mode");
 	return;
 #endif
 
@@ -6403,7 +6403,7 @@ DisplayServer::WindowID DisplayServerWindows::_create_window(WindowMode p_mode, 
 
 #ifdef TG_RENDERER
 		dwStyle = dwStyle & ~WS_VISIBLE; // Exclude visible flag
-		print_verbose("CreateWindowExW(..., NOT WS_VISIBLE, ...) Sandbox mode");
+		print_verbose("CreateWindowExW(..., NOT WS_VISIBLE, ...) Renderer mode");
 #endif
 
 		wd.id = id;

@@ -171,7 +171,7 @@ GodotApplication *GodotApp = nil;
 
 - (void)forceUnbundledWindowActivationHackStep1 {
 #ifdef TG_RENDERER
-	print_verbose("forceUnbundledWindowActivationHackStep1: return. Sandbox mode");
+	print_verbose("forceUnbundledWindowActivationHackStep1: return. Renderer mode");
 	return;
 #endif
 

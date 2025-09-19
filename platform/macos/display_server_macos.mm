@@ -1858,7 +1858,7 @@ DisplayServer::WindowID DisplayServerMacOS::create_sub_window(WindowMode p_mode,
 
 void DisplayServerMacOS::show_window(WindowID p_id) {
 #ifdef TG_RENDERER
-	print_verbose("show_window: return. Sandbox mode");
+	print_verbose("show_window: return. Renderer mode");
 	return;
 #endif
 
@@ -2335,7 +2335,7 @@ void DisplayServerMacOS::window_set_mode(WindowMode p_mode, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
 #ifdef TG_RENDERER
-	print_verbose("window_set_mode: return. Sandbox mode");
+	print_verbose("window_set_mode: return. Renderer mode");
 	return;
 #endif
 
@@ -2579,7 +2579,7 @@ void DisplayServerMacOS::window_set_flag(WindowFlags p_flag, bool p_enabled, Win
 	_THREAD_SAFE_METHOD_
 
 #ifdef TG_RENDERER
-	print_verbose("window_set_mode: return. Sandbox mode");
+	print_verbose("window_set_mode: return. Renderer mode");
 	return;
 #endif
 
