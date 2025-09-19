@@ -36,7 +36,7 @@
 #include "thirdparty/cppzmq/zmq.hpp"
 
 #ifdef WINDOWS_ENABLED
-static const String INPUT_SYNC_ADDRESS("ipc://sandbox/input_sync");
+static const String INPUT_SYNC_ADDRESS("ipc://renderer/input_sync");
 #else
 static const String INPUT_SYNC_ADDRESS("ipc:///tmp/input_sync");
 #endif

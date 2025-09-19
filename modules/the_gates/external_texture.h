@@ -6,7 +6,7 @@
 #include "servers/rendering/rendering_device_binds.h"
 
 #ifdef WINDOWS_ENABLED
-static const String FILEHANDLE_PATH("ipc://sandbox/external_texture");
+static const String FILEHANDLE_PATH("ipc://renderer/external_texture");
 #elif MACOS_ENABLED
 static const String FILEHANDLE_PATH("ipc:///tmp/external_texture");
 #else

@@ -36,7 +36,7 @@
 #include "thirdparty/cppzmq/zmq.hpp"
 
 #ifdef WINDOWS_ENABLED
-static const String COMMAND_SYNC_ADDRESS("ipc://sandbox/command_sync");
+static const String COMMAND_SYNC_ADDRESS("ipc://renderer/command_sync");
 #else
 static const String COMMAND_SYNC_ADDRESS("ipc:///tmp/command_sync");
 #endif
