@@ -36,6 +36,22 @@ def get_cpu_count():
         return "4"  # fallback
 
 
+def get_godot_version(project_root: Path) -> str:
+    """Read Godot version from version.py and return '<major>.<minor>'"""
+    version_file = project_root / "version.py"
+    try:
+        namespace = {}
+        with open(version_file, "r") as f:
+            code = f.read()
+        exec(code, namespace)
+        major = namespace.get("major")
+        minor = namespace.get("minor")
+        return f"{major}.{minor}"
+    except Exception as e:
+        print(f"Error reading version.py: {e}")
+        sys.exit(1)
+
+
 def parse_tasks_json(project_root):
     """Parse tasks.json and extract build tasks excluding 'build' and 'build renderer'"""
     tasks_file = project_root / ".vscode" / "tasks.json"
@@ -220,6 +236,8 @@ def main():
     working_template_frameworks.mkdir(parents=True, exist_ok=True)
 
     # Copy universal binaries with appropriate names
+    version_str = get_godot_version(project_root)
+    renderer_bin_name = f"Renderer-godot_v{version_str}.universal"
     universal_binaries = [
         {
             "source": bin_dir / "godot.macos.template_release.universal",
@@ -228,8 +246,8 @@ def main():
         },
         {
             "source": bin_dir / "godot.macos.template_release.renderer.universal",
-            "dest": working_template_frameworks / "Sandbox.universal",
-            "description": "Sandbox.universal",
+            "dest": working_template_frameworks / renderer_bin_name,
+            "description": renderer_bin_name,
         },
     ]
 
@@ -294,6 +312,9 @@ def main():
     for binary in binaries:
         if binary["universal"].exists():
             print(f"  - {binary['universal']}")
+
+    renderer_full_path = final_app_template / "Contents" / "Frameworks" / renderer_bin_name
+    print(f"Renderer binary: {renderer_full_path}")
 
     print(f"App template available at: {final_app_template}")
     print(f"macOS template archive: {zip_path}")
