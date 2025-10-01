@@ -1448,6 +1448,12 @@ Ref<InputEvent> Viewport::_make_input_local(const Ref<InputEvent> &ev) {
 
 Vector2 Viewport::get_mouse_position() const {
 	ERR_READ_THREAD_GUARD_V(Vector2());
+#ifdef TG_RENDERER
+	// Mouse position is offset by 50 pixels by some reason. And it gives wrong position when app is in another screen.
+	// So we need to use the most recent mouse coordinate from an InputEventMouse in push_input.
+	return gui.last_mouse_pos;
+#endif
+
 	if (get_section_root_viewport() != SceneTree::get_singleton()->get_root()) {
 		// Rely on the most recent mouse coordinate from an InputEventMouse in push_input.
 		// In this case get_screen_transform is not applicable, because it is ambiguous.
