@@ -1343,6 +1343,12 @@ Ref<InputEvent> Viewport::_make_input_local(const Ref<InputEvent> &ev) {
 
 Vector2 Viewport::get_mouse_position() const {
 	ERR_READ_THREAD_GUARD_V(Vector2());
+#ifdef THE_GATES_SANDBOX
+	// Mouse position is offset by 50 pixels by some reason. And it gives wrong position when app is in another screen.
+	// So we need to use the most recent mouse coordinate from an InputEventMouse in push_input.
+	return gui.last_mouse_pos;
+#endif
+
 	if (!is_directly_attached_to_screen()) {
 		// Rely on the most recent mouse coordinate from an InputEventMouse in push_input.
 		// In this case get_screen_transform is not applicable, because it is ambiguous.
