@@ -1,28 +1,57 @@
+/**************************************************************************/
+/*  external_texture.cpp                                                  */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
 #include "external_texture.h"
+#include "tg_pipe_ipc.h"
 
 #ifdef WINDOWS_ENABLED
 #include "Windows.h"
-#include "zmq_context.h"
-#include "thirdparty/cppzmq/zmq.hpp"
 #endif
 
 #if MACOS_ENABLED
 #include <IOSurface/IOSurface.h>
-#include "zmq_context.h"
-#include "thirdparty/cppzmq/zmq.hpp"
 #endif
 
 #if LINUXBSD_ENABLED
 #include "flingfd.h"
 #endif
 
-bool ExternalTexture::send_filehandle(const String &p_path) {
+#include "core/os/os.h"
+
+bool TGExternalTexture::send_filehandle(const String &p_path) {
 	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, false, "Sending invalid filehandle. First create external texture");
 
 #ifdef WINDOWS_ENABLED
 	// Duplicate handle
 	PackedStringArray split = p_path.split("|");
-	ERR_FAIL_COND_V_MSG(split.size() != 2, false, "Invalid path. Should be 'ipc://path|targetProcessId'");
+	ERR_FAIL_COND_V_MSG(split.size() != 2, false, "Invalid path. Should be 'pipe://path|targetProcessId'");
 	int targetProcessId = split[1].to_int();
 
 	HANDLE hTargetProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, targetProcessId);
@@ -32,17 +61,20 @@ bool ExternalTexture::send_filehandle(const String &p_path) {
 	bool success = DuplicateHandle(GetCurrentProcess(), (HANDLE)filehandle, hTargetProcess, &hDuplicateHandle, 0, FALSE, DUPLICATE_SAME_ACCESS);
 	ERR_FAIL_COND_V_MSG(!success, false, "Unable to DuplicateHandle. Error code: " + itos(GetLastError()));
 
-	// Send handle
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
-	sock.connect(split[0].utf8().get_data());
-
+	// Send handle.
 	filehandle = (FileHandle)hDuplicateHandle;
-	zmq::message_t msg;
 	int64_t data = reinterpret_cast<int64_t>(filehandle);
-	msg.rebuild(sizeof(int64_t));
-	memcpy(msg.data(), &data, sizeof(int64_t));
-	success = sock.send(msg, zmq::send_flags::none).has_value();
-	sock.close();
+	Vector<uint8_t> payload;
+	payload.resize(sizeof(int64_t));
+	memcpy(payload.ptrw(), &data, sizeof(int64_t));
+
+	TgPipeIpc pipe;
+	success = pipe.connect(split[0]);
+	if (success) {
+		pipe.queue_message(payload);
+		success = pipe.poll();
+	}
+	pipe.close();
 
 	// Clean up
 	CloseHandle(hTargetProcess);
@@ -54,15 +86,18 @@ bool ExternalTexture::send_filehandle(const String &p_path) {
 #elif MACOS_ENABLED
 	uint32_t surfaceID = IOSurfaceGetID(filehandle);
 
-	// Send IOSurfaceID
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
-	sock.connect(p_path.utf8().get_data());
+	// Send IOSurfaceID.
+	Vector<uint8_t> payload;
+	payload.resize(sizeof(uint32_t));
+	memcpy(payload.ptrw(), &surfaceID, sizeof(uint32_t));
 
-	zmq::message_t msg;
-	msg.rebuild(sizeof(uint32_t));
-	memcpy(msg.data(), &surfaceID, sizeof(uint32_t));
-	bool success = sock.send(msg, zmq::send_flags::none).has_value();
-	sock.close();
+	TgPipeIpc pipe;
+	bool success = pipe.connect(p_path);
+	if (success) {
+		pipe.queue_message(payload);
+		success = pipe.poll();
+	}
+	pipe.close();
 
 	return success;
 #else
@@ -70,52 +105,64 @@ bool ExternalTexture::send_filehandle(const String &p_path) {
 #endif
 }
 
-bool ExternalTexture::recv_filehandle(const String &p_path) {
+bool TGExternalTexture::recv_filehandle(const String &p_path) {
 #ifdef WINDOWS_ENABLED
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
-	sock.bind(p_path.utf8().get_data());
-
-	zmq::message_t msg;
-	if (!sock.recv(msg)) { // WARNING: BLOCKING COMMAND
+	TgPipeIpc pipe;
+	if (!pipe.bind(p_path)) {
 		return false;
+	}
+
+	Vector<uint8_t> msg;
+	while (!pipe.pop_message(msg)) { // WARNING: BLOCKING COMMAND
+		if (!pipe.poll()) {
+			return false;
+		}
+		OS::get_singleton()->delay_usec(1000);
 	}
 	int64_t data;
-	memcpy(&data, msg.data(), sizeof(int64_t));
-	sock.close();
+	ERR_FAIL_COND_V(msg.size() != (int)sizeof(int64_t), false);
+	memcpy(&data, msg.ptr(), sizeof(int64_t));
+	pipe.close();
 
-	filehandle = reinterpret_cast<void*>(data);
+	filehandle = reinterpret_cast<void *>(data);
 #elif MACOS_ENABLED
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
-	sock.bind(p_path.utf8().get_data());
-
-	zmq::message_t msg;
-	if (!sock.recv(msg)) { // WARNING: BLOCKING COMMAND
+	TgPipeIpc pipe;
+	if (!pipe.bind(p_path)) {
 		return false;
 	}
+
+	Vector<uint8_t> msg;
+	while (!pipe.pop_message(msg)) { // WARNING: BLOCKING COMMAND
+		if (!pipe.poll()) {
+			return false;
+		}
+		OS::get_singleton()->delay_usec(1000);
+	}
 	uint32_t surfaceID;
-	memcpy(&surfaceID, msg.data(), sizeof(uint32_t));
-	sock.close();
+	ERR_FAIL_COND_V(msg.size() != (int)sizeof(uint32_t), false);
+	memcpy(&surfaceID, msg.ptr(), sizeof(uint32_t));
+	pipe.close();
 
 	filehandle = IOSurfaceLookup(surfaceID);
 #else
 	filehandle = flingfd_simple_recv(p_path.utf8().get_data()); // WARNING: BLOCKING COMMAND
 #endif
-	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, false, "Recieve filehandle failed");
+	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, false, "Receive filehandle failed");
 
 	return true;
 }
 
-Error ExternalTexture::create(const RD::TextureFormat &p_format, const RD::TextureView &p_view, const Vector<Vector<uint8_t>> &p_data) {
+Error TGExternalTexture::create(const RD::TextureFormat &p_format, const RD::TextureView &p_view, const Vector<Vector<uint8_t>> &p_data) {
 	view = p_view;
 	format = p_format;
 	rid = RD::get_singleton()->external_texture_create(p_format, p_view, &filehandle, p_data);
 	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_CANT_CREATE, "Unable to create external texture");
 	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, ERR_CANT_CREATE, "Unable to export filehandle");
 
-    return OK;
+	return OK;
 }
 
-Error ExternalTexture::import(const RD::TextureFormat &p_format, const RD::TextureView &p_view) {
+Error TGExternalTexture::import(const RD::TextureFormat &p_format, const RD::TextureView &p_view) {
 	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, ERR_UNAVAILABLE, "filehandle is no valid. Receive filehandle first");
 
 	view = p_view;
@@ -123,10 +170,10 @@ Error ExternalTexture::import(const RD::TextureFormat &p_format, const RD::Textu
 	rid = RD::get_singleton()->external_texture_import(format, view, filehandle);
 	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_CANT_CREATE, "Unable to import external texture from filehandle");
 
-    return OK;
+	return OK;
 }
 
-Error ExternalTexture::copy_from_screen() {
+Error TGExternalTexture::copy_from_screen() {
 	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_UNAVAILABLE, "ExternalTexture is not valid. Create or import first");
 
 	Vector3 size = {
@@ -139,7 +186,7 @@ Error ExternalTexture::copy_from_screen() {
 	return RD::get_singleton()->screen_copy(rid, zero, size, 0, 0);
 }
 
-Error ExternalTexture::_create(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data) {
+Error TGExternalTexture::_create(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data) {
 	ERR_FAIL_COND_V(p_format.is_null(), ERR_INVALID_PARAMETER);
 	ERR_FAIL_COND_V(p_view.is_null(), ERR_INVALID_PARAMETER);
 
@@ -153,14 +200,14 @@ Error ExternalTexture::_create(const Ref<RDTextureFormat> &p_format, const Ref<R
 	return create(RD::_get_base(p_format), RD::_get_base(p_view), data);
 }
 
-Error ExternalTexture::_import(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view) {
+Error TGExternalTexture::_import(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view) {
 	ERR_FAIL_COND_V(p_format.is_null(), ERR_INVALID_PARAMETER);
 	ERR_FAIL_COND_V(p_view.is_null(), ERR_INVALID_PARAMETER);
 
 	return import(RD::_get_base(p_format), RD::_get_base(p_view));
 }
 
-Error ExternalTexture::_copy(RID p_texture, bool p_from) {
+Error TGExternalTexture::_copy(RID p_texture, bool p_from) {
 	ERR_FAIL_COND_V_MSG(!rid.is_valid(), ERR_UNAVAILABLE, "ExternalTexture is not valid. Create or import first");
 	ERR_FAIL_COND_V_MSG(!p_texture.is_valid(), ERR_INVALID_PARAMETER, "Parameter texture is not valid");
 
@@ -178,18 +225,18 @@ Error ExternalTexture::_copy(RID p_texture, bool p_from) {
 	}
 }
 
-void ExternalTexture::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("create", "format", "view"), &ExternalTexture::_create, DEFVAL(Array()));
-	ClassDB::bind_method(D_METHOD("send_filehandle", "path"), &ExternalTexture::send_filehandle);
-	ClassDB::bind_method(D_METHOD("copy_to", "texture"), &ExternalTexture::copy_to);
-	ClassDB::bind_method(D_METHOD("copy_from", "texture"), &ExternalTexture::copy_from);
-	ClassDB::bind_method(D_METHOD("get_rid"), &ExternalTexture::get_rid);
+void TGExternalTexture::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("create", "format", "view"), &TGExternalTexture::_create, DEFVAL(Array()));
+	ClassDB::bind_method(D_METHOD("send_filehandle", "path"), &TGExternalTexture::send_filehandle);
+	ClassDB::bind_method(D_METHOD("copy_to", "texture"), &TGExternalTexture::copy_to);
+	ClassDB::bind_method(D_METHOD("copy_from", "texture"), &TGExternalTexture::copy_from);
+	ClassDB::bind_method(D_METHOD("get_rid"), &TGExternalTexture::get_rid);
 }
 
-ExternalTexture::ExternalTexture() {
+TGExternalTexture::TGExternalTexture() {
 }
 
-ExternalTexture::~ExternalTexture() {
+TGExternalTexture::~TGExternalTexture() {
 	if (rid.is_valid()) {
 		RD::get_singleton()->free(rid);
 		print_line("Texture freed " + itos(rid.get_id()));

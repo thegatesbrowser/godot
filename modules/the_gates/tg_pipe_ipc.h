@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  input_sync.cpp                                                        */
+/*  tg_pipe_ipc.h                                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,62 +28,47 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "input_sync.h"
+#ifndef TG_PIPE_IPC_H
+#define TG_PIPE_IPC_H
 
-#include "core/core_string_names.h"
-#include "core/input/input.h"
-#include "variant_tools.h"
+#include "core/io/file_access.h"
+#include "core/templates/vector.h"
 
-void InputSync::socket_bind(const String &p_address) {
-	socket.bind(p_address);
-}
+class TgPipeIpc {
+public:
+	enum Role {
+		ROLE_BIND,
+		ROLE_CONNECT,
+	};
 
-void InputSync::socket_connect(const String &p_address) {
-	socket.connect(p_address);
-}
+private:
+	String base_address;
+	Role role = ROLE_CONNECT;
+	Ref<FileAccess> read_pipe;
+	Ref<FileAccess> write_pipe;
+	Vector<uint8_t> recv_stream;
+	Vector<Vector<uint8_t>> recv_queue;
+	Vector<Vector<uint8_t>> send_queue;
+	uint64_t last_activity_usec = 0;
+	bool connected = false;
 
-void InputSync::send_input_event(const Ref<InputEvent> &p_event) {
-	std::string msg_str = var_to_str(p_event).utf8().get_data();
-	Vector<uint8_t> payload;
-	payload.resize(msg_str.size());
-	if (!payload.is_empty()) {
-		memcpy(payload.ptrw(), msg_str.data(), msg_str.size());
-	}
-	socket.queue_message(payload);
-	if (!socket.poll()) {
-		print_line("Failed to send input event");
-	}
-}
+	String normalize_address(const String &p_address) const;
+	String make_read_address() const;
+	String make_write_address() const;
+	bool try_open();
+	void push_frame(const Vector<uint8_t> &p_payload);
+	bool pump_read();
+	bool pump_write();
+	void mark_activity();
 
-void InputSync::receive_input_events() {
-	if (!socket.poll()) {
-		return;
-	}
+public:
+	bool bind(const String &p_address);
+	bool connect(const String &p_address);
+	void queue_message(const Vector<uint8_t> &p_payload);
+	bool poll();
+	bool pop_message(Vector<uint8_t> &r_message);
+	bool is_connected(uint64_t p_idle_timeout_usec = 0) const;
+	void close();
+};
 
-	Vector<uint8_t> msg;
-	while (socket.pop_message(msg)) {
-		std::string msg_str;
-		msg_str.resize(msg.size());
-		if (!msg.is_empty()) {
-			memcpy(msg_str.data(), msg.ptr(), msg.size());
-		}
-		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(msg_str.c_str()));
-	}
-}
-
-void InputSync::close() {
-	socket.close();
-}
-
-void InputSync::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("socket_bind", "address"), &InputSync::socket_bind, DEFVAL(INPUT_SYNC_ADDRESS));
-	ClassDB::bind_method(D_METHOD("send_input_event", "event"), &InputSync::send_input_event);
-	ClassDB::bind_method(D_METHOD("close"), &InputSync::close);
-}
-
-InputSync::InputSync() :
-		socket() {
-}
-
-InputSync::~InputSync() {
-}
+#endif // TG_PIPE_IPC_H

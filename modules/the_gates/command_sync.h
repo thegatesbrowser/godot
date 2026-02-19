@@ -33,12 +33,12 @@
 
 #include "command.h"
 #include "scene/main/node.h"
-#include "thirdparty/cppzmq/zmq.hpp"
+#include "tg_pipe_ipc.h"
 
 #ifdef WINDOWS_ENABLED
-static const String COMMAND_SYNC_ADDRESS("ipc://renderer/command_sync");
+static const String COMMAND_SYNC_ADDRESS("pipe://renderer/command_sync");
 #else
-static const String COMMAND_SYNC_ADDRESS("ipc:///tmp/command_sync");
+static const String COMMAND_SYNC_ADDRESS("pipe:///tmp/command_sync");
 #endif
 
 static const String COMMAND_SYNC_MONITOR_ENDPOINT("inproc://command_sync_monitor");
@@ -51,11 +51,9 @@ class CommandSync : public Node {
 
 	static CommandSync *singleton;
 
-	zmq::socket_t sock;
+	TgPipeIpc socket;
 	Callable execute_function;
 
-	// Monitoring
-	zmq::socket_t monitor_sock;
 	bool peer_disconnected = false;
 
 protected:
@@ -82,7 +80,7 @@ public:
 
 	void close();
 
-	CommandSync(zmq::socket_type type = zmq::socket_type::pair, zmq::socket_type monitor_type = zmq::socket_type::pair);
+	CommandSync();
 	~CommandSync();
 };
 
