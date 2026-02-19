@@ -29,31 +29,34 @@
 /**************************************************************************/
 
 #include "command_sync.h"
+
 #include "core/input/input.h"
-#include "thirdparty/cppzmq/zmq_addon.hpp"
 #include "variant_tools.h"
-#include "zmq_context.h"
-#include <zmq.h>
 
 CommandSync *CommandSync::singleton = nullptr;
 
 void CommandSync::socket_bind(const String &p_address) {
-	sock.bind(p_address.utf8().get_data());
+	peer_disconnected = !socket.bind(p_address);
 }
 
 void CommandSync::socket_connect(const String &p_address, const String &p_monitor_endpoint) {
-	sock.connect(p_address.utf8().get_data());
-
-	std::string monitor_endpoint = p_monitor_endpoint.utf8().get_data();
-	zmq_socket_monitor(sock.handle(), monitor_endpoint.c_str(), ZMQ_EVENT_ALL);
-	monitor_sock.connect(monitor_endpoint);
+	(void)p_monitor_endpoint;
+	peer_disconnected = !socket.connect(p_address);
 }
 
 void CommandSync::send_command(const Ref<Command> &p_command) {
 	std::string msg_str = var_to_str(p_command).utf8().get_data();
-	zmq::message_t msg(msg_str);
-	if (!sock.send(msg, zmq::send_flags::none)) {
+	Vector<uint8_t> payload;
+	payload.resize(msg_str.size());
+	if (!payload.is_empty()) {
+		memcpy(payload.ptrw(), msg_str.data(), msg_str.size());
+	}
+	socket.queue_message(payload);
+	if (!socket.poll()) {
 		print_line("Failed to send command");
+		peer_disconnected = true;
+	} else {
+		peer_disconnected = false;
 	}
 }
 
@@ -71,29 +74,8 @@ void CommandSync::send_command(const String &p_name, const Array &p_args) {
 }
 
 void CommandSync::poll_monitor() {
-	zmq::message_t msg;
-
-	while (monitor_sock.recv(msg, zmq::recv_flags::dontwait)) {
-		if (msg.size() >= 6) {
-			const uint8_t *msg_data = static_cast<const uint8_t *>(msg.data());
-			uint16_t event_id = 0;
-			uint32_t value = 0;
-			memcpy(&event_id, msg_data, sizeof(uint16_t));
-			memcpy(&value, msg_data + sizeof(uint16_t), sizeof(uint32_t));
-
-			print_line(vformat("ZMQ Monitor Event: %d, Value: %d", event_id, value));
-
-			if (event_id == ZMQ_EVENT_DISCONNECTED || event_id == ZMQ_EVENT_CLOSED || event_id == ZMQ_EVENT_CLOSE_FAILED) {
-				peer_disconnected = true;
-				print_line("ZMQ Peer disconnected detected");
-			}
-
-			if (event_id == ZMQ_EVENT_CONNECTED || event_id == ZMQ_EVENT_ACCEPTED || event_id == ZMQ_EVENT_LISTENING) {
-				peer_disconnected = false;
-				print_line("ZMQ Peer connected detected");
-			}
-		}
-	}
+	socket.poll();
+	peer_disconnected = !socket.is_connected((uint64_t)COMMAND_SYNC_HEARTBEAT_TIMEOUT * 1000);
 }
 
 Variant CommandSync::call_execute_function(const Ref<Command> &p_command) {
@@ -125,17 +107,25 @@ void CommandSync::bind_commands() {
 }
 
 void CommandSync::receive_commands() {
-	zmq::message_t msg;
+	if (!socket.poll()) {
+		peer_disconnected = true;
+		return;
+	}
+	peer_disconnected = false;
 
-	while (sock.recv(msg, zmq::recv_flags::dontwait)) {
-		std::string msg_str(static_cast<const char *>(msg.data()), msg.size());
-		Variant res = call_execute_function((Ref<Command>)str_to_var(msg_str.c_str()));
+	Vector<uint8_t> msg;
+	while (socket.pop_message(msg)) {
+		std::string msg_str;
+		msg_str.resize(msg.size());
+		if (!msg.is_empty()) {
+			memcpy(msg_str.data(), msg.ptr(), msg.size());
+		}
+		call_execute_function((Ref<Command>)str_to_var(msg_str.c_str()));
 	}
 }
 
 void CommandSync::close() {
-	sock.close();
-	monitor_sock.close();
+	socket.close();
 }
 
 void CommandSync::_bind_methods() {
@@ -149,8 +139,7 @@ void CommandSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("close"), &CommandSync::close);
 }
 
-CommandSync::CommandSync(zmq::socket_type type, zmq::socket_type monitor_type) :
-		sock(ctx, type), monitor_sock(ctx, monitor_type) {
+CommandSync::CommandSync() {
 	if (singleton == nullptr) {
 		singleton = this;
 	}

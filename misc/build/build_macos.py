@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, Dict
 
 
 def detect_editor():
@@ -40,7 +41,7 @@ def get_godot_version(project_root: Path) -> str:
     """Read Godot version from version.py and return '<major>.<minor>'"""
     version_file = project_root / "version.py"
     try:
-        namespace = {}
+        namespace: Dict[str, Any] = {}
         with open(version_file, "r") as f:
             code = f.read()
         exec(code, namespace)
@@ -257,17 +258,6 @@ def main():
             print(f"✓ Copied {binary['description']} to working template")
         else:
             print(f"Warning: {binary['source']} does not exist, skipping copy")
-
-    # Copy libzmq libraries if they exist
-    libzmq_files = ["libzmq.dylib", "libzmq.5.dylib"]
-    for libzmq_file in libzmq_files:
-        source = bin_dir / libzmq_file
-        dest = working_template_frameworks / libzmq_file
-        if source.exists():
-            shutil.copy2(source, dest)
-            print(f"✓ Copied {libzmq_file} to working template")
-        else:
-            print(f"Warning: {libzmq_file} does not exist, skipping copy")
 
     print("\n=== Moving App Template to Bin Directory ===")
 
