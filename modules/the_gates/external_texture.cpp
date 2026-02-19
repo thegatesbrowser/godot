@@ -29,16 +29,13 @@
 /**************************************************************************/
 
 #include "external_texture.h"
+#include "tg_pipe_ipc.h"
 
 #ifdef WINDOWS_ENABLED
 #include "Windows.h"
-#include "thirdparty/cppzmq/zmq.hpp"
-#include "zmq_context.h"
 #endif
 
 #if MACOS_ENABLED
-#include "thirdparty/cppzmq/zmq.hpp"
-#include "zmq_context.h"
 #include <IOSurface/IOSurface.h>
 #endif
 
@@ -46,13 +43,15 @@
 #include "flingfd.h"
 #endif
 
+#include "core/os/os.h"
+
 bool TGExternalTexture::send_filehandle(const String &p_path) {
 	ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, false, "Sending invalid filehandle. First create external texture");
 
 #ifdef WINDOWS_ENABLED
 	// Duplicate handle
 	PackedStringArray split = p_path.split("|");
-	ERR_FAIL_COND_V_MSG(split.size() != 2, false, "Invalid path. Should be 'ipc://path|targetProcessId'");
+	ERR_FAIL_COND_V_MSG(split.size() != 2, false, "Invalid path. Should be 'pipe://path|targetProcessId'");
 	int targetProcessId = split[1].to_int();
 
 	HANDLE hTargetProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, targetProcessId);
@@ -62,17 +61,20 @@ bool TGExternalTexture::send_filehandle(const String &p_path) {
 	bool success = DuplicateHandle(GetCurrentProcess(), (HANDLE)filehandle, hTargetProcess, &hDuplicateHandle, 0, FALSE, DUPLICATE_SAME_ACCESS);
 	ERR_FAIL_COND_V_MSG(!success, false, "Unable to DuplicateHandle. Error code: " + itos(GetLastError()));
 
-	// Send handle
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
-	sock.connect(split[0].utf8().get_data());
-
+	// Send handle.
 	filehandle = (FileHandle)hDuplicateHandle;
-	zmq::message_t msg;
 	int64_t data = reinterpret_cast<int64_t>(filehandle);
-	msg.rebuild(sizeof(int64_t));
-	memcpy(msg.data(), &data, sizeof(int64_t));
-	success = sock.send(msg, zmq::send_flags::none).has_value();
-	sock.close();
+	Vector<uint8_t> payload;
+	payload.resize(sizeof(int64_t));
+	memcpy(payload.ptrw(), &data, sizeof(int64_t));
+
+	TgPipeIpc pipe;
+	success = pipe.connect(split[0]);
+	if (success) {
+		pipe.queue_message(payload);
+		success = pipe.poll();
+	}
+	pipe.close();
 
 	// Clean up
 	CloseHandle(hTargetProcess);
@@ -84,15 +86,18 @@ bool TGExternalTexture::send_filehandle(const String &p_path) {
 #elif MACOS_ENABLED
 	uint32_t surfaceID = IOSurfaceGetID(filehandle);
 
-	// Send IOSurfaceID
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
-	sock.connect(p_path.utf8().get_data());
+	// Send IOSurfaceID.
+	Vector<uint8_t> payload;
+	payload.resize(sizeof(uint32_t));
+	memcpy(payload.ptrw(), &surfaceID, sizeof(uint32_t));
 
-	zmq::message_t msg;
-	msg.rebuild(sizeof(uint32_t));
-	memcpy(msg.data(), &surfaceID, sizeof(uint32_t));
-	bool success = sock.send(msg, zmq::send_flags::none).has_value();
-	sock.close();
+	TgPipeIpc pipe;
+	bool success = pipe.connect(p_path);
+	if (success) {
+		pipe.queue_message(payload);
+		success = pipe.poll();
+	}
+	pipe.close();
 
 	return success;
 #else
@@ -102,29 +107,41 @@ bool TGExternalTexture::send_filehandle(const String &p_path) {
 
 bool TGExternalTexture::recv_filehandle(const String &p_path) {
 #ifdef WINDOWS_ENABLED
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
-	sock.bind(p_path.utf8().get_data());
-
-	zmq::message_t msg;
-	if (!sock.recv(msg)) { // WARNING: BLOCKING COMMAND
+	TgPipeIpc pipe;
+	if (!pipe.bind(p_path)) {
 		return false;
 	}
+
+	Vector<uint8_t> msg;
+	while (!pipe.pop_message(msg)) { // WARNING: BLOCKING COMMAND
+		if (!pipe.poll()) {
+			return false;
+		}
+		OS::get_singleton()->delay_usec(1000);
+	}
 	int64_t data;
-	memcpy(&data, msg.data(), sizeof(int64_t));
-	sock.close();
+	ERR_FAIL_COND_V(msg.size() != (int)sizeof(int64_t), false);
+	memcpy(&data, msg.ptr(), sizeof(int64_t));
+	pipe.close();
 
 	filehandle = reinterpret_cast<void *>(data);
 #elif MACOS_ENABLED
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
-	sock.bind(p_path.utf8().get_data());
-
-	zmq::message_t msg;
-	if (!sock.recv(msg)) { // WARNING: BLOCKING COMMAND
+	TgPipeIpc pipe;
+	if (!pipe.bind(p_path)) {
 		return false;
 	}
+
+	Vector<uint8_t> msg;
+	while (!pipe.pop_message(msg)) { // WARNING: BLOCKING COMMAND
+		if (!pipe.poll()) {
+			return false;
+		}
+		OS::get_singleton()->delay_usec(1000);
+	}
 	uint32_t surfaceID;
-	memcpy(&surfaceID, msg.data(), sizeof(uint32_t));
-	sock.close();
+	ERR_FAIL_COND_V(msg.size() != (int)sizeof(uint32_t), false);
+	memcpy(&surfaceID, msg.ptr(), sizeof(uint32_t));
+	pipe.close();
 
 	filehandle = IOSurfaceLookup(surfaceID);
 #else

@@ -29,40 +29,50 @@
 /**************************************************************************/
 
 #include "input_sync.h"
+
 #include "core/core_string_names.h"
 #include "core/input/input.h"
-#include "thirdparty/cppzmq/zmq.hpp"
 #include "variant_tools.h"
-#include "zmq_context.h"
 
 void InputSync::socket_bind(const String &p_address) {
-	sock.bind(p_address.utf8().get_data());
+	socket.bind(p_address);
 }
 
 void InputSync::socket_connect(const String &p_address) {
-	sock.connect(p_address.utf8().get_data());
+	socket.connect(p_address);
 }
 
 void InputSync::send_input_event(const Ref<InputEvent> &p_event) {
 	std::string msg_str = var_to_str(p_event).utf8().get_data();
-	zmq::message_t msg(msg_str);
-	auto result = sock.send(msg, zmq::send_flags::none);
-	if (!result) {
+	Vector<uint8_t> payload;
+	payload.resize(msg_str.size());
+	if (!payload.is_empty()) {
+		memcpy(payload.ptrw(), msg_str.data(), msg_str.size());
+	}
+	socket.queue_message(payload);
+	if (!socket.poll()) {
 		print_line("Failed to send input event");
 	}
 }
 
 void InputSync::receive_input_events() {
-	zmq::message_t msg;
+	if (!socket.poll()) {
+		return;
+	}
 
-	while (sock.recv(msg, zmq::recv_flags::dontwait)) {
-		std::string msg_str(static_cast<const char *>(msg.data()), msg.size());
+	Vector<uint8_t> msg;
+	while (socket.pop_message(msg)) {
+		std::string msg_str;
+		msg_str.resize(msg.size());
+		if (!msg.is_empty()) {
+			memcpy(msg_str.data(), msg.ptr(), msg.size());
+		}
 		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(msg_str.c_str()));
 	}
 }
 
 void InputSync::close() {
-	sock.close();
+	socket.close();
 }
 
 void InputSync::_bind_methods() {
@@ -72,7 +82,7 @@ void InputSync::_bind_methods() {
 }
 
 InputSync::InputSync() :
-		sock(ctx, zmq::socket_type::pair) {
+		socket() {
 }
 
 InputSync::~InputSync() {

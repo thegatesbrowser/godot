@@ -31,19 +31,20 @@
 #pragma once
 
 #include "core/input/input.h"
+#include "core/io/file_access.h"
 #include "core/object/ref_counted.h"
-#include "thirdparty/cppzmq/zmq.hpp"
+#include "tg_pipe_ipc.h"
 
 #ifdef WINDOWS_ENABLED
-static const String INPUT_SYNC_ADDRESS("ipc://renderer/input_sync");
+static const String INPUT_SYNC_ADDRESS("pipe://renderer/input_sync");
 #else
-static const String INPUT_SYNC_ADDRESS("ipc:///tmp/input_sync");
+static const String INPUT_SYNC_ADDRESS("pipe:///tmp/input_sync");
 #endif
 
 class InputSync : public RefCounted {
 	GDCLASS(InputSync, RefCounted);
 
-	zmq::socket_t sock;
+	TgPipeIpc socket;
 
 protected:
 	static void _bind_methods();

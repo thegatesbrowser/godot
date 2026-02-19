@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  zmq_context.h                                                         */
+/*  tg_pipe_ipc.h                                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,6 +30,42 @@
 
 #pragma once
 
-#include "thirdparty/cppzmq/zmq.hpp"
+#include "core/io/file_access.h"
+#include "core/templates/vector.h"
 
-inline zmq::context_t ctx;
+class TgPipeIpc {
+public:
+	enum Role {
+		ROLE_BIND,
+		ROLE_CONNECT,
+	};
+
+private:
+	String base_address;
+	Role role = ROLE_CONNECT;
+	Ref<FileAccess> read_pipe;
+	Ref<FileAccess> write_pipe;
+	Vector<uint8_t> recv_stream;
+	Vector<Vector<uint8_t>> recv_queue;
+	Vector<Vector<uint8_t>> send_queue;
+	uint64_t last_activity_usec = 0;
+	bool connected = false;
+
+	String normalize_address(const String &p_address) const;
+	String make_read_address() const;
+	String make_write_address() const;
+	bool try_open();
+	void push_frame(const Vector<uint8_t> &p_payload);
+	bool pump_read();
+	bool pump_write();
+	void mark_activity();
+
+public:
+	bool bind(const String &p_address);
+	bool connect(const String &p_address);
+	void queue_message(const Vector<uint8_t> &p_payload);
+	bool poll();
+	bool pop_message(Vector<uint8_t> &r_message);
+	bool is_connected(uint64_t p_idle_timeout_usec = 0) const;
+	void close();
+};

@@ -35,38 +35,21 @@
 #include "external_texture.h"
 #include "input_sync.h"
 #include "sandboxing.h"
-#include "zmq_context.h"
-#include "thirdparty/cppzmq/zmq.hpp"
 
 void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
 
-	try {
-		// Context is already initialized as a global variable
-		int major, minor, patch;
-		zmq_version(&major, &minor, &patch);
-		print_line(vformat("ZeroMQ version: %d.%d.%d", major, minor, patch));
-	} catch (const std::exception &e) {
-		ERR_PRINT("ZeroMQ initialization failure. Error: " + String(e.what()));
-	}
-
 	GDREGISTER_CLASS(Sandboxing);
 	GDREGISTER_CLASS(InputSync);
 	GDREGISTER_CLASS(Command);
 	GDREGISTER_CLASS(CommandSync);
-    GDREGISTER_CLASS(TGExternalTexture);
+	GDREGISTER_CLASS(TGExternalTexture);
 }
 
 void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
-	}
-
-	try {
-		ctx.close();
-	} catch (const std::exception &e) {
-		ERR_PRINT("ZeroMQ termination failure. Error: " + String(e.what()));
 	}
 }

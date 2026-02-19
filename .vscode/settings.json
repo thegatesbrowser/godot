@@ -74,9 +74,6 @@
     },
     "esbonio.sphinx.confDir": "",
     "C_Cpp.errorSquiggles": "disabled",
-    "terminal.integrated.env.windows": {
-        "PKG_CONFIG_PATH": "C:/Libs/ZeroMQ/lib/pkgconfig"
-    },
     "cmake.configureOnOpen": false,
     "dotnet.defaultSolution": "disable"
 }
