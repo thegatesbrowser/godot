@@ -45,7 +45,7 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(InputSync);
 	GDREGISTER_CLASS(Command);
 	GDREGISTER_CLASS(CommandSync);
-	GDREGISTER_CLASS(TGExternalTexture);
+	GDREGISTER_CLASS(ExternalTexture);
 }
 
 void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
