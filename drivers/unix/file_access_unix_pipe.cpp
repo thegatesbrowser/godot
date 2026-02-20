@@ -35,11 +35,12 @@
 #include "core/os/os.h"
 #include "core/string/print_string.h"
 
-#include <errno.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <cerrno>
 
 Error FileAccessUnixPipe::open_existing(int p_rfd, int p_wfd) {
 	// Open pipe using handles created by pipe(fd) call in the OS.execute_with_pipe.
@@ -74,7 +75,7 @@ Error FileAccessUnixPipe::open_internal(const String &p_path, int p_mode_flags) 
 		ERR_FAIL_COND_V_MSG(!S_ISFIFO(st.st_mode), ERR_ALREADY_IN_USE, "Pipe name is already used by file.");
 	}
 
-	int f = ::open(path.utf8().get_data(), O_RDWR | O_CLOEXEC);
+	int f = ::open(path.utf8().get_data(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
 	if (f < 0) {
 		switch (errno) {
 			case ENOENT: {
@@ -125,6 +126,14 @@ String FileAccessUnixPipe::get_path_absolute() const {
 	return path_src;
 }
 
+uint64_t FileAccessUnixPipe::get_length() const {
+	ERR_FAIL_COND_V_MSG(fd[0] < 0, 0, "Pipe must be opened before use.");
+
+	int buf_rem = 0;
+	ERR_FAIL_COND_V(ioctl(fd[0], FIONREAD, &buf_rem) != 0, 0);
+	return buf_rem;
+}
+
 uint8_t FileAccessUnixPipe::get_8() const {
 	ERR_FAIL_COND_V_MSG(fd[0] < 0, 0, "Pipe must be opened before use.");
 
@@ -139,11 +148,14 @@ uint8_t FileAccessUnixPipe::get_8() const {
 }
 
 uint64_t FileAccessUnixPipe::get_buffer(uint8_t *p_dst, uint64_t p_length) const {
-	ERR_FAIL_COND_V(!p_dst && p_length > 0, -1);
 	ERR_FAIL_COND_V_MSG(fd[0] < 0, -1, "Pipe must be opened before use.");
+	ERR_FAIL_COND_V(!p_dst && p_length > 0, -1);
 
-	uint64_t read = ::read(fd[0], p_dst, p_length);
-	if (read == p_length) {
+	ssize_t read = ::read(fd[0], p_dst, p_length);
+	if (read == -1) {
+		last_error = ERR_FILE_CANT_READ;
+		read = 0;
+	} else if (read != (ssize_t)p_length) {
 		last_error = ERR_FILE_CANT_READ;
 	} else {
 		last_error = OK;
