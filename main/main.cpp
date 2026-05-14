@@ -151,6 +151,7 @@
 #include "modules/the_gates/command_sync.h"
 #include "modules/the_gates/external_texture.h"
 #include "modules/the_gates/input_sync.h"
+#include "modules/the_gates/sandbox_diagnostics.h"
 #include "modules/the_gates/sandboxing.h"
 #endif
 
@@ -4688,6 +4689,7 @@ int Main::start() {
 	OS::get_singleton()->benchmark_dump();
 
 #ifdef TG_RENDERER
+	print_line("[RENDERER-START]");
 	Error err;
 
 	// CommandSync
@@ -4747,6 +4749,11 @@ int Main::start() {
 		}
 	}
 #endif
+
+	// Always dump diagnostics in renderer mode so the autotest harness can
+	// observe sandbox state (engaged or not) without parsing engine logs.
+	SandboxDiagnostics::dump();
+	print_line("[RENDERER-READY]");
 #endif
 
 	return EXIT_SUCCESS;
