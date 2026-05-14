@@ -265,6 +265,8 @@ void SandboxingWin::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_target"), &SandboxingWin::is_target);
 }
 
+bool SandboxingWin::broker_initialized = false;
+
 SandboxingWin::SandboxingWin() {
 	broker_service = sandbox::SandboxFactory::GetBrokerServices();
 }

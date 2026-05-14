@@ -16,7 +16,11 @@ class SandboxingWin : public RefCounted {
 	GDCLASS(SandboxingWin, RefCounted);
 
 	sandbox::BrokerServices *broker_service = nullptr;
-	bool broker_initialized = false;
+	// Per-process — BrokerServices is a process singleton (SandboxFactory),
+	// so calling Init() twice fails with SBOX_ERROR_UNEXPECTED_CALL (8).
+	// Static so it's shared across multiple SandboxingWin instances (the
+	// launcher creates one per gate spawn — first one Inits, rest reuse).
+	static bool broker_initialized;
 
 protected:
 	static void _bind_methods();
