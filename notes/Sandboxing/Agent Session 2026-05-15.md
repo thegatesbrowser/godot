@@ -7,7 +7,7 @@ and drop all `C:/code` references from `modules/the_gates/config.py`.
 
 **Status: shipped.** `pwsh godot/tools/run-sandbox-test.ps1 -Timeout 30`
 returns `[VERIFY-OK] integrity=untrusted renderer_pid=… canary_file=blocked
-build=the_gates_sandbox=yes`. `verify.json` shows full Chrome-renderer
+build=tg_sandbox=yes`. `verify.json` shows full Chrome-renderer
 strictness: integrity SID `S-1-16-0`, 4 restricted SIDs, alternate desktop,
 DEP + ASLR + payload restriction mitigations, both canaries blocked
 (ERROR_ACCESS_DENIED).
@@ -138,7 +138,7 @@ had already established.
 ```json
 {
   "alt_desktop": "sbox_alternate_desktop_local_winstation_0x40D4",
-  "build": "the_gates_sandbox=yes",
+  "build": "tg_sandbox=yes",
   "canaries": {
     "canary_file_write": "blocked",
     "canary_file_write_error": 5,

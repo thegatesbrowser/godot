@@ -45,10 +45,10 @@ godot/
 │   │   ├── helpers.h                       # to_wchar (leaks; needs fix)
 │   │   └── SCsub                           # NDEBUG forced; UNICODE flags
 │   ├── sandboxing.{h,cpp}                  # Linux seccomp Sandboxing class
-│   ├── SCsub                               # platform=windows && the_gates_sandbox guard
+│   ├── SCsub                               # platform=windows && tg_sandbox guard
 │   └── config.py                           # clang-cl switch, CEF LIBPATH, CPPPATH
 ├── main/main.cpp                           # lower_token call near end of Main::start
-├── SConstruct                              # the_gates_sandbox=False flag, .sandbox suffix
+├── SConstruct                              # tg_sandbox=False flag, .sandbox suffix
 └── godot.manifest                          # Win10/11 compat OS GUID
 ```
 

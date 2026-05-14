@@ -5,7 +5,7 @@ Effort to properly sandbox the renderer process, currently on branch
 from in-tree sources** — see [[Agent Session 2026-05-15]].
 
 `pwsh godot/tools/run-sandbox-test.ps1` returns `[VERIFY-OK]
-integrity=untrusted canary_file=blocked build=the_gates_sandbox=yes`. The
+integrity=untrusted canary_file=blocked build=tg_sandbox=yes`. The
 chromium sandbox lib is built by SCons from `thirdparty/chromium-sandbox/`
 — no `C:/code` paths or prebuilt `cef_sandbox.lib` in the build line.
 

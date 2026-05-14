@@ -36,7 +36,7 @@ env.modules_sources += module_obj
 
 Export("env_tg")
 
-if env["platform"] == "windows" and env.the_gates_sandbox:
+if env["platform"] == "windows" and env.tg_sandbox:
     SConscript("sandbox/SCsub")
 
 # Needed to force rebuilding the module files when the thirdparty library is updated.

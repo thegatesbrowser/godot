@@ -30,7 +30,7 @@ def configure(env):
             env.ParseConfig("pkg-config libseccomp --cflags --libs")
             print("Linking Seccomp")
 
-    if env["platform"] == "windows" and env.get("the_gates_sandbox"):
+    if env["platform"] == "windows" and env.get("tg_sandbox"):
         # The Windows sandbox is built directly from the vendored Chromium
         # sources under godot/thirdparty/chromium-sandbox/. No external
         # checkout required: every header, every .cc, and every generated

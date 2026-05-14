@@ -25,7 +25,7 @@
     the verify cycle fast.
 
 .PARAMETER SandboxBuild
-    If set together with -Build, builds with the_gates_sandbox=yes.
+    If set together with -Build, builds with tg_sandbox=yes.
 
 .PARAMETER LauncherBin
     Override the launcher binary path. Defaults to the dev editor build.
@@ -87,23 +87,10 @@ $AppDir    = Join-Path $RepoDir "app"
 $BinDir    = Join-Path $GodotDir "bin"
 
 if (-not $LauncherBin) {
-    # Prefer the sandbox-suffixed binary if present; the launcher's
-    # renderer_executable.gd has matching logic to pick the .sandbox renderer
-    # when SandboxingWin is registered.
-    $sandboxLauncher = Join-Path $BinDir "godot.windows.editor.dev.sandbox.x86_64.llvm.console.exe"
-    if (Test-Path $sandboxLauncher) {
-        $LauncherBin = $sandboxLauncher
-    } else {
-        $LauncherBin = Join-Path $BinDir "godot.windows.editor.dev.x86_64.llvm.console.exe"
-    }
+    $LauncherBin = Join-Path $BinDir "godot.windows.editor.dev.x86_64.llvm.console.exe"
 }
 if (-not $RendererBin) {
-    $sandboxRenderer = Join-Path $BinDir "godot.windows.template_debug.dev.renderer.sandbox.x86_64.llvm.console.exe"
-    if (Test-Path $sandboxRenderer) {
-        $RendererBin = $sandboxRenderer
-    } else {
-        $RendererBin = Join-Path $BinDir "godot.windows.template_debug.dev.renderer.x86_64.llvm.console.exe"
-    }
+    $RendererBin = Join-Path $BinDir "godot.windows.template_debug.dev.renderer.x86_64.llvm.console.exe"
 }
 if (-not $ResultsDir) {
     $ResultsDir = Join-Path $env:TEMP "thegates-autotest"
@@ -143,7 +130,7 @@ if ($Build) {
             "linker=lld",
             "disable_exceptions=no"
         )
-        if ($SandboxBuild) { $sconsArgs += "the_gates_sandbox=yes" }
+        if ($SandboxBuild) { $sconsArgs += "tg_sandbox=yes" }
         Write-Host "[BUILD] launcher: scons $($sconsArgs -join ' ')"
         scons -j8 @sconsArgs 2>&1 | Tee-Object -FilePath $BuildLog
         if ($LASTEXITCODE -ne 0) { Emit-Fail "build_launcher" 11 }
@@ -157,7 +144,7 @@ if ($Build) {
             "linker=lld",
             "disable_exceptions=no"
         )
-        if ($SandboxBuild) { $sconsArgs2 += "the_gates_sandbox=yes" }
+        if ($SandboxBuild) { $sconsArgs2 += "tg_sandbox=yes" }
         Write-Host "[BUILD] renderer: scons $($sconsArgs2 -join ' ')"
         scons -j8 @sconsArgs2 2>&1 | Tee-Object -FilePath $BuildLog -Append
         if ($LASTEXITCODE -ne 0) { Emit-Fail "build_renderer" 12 }
