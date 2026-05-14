@@ -30,7 +30,6 @@
 
 #include "input_sync.h"
 
-#include "core/core_string_names.h"
 #include "core/input/input.h"
 #include "variant_tools.h"
 
@@ -43,31 +42,21 @@ void InputSync::socket_connect(const String &p_address) {
 }
 
 void InputSync::send_input_event(const Ref<InputEvent> &p_event) {
-	std::string msg_str = var_to_str(p_event).utf8().get_data();
+	const CharString utf8 = var_to_str(p_event).utf8();
 	Vector<uint8_t> payload;
-	payload.resize(msg_str.size());
-	if (!payload.is_empty()) {
-		memcpy(payload.ptrw(), msg_str.data(), msg_str.size());
-	}
+	payload.resize(utf8.length());
+	memcpy(payload.ptrw(), utf8.get_data(), utf8.length());
 	socket.queue_message(payload);
-	if (!socket.poll()) {
-		print_line("Failed to send input event");
-	}
+	socket.poll();
 }
 
 void InputSync::receive_input_events() {
-	if (!socket.poll()) {
-		return;
-	}
+	socket.poll();
 
 	Vector<uint8_t> msg;
 	while (socket.pop_message(msg)) {
-		std::string msg_str;
-		msg_str.resize(msg.size());
-		if (!msg.is_empty()) {
-			memcpy(msg_str.data(), msg.ptr(), msg.size());
-		}
-		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(msg_str.c_str()));
+		const String text = String::utf8((const char *)msg.ptr(), msg.size());
+		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(text));
 	}
 }
 
@@ -79,11 +68,4 @@ void InputSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("socket_bind", "address"), &InputSync::socket_bind, DEFVAL(INPUT_SYNC_ADDRESS));
 	ClassDB::bind_method(D_METHOD("send_input_event", "event"), &InputSync::send_input_event);
 	ClassDB::bind_method(D_METHOD("close"), &InputSync::close);
-}
-
-InputSync::InputSync() :
-		socket() {
-}
-
-InputSync::~InputSync() {
 }

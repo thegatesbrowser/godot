@@ -40,10 +40,7 @@ static const String COMMAND_SYNC_ADDRESS("pipe://renderer/command_sync");
 static const String COMMAND_SYNC_ADDRESS("pipe:///tmp/command_sync");
 #endif
 
-static const String COMMAND_SYNC_MONITOR_ENDPOINT("inproc://command_sync_monitor");
-
-static const int COMMAND_SYNC_HEARTBEAT_IVL = 2000;
-static const int COMMAND_SYNC_HEARTBEAT_TIMEOUT = 15000;
+static const uint64_t COMMAND_SYNC_HEARTBEAT_TIMEOUT_USEC = 15000 * 1000;
 
 class CommandSync : public Node {
 	GDCLASS(CommandSync, Node);
@@ -53,22 +50,19 @@ class CommandSync : public Node {
 	TgPipeIpc socket;
 	Callable execute_function;
 
-	bool peer_disconnected = false;
-
 protected:
 	static void _bind_methods();
 
 public:
 	void socket_bind(const String &p_address = COMMAND_SYNC_ADDRESS);
-	void socket_connect(const String &p_address = COMMAND_SYNC_ADDRESS, const String &p_monitor_endpoint = COMMAND_SYNC_MONITOR_ENDPOINT);
+	void socket_connect(const String &p_address = COMMAND_SYNC_ADDRESS);
 
 	void send_command(const Ref<Command> &p_command);
 	void send_command(const String &p_name);
 	void send_command(const String &p_name, const Array &p_args);
 
-	// Monitor peer connection and report status.
-	void poll_monitor();
-	bool is_peer_connected() const { return !peer_disconnected; }
+	void poll_monitor() { socket.poll(); }
+	bool is_peer_connected() const { return socket.is_connected(COMMAND_SYNC_HEARTBEAT_TIMEOUT_USEC); }
 
 	Variant call_execute_function(const Ref<Command> &p_command);
 	void set_execute_function(Callable p_execute_function) { execute_function = p_execute_function; }

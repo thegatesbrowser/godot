@@ -32,7 +32,8 @@
 #include "tg_pipe_ipc.h"
 
 #ifdef WINDOWS_ENABLED
-#include "Windows.h"
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 #if MACOS_ENABLED
