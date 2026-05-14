@@ -20,6 +20,10 @@ The starting point for engine-side work. Every fork-specific note is reachable f
 
 - [[Platform Differences]] — Windows handles vs. macOS IOSurface vs. Linux file descriptors
 
+## In-progress work
+
+- [[Sandboxing/Index]] — Windows renderer sandbox effort (branch `chromium-sandboxing`). Unfinished; handoff brief in that folder.
+
 ## Style and patterns (mandatory before writing C++)
 
 - [[C++ Style Guide]] — the rules for this folder. Mostly defers to upstream Godot's docs + pre-commit.
