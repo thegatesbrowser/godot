@@ -30,8 +30,7 @@
 
 #pragma once
 
-#include "core/input/input.h"
-#include "core/io/file_access.h"
+#include "core/input/input_event.h"
 #include "core/object/ref_counted.h"
 #include "tg_pipe_ipc.h"
 
@@ -57,7 +56,4 @@ public:
 	void receive_input_events();
 
 	void close();
-
-	InputSync();
-	~InputSync();
 };
