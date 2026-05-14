@@ -1,0 +1,22 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+Import("env")
+Import("env_tg")
+
+env_sandbox = env_tg.Clone()
+
+module_obj = []
+
+env_sandbox.add_source_files(module_obj, "*.cpp")
+
+env.modules_sources += module_obj
+
+# Add module-specific compiler flags
+env_sandbox.Prepend(CXXFLAGS=[
+    "/DUNICODE",
+    "/D_UNICODE",
+])
+
+# Disable chromium debugging code
+env_sandbox.Prepend(CPPDEFINES=["NDEBUG"])
