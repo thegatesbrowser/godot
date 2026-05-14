@@ -47,6 +47,21 @@ Full rules: [`notes/C++ Style Guide.md`](./notes/C%2B%2B%20Style%20Guide.md).
 - **Don't break the IPC protocol.** Old renderer binaries cached on user machines call the existing command names with the existing arg shapes. Renaming/breaking commands silently breaks any gate built against an older renderer.
 - **The launcher allocates the shared texture; the renderer imports it.** Counterintuitive direction — don't "fix" it without reading [`notes/External Texture Sharing.md`](./notes/External%20Texture%20Sharing.md) first.
 
+### Branch sync (non-negotiable)
+
+This fork has two active branches that must stay in sync: `tg-4.5` (current dev) and `tg-master` (integration). **Every commit you push to `tg-4.5` must also be cherry-picked to `tg-master` and pushed.**
+
+```bash
+# after pushing your work on tg-4.5:
+git push origin tg-4.5
+git checkout tg-master
+git cherry-pick <sha>           # or <sha1>^..<shaN> for a range
+git push origin tg-master
+git checkout tg-4.5             # back to dev branch
+```
+
+The cherry-pick is mechanical. The SHA on `tg-master` will differ from `tg-4.5` (tg-master is independently rebased on upstream). Don't edit messages or content to "align" SHAs — any SHA references inside commit messages will dangle on the other branch, and that's fine; readers find equivalents by commit message text. See the parent's `../docs/Submodule Workflow.md` for the wider git layout.
+
 ## Build & run
 
 Build commands are in the parent [`README.md`](../README.md). They change; trust the README, not memory.
