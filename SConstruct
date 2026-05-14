@@ -186,6 +186,7 @@ opts.Add(
 opts.Add(BoolVariable("production", "Set defaults to build Godot for use in production", False))
 opts.Add(BoolVariable("threads", "Enable threading support", True))
 opts.Add(BoolVariable("tg_renderer", "TheGates renderer build", False))
+opts.Add(BoolVariable("the_gates_sandbox", "TheGates sandbox build (Windows: link cef_sandbox; Linux: enable seccomp at runtime)", False))
 
 # Components
 opts.Add(BoolVariable("deprecated", "Enable compatibility code for deprecated and removed features", True))
@@ -495,6 +496,7 @@ env.editor_build = env["target"] == "editor"
 env.dev_build = env["dev_build"]
 env.debug_features = env["target"] in ["editor", "template_debug"]
 env.tg_renderer = env["tg_renderer"]
+env.the_gates_sandbox = env["the_gates_sandbox"]
 
 if env["optimize"] == "auto":
     if env.dev_build:
@@ -526,6 +528,9 @@ else:
 if env.tg_renderer:
     # Run in TheGates renderer mode
     env.Append(CPPDEFINES=["TG_RENDERER"])
+
+if env.the_gates_sandbox:
+    env.Append(CPPDEFINES=["THE_GATES_SANDBOX"])
 
 # This is not part of fast_unsafe because the only downside it has compared to
 # the default is that SCons won't mark files that were changed in the last second
@@ -665,6 +670,9 @@ if env.dev_build:
 
 if env.tg_renderer:
     print("NOTE: TheGates renderer build.")
+
+if env.the_gates_sandbox:
+    print("NOTE: TheGates sandbox build.")
 
 # Enforce our minimal compiler version requirements
 cc_version = methods.get_compiler_version(env)
@@ -998,6 +1006,9 @@ if env.dev_build:
 
 if env.tg_renderer:
     suffix += ".renderer"
+
+if env.the_gates_sandbox:
+    suffix += ".sandbox"
 
 if env["precision"] == "double":
     suffix += ".double"
