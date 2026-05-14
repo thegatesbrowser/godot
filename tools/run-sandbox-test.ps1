@@ -87,10 +87,23 @@ $AppDir    = Join-Path $RepoDir "app"
 $BinDir    = Join-Path $GodotDir "bin"
 
 if (-not $LauncherBin) {
-    $LauncherBin = Join-Path $BinDir "godot.windows.editor.dev.x86_64.llvm.console.exe"
+    # Prefer the sandbox-suffixed binary if present; the launcher's
+    # renderer_executable.gd has matching logic to pick the .sandbox renderer
+    # when SandboxingWin is registered.
+    $sandboxLauncher = Join-Path $BinDir "godot.windows.editor.dev.sandbox.x86_64.llvm.console.exe"
+    if (Test-Path $sandboxLauncher) {
+        $LauncherBin = $sandboxLauncher
+    } else {
+        $LauncherBin = Join-Path $BinDir "godot.windows.editor.dev.x86_64.llvm.console.exe"
+    }
 }
 if (-not $RendererBin) {
-    $RendererBin = Join-Path $BinDir "godot.windows.template_debug.dev.renderer.x86_64.llvm.console.exe"
+    $sandboxRenderer = Join-Path $BinDir "godot.windows.template_debug.dev.renderer.sandbox.x86_64.llvm.console.exe"
+    if (Test-Path $sandboxRenderer) {
+        $RendererBin = $sandboxRenderer
+    } else {
+        $RendererBin = Join-Path $BinDir "godot.windows.template_debug.dev.renderer.x86_64.llvm.console.exe"
+    }
 }
 if (-not $ResultsDir) {
     $ResultsDir = Join-Path $env:TEMP "thegates-autotest"
