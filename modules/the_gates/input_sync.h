@@ -31,8 +31,7 @@
 #ifndef INPUT_SYNC_H
 #define INPUT_SYNC_H
 
-#include "core/input/input.h"
-#include "core/io/file_access.h"
+#include "core/input/input_event.h"
 #include "core/object/ref_counted.h"
 #include "tg_pipe_ipc.h"
 
@@ -58,9 +57,6 @@ public:
 	void receive_input_events();
 
 	void close();
-
-	InputSync();
-	~InputSync();
 };
 
 #endif // INPUT_SYNC_H

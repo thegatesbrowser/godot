@@ -36,46 +36,35 @@
 CommandSync *CommandSync::singleton = nullptr;
 
 void CommandSync::socket_bind(const String &p_address) {
-	peer_disconnected = !socket.bind(p_address);
+	socket.bind(p_address);
 }
 
-void CommandSync::socket_connect(const String &p_address, const String &p_monitor_endpoint) {
-	(void)p_monitor_endpoint;
-	peer_disconnected = !socket.connect(p_address);
+void CommandSync::socket_connect(const String &p_address) {
+	socket.connect(p_address);
 }
 
 void CommandSync::send_command(const Ref<Command> &p_command) {
-	std::string msg_str = var_to_str(p_command).utf8().get_data();
+	const CharString utf8 = var_to_str(p_command).utf8();
 	Vector<uint8_t> payload;
-	payload.resize(msg_str.size());
-	if (!payload.is_empty()) {
-		memcpy(payload.ptrw(), msg_str.data(), msg_str.size());
-	}
+	payload.resize(utf8.length());
+	memcpy(payload.ptrw(), utf8.get_data(), utf8.length());
 	socket.queue_message(payload);
-	if (!socket.poll()) {
-		print_line("Failed to send command");
-		peer_disconnected = true;
-	} else {
-		peer_disconnected = false;
-	}
+	socket.poll();
 }
 
 void CommandSync::send_command(const String &p_name) {
-	Command *command = memnew(Command);
+	Ref<Command> command;
+	command.instantiate();
 	command->set_name(p_name);
-	send_command(Ref<Command>(command));
+	send_command(command);
 }
 
 void CommandSync::send_command(const String &p_name, const Array &p_args) {
-	Command *command = memnew(Command);
+	Ref<Command> command;
+	command.instantiate();
 	command->set_name(p_name);
 	command->set_args(p_args);
-	send_command(Ref<Command>(command));
-}
-
-void CommandSync::poll_monitor() {
-	socket.poll();
-	peer_disconnected = !socket.is_connected((uint64_t)COMMAND_SYNC_HEARTBEAT_TIMEOUT * 1000);
+	send_command(command);
 }
 
 Variant CommandSync::call_execute_function(const Ref<Command> &p_command) {
@@ -91,7 +80,6 @@ Variant CommandSync::call_execute_function(const Ref<Command> &p_command) {
 
 void CommandSync::bind_commands() {
 	auto _input_set_mouse_mode = [](Input::MouseMode p_mode) {
-		print_line("_input_set_mouse_mode " + itos((int)p_mode));
 		DisplayServer::_input_set_mouse_mode(p_mode);
 
 		Array args;
@@ -107,20 +95,12 @@ void CommandSync::bind_commands() {
 }
 
 void CommandSync::receive_commands() {
-	if (!socket.poll()) {
-		peer_disconnected = true;
-		return;
-	}
-	peer_disconnected = false;
+	socket.poll();
 
 	Vector<uint8_t> msg;
 	while (socket.pop_message(msg)) {
-		std::string msg_str;
-		msg_str.resize(msg.size());
-		if (!msg.is_empty()) {
-			memcpy(msg_str.data(), msg.ptr(), msg.size());
-		}
-		call_execute_function((Ref<Command>)str_to_var(msg_str.c_str()));
+		const String text = String::utf8((const char *)msg.ptr(), msg.size());
+		call_execute_function((Ref<Command>)str_to_var(text));
 	}
 }
 

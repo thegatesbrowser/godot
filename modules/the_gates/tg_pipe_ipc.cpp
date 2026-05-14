@@ -30,20 +30,94 @@
 
 #include "tg_pipe_ipc.h"
 
+#include "core/io/marshalls.h"
 #include "core/os/os.h"
 
-String TgPipeIpc::normalize_address(const String &p_address) const {
-	if (p_address.begins_with("pipe://")) {
-		return p_address;
-	}
-	if (p_address.begins_with("ipc://")) {
-		return "pipe://" + p_address.substr(6);
-	}
-	if (p_address.begins_with("/")) {
-		return "pipe://" + p_address;
-	}
-	return "pipe://" + p_address;
+namespace {
+constexpr int FRAME_HEADER_SIZE = 4;
+} // namespace
+
+#ifdef WINDOWS_ENABLED
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+namespace {
+
+constexpr DWORD PIPE_BUFFER_SIZE = 4096;
+constexpr DWORD PIPE_MAX_INSTANCES = 1;
+
+enum WinIoStatus {
+	WIN_OK,
+	WIN_BUSY, // Transient: peer not attached yet, would-block, buffer full.
+	WIN_FATAL, // Handle is unusable for further I/O.
+};
+
+String to_win_pipe_path(const String &p_address) {
+	return String("\\\\.\\pipe\\LOCAL\\") + p_address.replace("pipe://", "").replace("/", "_");
 }
+
+HANDLE open_win_pipe(const String &p_address) {
+	const String win_path = to_win_pipe_path(p_address);
+	const Char16String wpath = win_path.utf16();
+	HANDLE h = CreateFileW((LPCWSTR)wpath.get_data(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (h != INVALID_HANDLE_VALUE) {
+		DWORD mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
+		SetNamedPipeHandleState(h, &mode, nullptr, nullptr);
+		return h;
+	}
+	h = CreateNamedPipeW((LPCWSTR)wpath.get_data(), PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT, PIPE_MAX_INSTANCES, PIPE_BUFFER_SIZE, PIPE_BUFFER_SIZE, 0, nullptr);
+	if (h == INVALID_HANDLE_VALUE) {
+		return nullptr;
+	}
+	ConnectNamedPipe(h, nullptr);
+	return h;
+}
+
+void close_win_pipe(void *&h) {
+	if (h != nullptr && h != INVALID_HANDLE_VALUE) {
+		CloseHandle((HANDLE)h);
+	}
+	h = nullptr;
+}
+
+WinIoStatus classify_win_error(DWORD p_win_err) {
+	if (p_win_err == ERROR_BROKEN_PIPE || p_win_err == ERROR_INVALID_HANDLE) {
+		return WIN_FATAL;
+	}
+	return WIN_BUSY;
+}
+
+WinIoStatus peek_win_pipe(HANDLE p_h, uint64_t &r_available) {
+	DWORD avail = 0;
+	if (!PeekNamedPipe(p_h, nullptr, 0, nullptr, &avail, nullptr)) {
+		r_available = 0;
+		return classify_win_error(GetLastError());
+	}
+	r_available = avail;
+	return WIN_OK;
+}
+
+WinIoStatus read_win_pipe(HANDLE p_h, uint8_t *p_dst, uint64_t p_len, uint64_t &r_read) {
+	DWORD got = 0;
+	if (!ReadFile(p_h, p_dst, (DWORD)p_len, &got, nullptr)) {
+		r_read = got;
+		return classify_win_error(GetLastError());
+	}
+	r_read = got;
+	return got == 0 ? WIN_BUSY : WIN_OK;
+}
+
+WinIoStatus write_win_pipe(HANDLE p_h, const uint8_t *p_src, uint64_t p_len) {
+	DWORD wrote = 0;
+	if (!WriteFile(p_h, p_src, (DWORD)p_len, &wrote, nullptr)) {
+		return classify_win_error(GetLastError());
+	}
+	// PIPE_NOWAIT writes are atomic: either all bytes go or none.
+	return wrote == p_len ? WIN_OK : WIN_BUSY;
+}
+
+} // namespace
+#endif // WINDOWS_ENABLED
 
 String TgPipeIpc::make_read_address() const {
 	return role == ROLE_BIND ? base_address + ".c2s" : base_address + ".s2c";
@@ -62,131 +136,164 @@ bool TgPipeIpc::try_open() {
 		return true;
 	}
 
+#ifdef WINDOWS_ENABLED
+	if (read_handle == nullptr) {
+		read_handle = open_win_pipe(make_read_address());
+	}
+	if (write_handle == nullptr) {
+		write_handle = open_win_pipe(make_write_address());
+	}
+	if (read_handle == nullptr || write_handle == nullptr) {
+		close_handles();
+		return false;
+	}
+#else
 	Error read_error = OK;
 	Error write_error = OK;
 	read_pipe = FileAccess::open(make_read_address(), FileAccess::READ_WRITE, &read_error);
 	write_pipe = FileAccess::open(make_write_address(), FileAccess::READ_WRITE, &write_error);
-
-	if (read_error != OK || write_error != OK || read_pipe.is_null() || write_pipe.is_null() || !read_pipe->is_open() || !write_pipe->is_open()) {
-		read_pipe.unref();
-		write_pipe.unref();
-		connected = false;
+	if (read_error != OK || write_error != OK || read_pipe.is_null() || write_pipe.is_null()) {
+		close_handles();
 		return false;
 	}
+#endif
 
 	connected = true;
 	mark_activity();
 	return true;
 }
 
+void TgPipeIpc::close_handles() {
+	connected = false;
+#ifdef WINDOWS_ENABLED
+	close_win_pipe(read_handle);
+	close_win_pipe(write_handle);
+#else
+	read_pipe.unref();
+	write_pipe.unref();
+#endif
+}
+
 bool TgPipeIpc::bind(const String &p_address) {
 	close();
 	role = ROLE_BIND;
-	base_address = normalize_address(p_address);
+	base_address = p_address;
 	return try_open();
 }
 
 bool TgPipeIpc::connect(const String &p_address) {
 	close();
 	role = ROLE_CONNECT;
-	base_address = normalize_address(p_address);
+	base_address = p_address;
 	return try_open();
 }
 
-void TgPipeIpc::push_frame(const Vector<uint8_t> &p_payload) {
-	uint32_t size = (uint32_t)p_payload.size();
+void TgPipeIpc::queue_message(const Vector<uint8_t> &p_payload) {
+	const uint32_t size = (uint32_t)p_payload.size();
 	Vector<uint8_t> framed;
-	framed.resize((int)size + 4);
-	uint8_t *dst = framed.ptrw();
-	dst[0] = (uint8_t)(size & 0xFF);
-	dst[1] = (uint8_t)((size >> 8) & 0xFF);
-	dst[2] = (uint8_t)((size >> 16) & 0xFF);
-	dst[3] = (uint8_t)((size >> 24) & 0xFF);
+	framed.resize(FRAME_HEADER_SIZE + (int)size);
+	encode_uint32(size, framed.ptrw());
 	if (size > 0) {
-		memcpy(dst + 4, p_payload.ptr(), size);
+		memcpy(framed.ptrw() + FRAME_HEADER_SIZE, p_payload.ptr(), size);
 	}
 	send_queue.push_back(framed);
 }
 
-void TgPipeIpc::queue_message(const Vector<uint8_t> &p_payload) {
-	push_frame(p_payload);
-}
-
 bool TgPipeIpc::pump_write() {
-	if (!connected || write_pipe.is_null()) {
+	if (!connected) {
 		return false;
 	}
-
 	while (!send_queue.is_empty()) {
 		const Vector<uint8_t> &msg = send_queue[0];
+#ifdef WINDOWS_ENABLED
+		const WinIoStatus status = write_win_pipe((HANDLE)write_handle, msg.ptr(), (uint64_t)msg.size());
+		const bool ok = (status == WIN_OK);
+		const bool busy = (status == WIN_BUSY);
+#else
 		write_pipe->store_buffer(msg.ptr(), msg.size());
-		Error write_error = write_pipe->get_error();
-		if (write_error == OK) {
+		const Error err = write_pipe->get_error();
+		const bool ok = (err == OK);
+		const bool busy = (err == ERR_BUSY);
+#endif
+		if (ok) {
 			send_queue.remove_at(0);
 			mark_activity();
 			continue;
 		}
-		if (write_error == ERR_BUSY) {
+		if (busy) {
 			return true;
 		}
-		connected = false;
-		read_pipe.unref();
-		write_pipe.unref();
+		// Fatal: drop both handles so the next poll() retries from scratch.
+		close_handles();
 		return false;
 	}
-
 	return true;
 }
 
 bool TgPipeIpc::pump_read() {
-	if (!connected || read_pipe.is_null()) {
+	if (!connected) {
 		return false;
 	}
-
 	while (true) {
-		uint64_t available = read_pipe->get_length();
+		uint64_t available = 0;
+#ifdef WINDOWS_ENABLED
+		if (peek_win_pipe((HANDLE)read_handle, available) != WIN_OK || available == 0) {
+			break;
+		}
+#else
+		available = read_pipe->get_length();
 		if (available == 0) {
 			break;
 		}
+#endif
+		const int prev_size = recv_stream.size();
+		recv_stream.resize(prev_size + (int)available);
+		uint8_t *dst = recv_stream.ptrw() + prev_size;
 
-		Vector<uint8_t> chunk;
-		chunk.resize((int)available);
-		uint64_t read_size = read_pipe->get_buffer(chunk.ptrw(), available);
-		if (read_size == 0) {
+		uint64_t got = 0;
+#ifdef WINDOWS_ENABLED
+		read_win_pipe((HANDLE)read_handle, dst, available, got);
+#else
+		got = read_pipe->get_buffer(dst, available);
+#endif
+		if (got == 0) {
+			recv_stream.resize(prev_size);
 			break;
 		}
-
-		if (read_size != available) {
-			chunk.resize((int)read_size);
+		if (got != available) {
+			recv_stream.resize(prev_size + (int)got);
 		}
-		recv_stream.append_array(chunk);
 		mark_activity();
 	}
 
-	while (recv_stream.size() >= 4) {
-		const uint8_t *src = recv_stream.ptr();
-		uint32_t payload_size = (uint32_t)src[0] | ((uint32_t)src[1] << 8) | ((uint32_t)src[2] << 16) | ((uint32_t)src[3] << 24);
-		uint64_t frame_size = 4 + payload_size;
-		if ((uint64_t)recv_stream.size() < frame_size) {
+	extract_frames();
+	return true;
+}
+
+void TgPipeIpc::extract_frames() {
+	int offset = 0;
+	while (recv_stream.size() - offset >= FRAME_HEADER_SIZE) {
+		const uint8_t *header = recv_stream.ptr() + offset;
+		const uint32_t payload_size = decode_uint32(header);
+		const int frame_size = FRAME_HEADER_SIZE + (int)payload_size;
+		if (recv_stream.size() - offset < frame_size) {
 			break;
 		}
-
 		Vector<uint8_t> payload;
 		payload.resize((int)payload_size);
 		if (payload_size > 0) {
-			memcpy(payload.ptrw(), src + 4, payload_size);
+			memcpy(payload.ptrw(), header + FRAME_HEADER_SIZE, payload_size);
 		}
 		recv_queue.push_back(payload);
-
-		Vector<uint8_t> rest;
-		rest.resize(recv_stream.size() - (int)frame_size);
-		if (!rest.is_empty()) {
-			memcpy(rest.ptrw(), src + frame_size, rest.size());
-		}
-		recv_stream = rest;
+		offset += frame_size;
 	}
-
-	return true;
+	if (offset > 0) {
+		const int remaining = recv_stream.size() - offset;
+		if (remaining > 0) {
+			memmove(recv_stream.ptrw(), recv_stream.ptr() + offset, remaining);
+		}
+		recv_stream.resize(remaining);
+	}
 }
 
 bool TgPipeIpc::poll() {
@@ -196,8 +303,8 @@ bool TgPipeIpc::poll() {
 	if (!connected) {
 		return false;
 	}
-	bool write_ok = pump_write();
-	bool read_ok = pump_read();
+	const bool write_ok = pump_write();
+	const bool read_ok = pump_read();
 	return write_ok && read_ok;
 }
 
@@ -221,15 +328,7 @@ bool TgPipeIpc::is_connected(uint64_t p_idle_timeout_usec) const {
 }
 
 void TgPipeIpc::close() {
-	connected = false;
-	if (read_pipe.is_valid()) {
-		read_pipe->close();
-	}
-	if (write_pipe.is_valid()) {
-		write_pipe->close();
-	}
-	read_pipe.unref();
-	write_pipe.unref();
+	close_handles();
 	recv_stream.clear();
 	recv_queue.clear();
 	send_queue.clear();
