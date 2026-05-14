@@ -31,15 +31,15 @@ def configure(env):
             print("Linking Seccomp")
 
     if env["platform"] == "windows" and env.get("the_gates_sandbox"):
-        # Vendored Chromium sandbox headers + a prebuilt static lib produced
-        # from the same source. The prebuilt lib lives in our Chromium fork
-        # checkout at C:/code; the headers are vendored in-tree under
-        # godot/thirdparty/chromium-sandbox/.
+        # The Windows sandbox is built directly from the vendored Chromium
+        # sources under godot/thirdparty/chromium-sandbox/. No external
+        # checkout required: every header, every .cc, and every generated
+        # buildflag header lives in tree.
         #
-        # The lib must have been built with SANDBOX_EXPORTS=1 (see the
-        # 08_add_back_SANDBOX_EXPORTS-style patch we apply in our chromium
-        # fork); we also define it in the consumer build so SANDBOX_INTERCEPT
-        # expands to the dllexport variant in any sandbox header we pull in.
+        # The SANDBOX_EXPORTS patch (Firefox-style cross-exe broker/target)
+        # is applied to the vendored sandbox/win/src/ files. Module-local
+        # CPPDEFINES live in modules/the_gates/sandbox/SCsub so toggling
+        # SANDBOX_EXPORTS doesn't invalidate engine-wide TU caches.
 
         env.Replace(CC="clang-cl")
         env.Replace(CXX="clang-cl")
@@ -50,55 +50,24 @@ def configure(env):
         # Disable assembly optimizations in R128 (incompatible with clang-cl link).
         env.Prepend(CPPDEFINES=["R128_STDC_ONLY"])
 
-        # NOTE: SANDBOX_EXPORTS=1 is only set on the sandbox module's TUs
-        # (see modules/the_gates/sandbox/SCsub) — not engine-wide, otherwise
-        # every TU triggers a rebuild on toggle and we touch unrelated code.
-
-        env.Prepend(CPPPATH=[
-            "thirdparty/chromium-sandbox",
-            "C:/code/chromium_git/chromium/src/",
-            "C:/code/chromium_git/chromium/src/out/Release_GN_x64_sandbox/gen/",
-            "C:/code/chromium_git/chromium/src/buildtools/third_party/libc++/",
-            "C:/code/chromium_git/chromium/src/third_party/perfetto/include/",
-            "C:/code/chromium_git/chromium/src/out/Release_GN_x64_sandbox/gen/third_party/perfetto/build_config/",
-            "C:/code/chromium_git/chromium/src/out/Release_GN_x64_sandbox/gen/third_party/perfetto/",
-            "C:/code/chromium_git/chromium/src/base/allocator/partition_allocator/src/",
-            "C:/code/chromium_git/chromium/src/out/Release_GN_x64_sandbox/gen/base/allocator/partition_allocator/src/",
-            "C:/code/chromium_git/chromium/src/third_party/abseil-cpp/",
-            "C:/code/chromium_git/chromium/src/third_party/boringssl/src/include/",
-            "C:/code/chromium_git/chromium/src/third_party/protobuf/src/",
-        ])
-
-        env.Append(LIBPATH=[
-            "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/lib/x64",
-            "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64",
-            "C:/code/chromium_git/chromium/src/cef/binary_distrib/cef_binary_137.0.10+g7e14fe1+chromium-137.0.7151.69_windows64_sandbox/Release",
-        ])
-
+        # Windows system libs the Chromium sandbox + base/ subset needs at link
+        # time. sandbox/win/BUILD.gn declares `libs = [ "ntdll.lib",
+        # "userenv.lib" ]`. base/win/ adds the rest (RuntimeObject for WinRT
+        # strings, SetupAPI for device enum, propsys for VARIANT, etc.).
         env.Append(LINKFLAGS=[
-            "cef_sandbox.lib",
-            "kernel32.lib",
-            "user32.lib",
-            "gdi32.lib",
-            "advapi32.lib",
-            "shell32.lib",
-            "ole32.lib",
-            "oleaut32.lib",
-            "uuid.lib",
-            "winmm.lib",
-            "shlwapi.lib",
-            "propsys.lib",
-            "powrprof.lib",
-            "shcore.lib",
             "ntdll.lib",
+            "userenv.lib",
+            "powrprof.lib",
+            "version.lib",
+            "runtimeobject.lib",
             "setupapi.lib",
             "cfgmgr32.lib",
-            "version.lib",
-            "ws2_32.lib",
-            "runtimeobject.lib",
+            "propsys.lib",
+            "shlwapi.lib",
+            "shcore.lib",
             "dbghelp.lib",
-            "userenv.lib",
-            "delayimp.lib",
+            "winmm.lib",
             "wbemuuid.lib",
             "mincore.lib",
+            "delayimp.lib",
         ])
