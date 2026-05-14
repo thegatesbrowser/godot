@@ -30,11 +30,16 @@ def configure(env):
             env.ParseConfig("pkg-config libseccomp --cflags --libs")
             print("Linking Seccomp")
 
-    if env["platform"] == "windows" and env.get("the_gates_sandbox") and env.msvc:
-        # Build flags to link the renderer against Chromium's cef_sandbox.
-        # Requires a local Chromium/CEF build at C:/code/chromium_git (see
-        # https://github.com/thegatesbrowser/chromium). Paths are intentionally
-        # absolute; this is a developer-host build, not a CI build.
+    if env["platform"] == "windows" and env.get("the_gates_sandbox"):
+        # Vendored Chromium sandbox headers + a prebuilt static lib produced
+        # from the same source. The prebuilt lib lives in our Chromium fork
+        # checkout at C:/code; the headers are vendored in-tree under
+        # godot/thirdparty/chromium-sandbox/.
+        #
+        # The lib must have been built with SANDBOX_EXPORTS=1 (see the
+        # 08_add_back_SANDBOX_EXPORTS-style patch we apply in our chromium
+        # fork); we also define it in the consumer build so SANDBOX_INTERCEPT
+        # expands to the dllexport variant in any sandbox header we pull in.
 
         env.Replace(CC="clang-cl")
         env.Replace(CXX="clang-cl")
@@ -45,7 +50,12 @@ def configure(env):
         # Disable assembly optimizations in R128 (incompatible with clang-cl link).
         env.Prepend(CPPDEFINES=["R128_STDC_ONLY"])
 
+        # NOTE: SANDBOX_EXPORTS=1 is only set on the sandbox module's TUs
+        # (see modules/the_gates/sandbox/SCsub) — not engine-wide, otherwise
+        # every TU triggers a rebuild on toggle and we touch unrelated code.
+
         env.Prepend(CPPPATH=[
+            "thirdparty/chromium-sandbox",
             "C:/code/chromium_git/chromium/src/",
             "C:/code/chromium_git/chromium/src/out/Release_GN_x64_sandbox/gen/",
             "C:/code/chromium_git/chromium/src/buildtools/third_party/libc++/",
