@@ -65,6 +65,19 @@ godot/drivers/vulkan/rendering_device_driver_vulkan.cpp
 
 The Metal-side IOSurface export uses `VkExportMetalObjectsEXT` — that's why `modules/the_gates/config.py` and the build defaults touch the Metal extension on macOS. See the commit `9b5f90d209` ("default function bodies to build with metal").
 
+### Named-pipe `FileAccess` driver fixes
+
+Unconditional (not `#ifdef`'d) fixes in:
+
+```
+godot/drivers/windows/file_access_windows_pipe.cpp
+godot/drivers/unix/file_access_unix_pipe.cpp
+```
+
+Added in commit `170ccff0a9` ("fix named pipe IPC at the driver layer"). The original drivers were built for `OS.execute_with_pipe` (anonymous pipes to a child, always-connected, blocking-is-fine); they don't work for symmetric named-pipe IPC out of the box. The fork-side fixes set `PIPE_NOWAIT` on the Windows client handle, classify per-OS errors (`GetLastError` / `errno`) into `ERR_BUSY` vs fatal, wrap Unix read/write in `EINTR` retry, and stop spamming `PeekNamedPipe` errors when no peer is attached.
+
+Could be upstreamed — they're not TheGates-specific. See [[IPC Pipe Stack]] for context and the failure modes they fix.
+
 ## What is *not* changed
 
 - The renderer architecture (Forward+, Mobile, Compatibility) — all upstream.

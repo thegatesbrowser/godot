@@ -14,6 +14,7 @@ The starting point for engine-side work. Every fork-specific note is reachable f
 ## The two-process architecture (engine side)
 
 - [[External Texture Sharing]] — how a Vulkan-rendered framebuffer in one process becomes a `Texture2D` in another, with no CPU copy
+- [[IPC Pipe Stack]] — `TgPipeIpc` on top of Godot named pipes (replaces ZMQ); driver-layer fork fixes for symmetric IPC
 
 ## Per-OS
 
