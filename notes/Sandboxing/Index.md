@@ -1,6 +1,13 @@
 # Sandboxing — handoff index
 
-Work-in-progress effort to properly sandbox the renderer process, currently on branch `chromium-sandboxing` of this submodule. **Unfinished.**
+Effort to properly sandbox the renderer process, currently on branch
+`chromium-sandboxing` of this submodule. **Working end-to-end on Windows
+from in-tree sources** — see [[Agent Session 2026-05-15]].
+
+`pwsh godot/tools/run-sandbox-test.ps1` returns `[VERIFY-OK]
+integrity=untrusted canary_file=blocked build=the_gates_sandbox=yes`. The
+chromium sandbox lib is built by SCons from `thirdparty/chromium-sandbox/`
+— no `C:/code` paths or prebuilt `cef_sandbox.lib` in the build line.
 
 The renderer must be locked down so a hostile gate cannot read user files, registry, network, IPC channels it doesn't own, etc. Chromium's multi-process sandbox is the model. Linux already has a seccomp implementation (the `Sandboxing` class, see [[Custom Godot Module]]); Windows is the current focus; macOS is untouched.
 
@@ -17,8 +24,11 @@ The renderer must be locked down so a hostile gate cannot read user files, regis
 9. [[GDExtension Loading]] — how gate-shipped native libs load today (deliberate ordering of lower_token after imports) and what bootstrap/vendoring change about it.
 10. [[Autonomous Test Loop]] — design for the write→build→run→verify harness that lets an agent self-drive the vendoring port. Diagnostic primitive, GDScript autotest hook, runner script, failure-mode catalog.
 11. [[Agent Instructions]] — concrete agent contract: the one command per iteration, failure-mode catalog, context-budget rules, edit policy, when to stop. **Read this if you're an agent.**
-12. [[Reference Material]] — every bug number, every file path, every key quote. Use this when you need to dig deeper, verify a claim, or pick up a research thread. Also contains a list of open questions worth pulling on.
-13. [[Research Notes]] — the original wider-internet sweep: Chromium docs, crbugs, chromium-dev list, CEF forum, Firefox, Project Zero, StackOverflow. Some content now duplicated in Reference Material; worth skimming for the narrative sweep.
+12. [[Agent Session 2026-05-14]] — full writeup of the session that got VERIFY-OK at integrity=untrusted using a prebuilt cef_sandbox.lib. Read this if you're picking up where the previous agent left off — especially the "Non-obvious debugging discoveries" catalog.
+13. [[Next Session Prompt]] — copy-paste prompt for the deferred sandbox-from-source SCons task.
+14. [[Future Work]] — what's left to do after the 2026-05-14 vendoring win, sorted into tiers (finish-the-win / productionization / Chrome parity / cross-platform / hygiene). Includes WIN32K_DISABLE, network brokering, sign-verify, macOS wiring, and the optional process mitigations not yet on.
+13. [[Reference Material]] — every bug number, every file path, every key quote. Use this when you need to dig deeper, verify a claim, or pick up a research thread. Also contains a list of open questions worth pulling on.
+14. [[Research Notes]] — the original wider-internet sweep: Chromium docs, crbugs, chromium-dev list, CEF forum, Firefox, Project Zero, StackOverflow. Some content now duplicated in Reference Material; worth skimming for the narrative sweep.
 
 ## Known open gaps (see [[Implementation Status]] for detail)
 

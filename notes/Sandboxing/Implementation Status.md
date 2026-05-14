@@ -1,6 +1,37 @@
 # Implementation Status — `chromium-sandboxing` branch
 
-What is actually in this repo right now. Reflects branch `chromium-sandboxing` against `tg-4.5`.
+**Current state (2026-05-15):** sandbox is working end-to-end on Windows
+from in-tree sources. `pwsh godot/tools/run-sandbox-test.ps1` returns
+`[VERIFY-OK] integrity=untrusted canary_file=blocked` with the renderer
+running at `INTEGRITY_LEVEL_UNTRUSTED` (S-1-16-0), 4 restricted SIDs,
+alternate desktop, full DEP+ASLR+payload mitigations, file + registry
+canaries both blocked with ERROR_ACCESS_DENIED.
+
+The chromium sandbox lib is built by SCons directly from
+`thirdparty/chromium-sandbox/` — no `C:/code` dependency, no prebuilt
+`cef_sandbox.lib` link. See [[Agent Session 2026-05-15]] for the full
+build architecture (Firefox-style vendor + chromium-shim + targeted
+stubs) and [[Agent Session 2026-05-14]] for the SANDBOX_EXPORTS cross-exe
+work that landed before it.
+
+The rest of this file is the original status snapshot from the 2026-05-14
+handoff — kept for historical context but **superseded** by the journals
+above. Specifically:
+
+- `helpers.h` was deleted (was leaky, never used by the rewritten
+  `sandbox_win.cpp`).
+- `spawn_target` is now called by the launcher per gate spawn, not just
+  bound to GDScript with no caller.
+- `config.py` no longer references `C:/code` or any hardcoded MSVC/SDK
+  paths.
+- Hardcoded user-specific dev-machine paths in `sandbox_win.cpp` are gone.
+
+---
+
+## Original snapshot (pre-2026-05-15)
+
+What was in this repo at the start of the 2026-05-14 session. Reflects
+branch `chromium-sandboxing` against `tg-4.5`.
 
 ## Files added under `modules/the_gates/sandbox/`
 
