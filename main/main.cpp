@@ -154,6 +154,10 @@
 #include "modules/the_gates/sandboxing.h"
 #endif
 
+#if defined(TG_RENDERER) && defined(THE_GATES_SANDBOX) && defined(WINDOWS_ENABLED)
+#include "modules/the_gates/sandbox/sandbox_win.h"
+#endif
+
 /* Static members */
 
 // Singletons
@@ -4730,6 +4734,19 @@ int Main::start() {
 	// InputSync
 	input_sync = memnew(InputSync);
 	input_sync->socket_connect();
+
+#if defined(THE_GATES_SANDBOX) && defined(WINDOWS_ENABLED)
+	{
+		Ref<SandboxingWin> sandboxing_win;
+		sandboxing_win.instantiate();
+		if (sandboxing_win->is_target()) {
+			Error sandbox_err = sandboxing_win->lower_token();
+			if (sandbox_err != OK) {
+				ERR_PRINT("SandboxingWin::lower_token failed; renderer continues without sandbox.");
+			}
+		}
+	}
+#endif
 #endif
 
 	return EXIT_SUCCESS;

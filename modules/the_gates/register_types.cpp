@@ -36,6 +36,10 @@
 #include "input_sync.h"
 #include "sandboxing.h"
 
+#if defined(THE_GATES_SANDBOX) && defined(WINDOWS_ENABLED)
+#include "sandbox/sandbox_win.h"
+#endif
+
 void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
@@ -46,6 +50,10 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(Command);
 	GDREGISTER_CLASS(CommandSync);
 	GDREGISTER_CLASS(TGExternalTexture);
+
+#if defined(THE_GATES_SANDBOX) && defined(WINDOWS_ENABLED)
+	GDREGISTER_CLASS(SandboxingWin);
+#endif
 }
 
 void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {

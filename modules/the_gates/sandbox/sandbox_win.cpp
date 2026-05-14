@@ -46,7 +46,7 @@ void on_spawn_target_complete(base::win::ScopedProcessInformation process_info, 
 	}
 }
 
-Error SandboxingWin::spawn_target(const Vector<String> &p_arguments) {
+Error SandboxingWin::spawn_target(const String &p_executable, const Vector<String> &p_arguments) {
 	ERR_FAIL_COND_V_MSG(is_target(), ERR_UNAUTHORIZED, "Target process cannot spawn another targets");
 
 	std::unique_ptr<BrokerServicesDelegateImpl> delegate = std::make_unique<BrokerServicesDelegateImpl>();
@@ -75,9 +75,8 @@ Error SandboxingWin::spawn_target(const Vector<String> &p_arguments) {
 	ret = config->AllowRegistryAccess(sandbox::RegistrySemantics::kAllowAny, L"HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion");
 	ERR_FAIL_COND_V_MSG(ret != sandbox::SBOX_ALL_OK, FAILED, "Failed to set registry access");
 
-	String exe_path = OS::get_singleton()->get_executable_path();
-	String args_str = exe_path + " " + String(" ").join(p_arguments);
-	broker_service->SpawnTargetAsync(to_wchar(exe_path), to_wchar(args_str), std::move(policy), base::BindOnce(&on_spawn_target_complete));
+	String args_str = p_executable + " " + String(" ").join(p_arguments);
+	broker_service->SpawnTargetAsync(to_wchar(p_executable), to_wchar(args_str), std::move(policy), base::BindOnce(&on_spawn_target_complete));
 
 	return OK;
 }
@@ -202,7 +201,9 @@ Error SandboxingWin::lower_token() {
 }
 
 void SandboxingWin::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("spawn_target", "arguments"), &SandboxingWin::spawn_target);
+	ClassDB::bind_method(D_METHOD("spawn_target", "executable", "arguments"), &SandboxingWin::spawn_target);
+	ClassDB::bind_method(D_METHOD("lower_token"), &SandboxingWin::lower_token);
+	ClassDB::bind_method(D_METHOD("is_target"), &SandboxingWin::is_target);
 }
 
 SandboxingWin::SandboxingWin() {
