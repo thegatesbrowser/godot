@@ -147,7 +147,7 @@ strings. New implementation:
 
 `app/scripts/renderer/renderer_manager.gd`'s `start_process` now checks
 `ClassDB.class_exists("SandboxingWin")`. If true (i.e. the launcher was built
-with `the_gates_sandbox=yes`), it instantiates the broker and calls
+with `tg_sandbox=yes`), it instantiates the broker and calls
 `spawn_target(gate.renderer, args)`. Falls back to `OS.execute_with_pipe`
 for non-Windows builds or when `SandboxingWin` isn't registered.
 
@@ -174,14 +174,14 @@ From a clean state:
 
 ```powershell
 pwsh godot/tools/run-sandbox-test.ps1 -Timeout 60
-[VERIFY-OK] integrity=untrusted renderer_pid=34768 canary_file=blocked build=the_gates_sandbox=yes
+[VERIFY-OK] integrity=untrusted renderer_pid=34768 canary_file=blocked build=tg_sandbox=yes
 ```
 
 `verify.json` shows the sandbox is fully engaged at Chrome-renderer strictness:
 
 ```json
 {
-  "build": "the_gates_sandbox=yes",
+  "build": "tg_sandbox=yes",
   "integrity": "untrusted",           // S-1-16-0 — strictest mandatory IL
   "restricted_sid_count": 4,          // USER_LIMITED applied
   "alt_desktop": "sbox_alternate_desktop_local_winstation_0x79F4",
@@ -245,7 +245,7 @@ Things that cost an iteration each and would cost a future engineer the same ite
 6. **Sandbox-module TUs need C++20.**
    The vendored `base/numerics/safe_conversions_impl.h` uses `requires(std::is_arithmetic_v<T>)` (C++20 concepts). Godot's engine TUs are C++17. Solution: strip `/std:c++` from `env_sandbox.CXXFLAGS` and Append `/std:c++20` (last-wins for clang-cl) — scoped to the sandbox module only, not engine-wide.
 
-7. **`the_gates_sandbox=yes` was guarded behind `env.msvc` in `config.py`.**
+7. **`tg_sandbox=yes` was guarded behind `env.msvc` in `config.py`.**
    The harness builds with `use_llvm=yes` which sets `CC=clang-cl` but leaves `env.msvc=False`. The sandbox config branch then silently didn't fire. Removed the guard — clang-cl produces MSVC-ABI binaries fine, the `cef_sandbox.lib` ABI requirement is satisfied either way.
 
 8. **SCons MD5-based change detection requires actual content changes.**

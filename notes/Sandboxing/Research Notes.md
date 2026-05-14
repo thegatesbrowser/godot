@@ -184,7 +184,7 @@ Pragmatic alternative the user should consider: **does the renderer actually nee
 
 `cef_sandbox.lib` is built with **static CRT (/MT)** and requires its consumers to link /MT too. Mixing /MT with /MD in one EXE is impossible. Pre-built CEF binaries enforce this.
 
-Godot normally builds /MD on Windows (the default Visual Studio runtime). The user's `config.py` switches the whole build to `clang-cl` when `the_gates_sandbox=True` — but **clang-cl by default is /MD as well**. No explicit `/MT` flag is added in `config.py`. This is a likely silent linker failure / DLL hell waiting to happen.
+Godot normally builds /MD on Windows (the default Visual Studio runtime). The user's `config.py` switches the whole build to `clang-cl` when `tg_sandbox=True` — but **clang-cl by default is /MD as well**. No explicit `/MT` flag is added in `config.py`. This is a likely silent linker failure / DLL hell waiting to happen.
 
 To use a from-source sandbox (just `//sandbox` without going through CEF) the user could build it with `use_custom_libcxx=false` and the same CRT mode as Godot. That avoids the /MT requirement at the cost of building Chromium-without-CEF themselves. [crbug 3824 #1](https://github.com/chromiumembedded/cef/issues/3824) confirms `use_custom_libcxx=false` is the right GN arg.
 
@@ -202,7 +202,7 @@ To use a from-source sandbox (just `//sandbox` without going through CEF) the us
 
 These are gaps in the user's current state that I couldn't resolve from reading the repo. Worth confirming up front.
 
-1. **Does the build even compile today?** `the_gates_sandbox=yes target=template_debug` — does it produce a binary, or does the clang-cl + /MT mismatch fail at link time?
+1. **Does the build even compile today?** `tg_sandbox=yes target=template_debug` — does it produce a binary, or does the clang-cl + /MT mismatch fail at link time?
 2. **Does the renderer actually run as a sandbox target?** The `is_target()` check returns true only if `GetBrokerServices() == nullptr`, which happens only when launched as a child of a broker that ran `SpawnTarget` on this exe. The launcher uses `OS::create_process` today, so `is_target()` is **false** in the renderer and `lower_token()` is silently skipped. Has this been observed?
 3. **Has `test_sandbox()` ever passed?** If yes — under what config (with/without the SUBSYS_REGISTRY revert)? If no — what was the failure mode (file write succeeded? registry read failed? crash before lockdown?)
 4. **What's in stash@{0}: "On chromium-sandboxing: some sandbox test"?** Worth popping to find out.
@@ -210,7 +210,7 @@ These are gaps in the user's current state that I couldn't resolve from reading 
 6. **Is the Chromium fork commit `8aed42a "cef-build. TODO: delete commit"` meant to be squashed away?** It's a huge mixed bag of CEF patches that aren't part of the sandbox revert.
 7. **Was the AppContainer experiment abandoned because LPAC is the better target, or because vanilla AC was breaking Vulkan?** The branch history shows "adding app container capabilities" → "delete app container as it's not used by default in chromium" but the reasoning isn't recorded.
 8. **Has the user tried `INTEGRITY_LEVEL_LOW` instead of `UNTRUSTED`?** GPU work in Chrome runs at LOW. Vulkan + UNTRUSTED is likely the source of many "AllowRegistryAccess (wip)" iterations.
-9. **Why force clang-cl when `the_gates_sandbox=yes`?** Is it required by some Chromium header? Or was it tried to fix a different toolchain bug?
+9. **Why force clang-cl when `tg_sandbox=yes`?** Is it required by some Chromium header? Or was it tried to fix a different toolchain bug?
 10. **Does the launcher need a SandboxingWin too?** The Chromium model needs the broker to live in the launcher process — i.e. the launcher would need to link the sandbox lib and call `SpawnTarget` to launch the renderer. Has this been planned but not yet built?
 11. **Is the CEF dependency actually wanted?** Nothing in `modules/the_gates/sandbox/` calls into CEF — they only use `sandbox::*` symbols. The user could potentially link directly against a stripped `//sandbox` build and drop the CEF distrib entirely. That would also solve the /MT problem (build it the way Godot wants).
 12. **What's the Linux/macOS plan?** Linux has the seccomp `Sandboxing` class. macOS has nothing. Is macOS abandoned, or scheduled, or unstarted?

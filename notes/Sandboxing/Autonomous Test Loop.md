@@ -112,10 +112,10 @@ $temp = "$env:TEMP\thegates-autotest"
 New-Item -ItemType Directory -Force $temp | Out-Null
 
 # Build
-scons -j8 dev_build=yes tg_renderer=no the_gates_sandbox=yes ... 2>&1 > $temp\build-launcher.log
+scons -j8 dev_build=yes tg_renderer=no tg_sandbox=yes ... 2>&1 > $temp\build-launcher.log
 if ($LASTEXITCODE -ne 0) { Write-Host "[VERIFY-FAIL] launcher build"; exit 11 }
 
-scons -j8 dev_build=yes tg_renderer=yes target=template_debug the_gates_sandbox=yes ... 2>&1 > $temp\build-renderer.log
+scons -j8 dev_build=yes tg_renderer=yes target=template_debug tg_sandbox=yes ... 2>&1 > $temp\build-renderer.log
 if ($LASTEXITCODE -ne 0) { Write-Host "[VERIFY-FAIL] renderer build"; exit 12 }
 
 # Launch (background) with autotest harness

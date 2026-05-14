@@ -155,7 +155,7 @@
 #include "modules/the_gates/sandboxing.h"
 #endif
 
-#if defined(TG_RENDERER) && defined(THE_GATES_SANDBOX) && defined(WINDOWS_ENABLED)
+#if defined(TG_RENDERER) && defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 #include "modules/the_gates/sandbox/sandbox_win.h"
 #endif
 
@@ -4737,7 +4737,7 @@ int Main::start() {
 	input_sync = memnew(InputSync);
 	input_sync->socket_connect();
 
-#if defined(THE_GATES_SANDBOX) && defined(WINDOWS_ENABLED)
+#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 	{
 		Ref<SandboxingWin> sandboxing_win;
 		sandboxing_win.instantiate();

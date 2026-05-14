@@ -95,7 +95,7 @@ Build commands haven't changed. From the `godot/` submodule:
 
 ```
 scons -j$(nproc) dev_build=yes tg_renderer=yes target=template_debug \
-      the_gates_sandbox=yes compiledb=yes use_llvm=yes linker=lld \
+      tg_sandbox=yes compiledb=yes use_llvm=yes linker=lld \
       disable_exceptions=no
 ```
 

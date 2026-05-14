@@ -186,10 +186,10 @@ void SandboxDiagnostics::dump() {
 	diag["platform"] = "windows";
 	diag["pid"] = (int)GetCurrentProcessId();
 	diag["build"] = String(
-#ifdef THE_GATES_SANDBOX
-			"the_gates_sandbox=yes"
+#ifdef TG_SANDBOX
+			"tg_sandbox=yes"
 #else
-			"the_gates_sandbox=no"
+			"tg_sandbox=no"
 #endif
 	);
 

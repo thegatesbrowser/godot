@@ -33,7 +33,7 @@ Default behavior:
 
 Useful switches:
 - `-Build` — rebuild launcher + renderer first
-- `-SandboxBuild` — pass `the_gates_sandbox=yes` to scons (combine with `-Build`)
+- `-SandboxBuild` — pass `tg_sandbox=yes` to scons (combine with `-Build`)
 - `-Timeout <s>` — change the in-launcher autotest timeout
 - `-GateUrl <url>` — different gate
 - `-VerboseLogs` — pass `--verbose` everywhere (huge logs; only for deep debug)
@@ -82,7 +82,7 @@ After a success or `no_diag_block`-adjacent failure, the diag JSON is parsed int
 {
   "platform": "windows",
   "pid": 12345,
-  "build": "the_gates_sandbox=yes|no",
+  "build": "tg_sandbox=yes|no",
   "integrity_sid": "S-1-16-0",
   "integrity": "untrusted|low|medium|...",
   "restricted_sid_count": 0,
@@ -106,7 +106,7 @@ After a success or `no_diag_block`-adjacent failure, the diag JSON is parsed int
 
 What you want to see when the sandbox is engaged correctly:
 
-- `"build": "the_gates_sandbox=yes"`
+- `"build": "tg_sandbox=yes"`
 - `"integrity": "untrusted"`
 - `"restricted_sid_count": 1` (just the null SID)
 - `"win32k_disabled": true` (once you've added mitigations)

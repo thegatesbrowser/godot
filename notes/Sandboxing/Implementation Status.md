@@ -44,7 +44,7 @@ branch `chromium-sandboxing` against `tg-4.5`.
 
 ## The `SandboxingWin` class
 
-GDClass exposed as `SandboxingWin` (registered in `register_types.cpp` under `THE_GATES_SANDBOX && WINDOWS_ENABLED`).
+GDClass exposed as `SandboxingWin` (registered in `register_types.cpp` under `TG_SANDBOX && WINDOWS_ENABLED`).
 
 Internal state: `sandbox::BrokerServices* broker_service`, populated in the constructor via `SandboxFactory::GetBrokerServices()`. The Chromium sandbox API returns non-null only in the broker process — so `is_target()` returns true iff `broker_service == nullptr`, i.e. iff we are the spawned child.
 
@@ -84,7 +84,7 @@ Whether the test currently passes is an open question. See questions in [[Index]
 After `input_sync->socket_connect()` in `Main::start()`:
 
 ```cpp
-#if defined(THE_GATES_SANDBOX) && defined(WINDOWS_ENABLED)
+#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 {
     Ref<SandboxingWin> sandboxing_win;
     sandboxing_win.instantiate();
@@ -106,16 +106,16 @@ Best-effort. A failure does not abort the renderer.
 
 ### SCons flag
 
-`SConstruct` exposes `the_gates_sandbox=False`. When enabled:
+`SConstruct` exposes `tg_sandbox=False`. When enabled:
 
-- Sets `CPPDEFINES += THE_GATES_SANDBOX`
+- Sets `CPPDEFINES += TG_SANDBOX`
 - Adds `.sandbox` to the binary suffix
 - Triggers `modules/the_gates/sandbox/SCsub` (only on `platform == "windows"`)
 - Triggers the Windows clang-cl + cef_sandbox setup in `modules/the_gates/config.py`
 
 ### `modules/the_gates/config.py` Windows path
 
-Only runs when `platform == "windows" && the_gates_sandbox && env.msvc`. It:
+Only runs when `platform == "windows" && tg_sandbox && env.msvc`. It:
 
 - Replaces `CC`/`CXX` with `clang-cl`. **MSVC is no longer used.**
 - Adds `-mssse3 -msse4.1` for libwebp under clang-cl.
