@@ -42,6 +42,29 @@
 #include <unistd.h>
 #include <cerrno>
 
+static ssize_t pipe_read_retry(int p_fd, void *p_buf, size_t p_len) {
+	ssize_t r;
+	do {
+		r = ::read(p_fd, p_buf, p_len);
+	} while (r == -1 && errno == EINTR);
+	return r;
+}
+
+static ssize_t pipe_write_retry(int p_fd, const void *p_buf, size_t p_len) {
+	ssize_t r;
+	do {
+		r = ::write(p_fd, p_buf, p_len);
+	} while (r == -1 && errno == EINTR);
+	return r;
+}
+
+static Error classify_unix_pipe_errno(int p_errno, Error p_fatal) {
+	if (p_errno == EAGAIN || p_errno == EWOULDBLOCK) {
+		return ERR_BUSY;
+	}
+	return p_fatal;
+}
+
 Error FileAccessUnixPipe::open_existing(int p_rfd, int p_wfd, bool p_blocking) {
 	// Open pipe using handles created by pipe(fd) call in the OS.execute_with_pipe.
 	_close();
@@ -145,16 +168,13 @@ uint64_t FileAccessUnixPipe::get_buffer(uint8_t *p_dst, uint64_t p_length) const
 	ERR_FAIL_COND_V_MSG(fd[0] < 0, -1, "Pipe must be opened before use.");
 	ERR_FAIL_COND_V(!p_dst && p_length > 0, -1);
 
-	ssize_t read = ::read(fd[0], p_dst, p_length);
-	if (read == -1) {
-		last_error = ERR_FILE_CANT_READ;
-		read = 0;
-	} else if (read != (ssize_t)p_length) {
-		last_error = ERR_FILE_CANT_READ;
-	} else {
-		last_error = OK;
+	ssize_t r = pipe_read_retry(fd[0], p_dst, p_length);
+	if (r == -1) {
+		last_error = classify_unix_pipe_errno(errno, ERR_FILE_CANT_READ);
+		return 0;
 	}
-	return read;
+	last_error = OK;
+	return r;
 }
 
 Error FileAccessUnixPipe::get_error() const {
@@ -165,13 +185,19 @@ bool FileAccessUnixPipe::store_buffer(const uint8_t *p_src, uint64_t p_length) {
 	ERR_FAIL_COND_V_MSG(fd[1] < 0, false, "Pipe must be opened before use.");
 	ERR_FAIL_COND_V(!p_src && p_length > 0, false);
 
-	if (::write(fd[1], p_src, p_length) != (ssize_t)p_length) {
+	ssize_t r = pipe_write_retry(fd[1], p_src, p_length);
+	if (r == -1) {
+		last_error = classify_unix_pipe_errno(errno, ERR_FILE_CANT_WRITE);
+		return false;
+	}
+	if ((uint64_t)r != p_length) {
+		// POSIX guarantees writes <= PIPE_BUF are atomic; partial write means
+		// the stream is now misaligned — treat as fatal so the caller tears down.
 		last_error = ERR_FILE_CANT_WRITE;
 		return false;
-	} else {
-		last_error = OK;
-		return true;
 	}
+	last_error = OK;
+	return true;
 }
 
 void FileAccessUnixPipe::close() {
