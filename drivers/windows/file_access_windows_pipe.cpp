@@ -35,6 +35,17 @@
 #include "core/os/os.h"
 #include "core/string/print_string.h"
 
+static Error classify_win_pipe_error(DWORD p_err, Error p_fatal) {
+	switch (p_err) {
+		case ERROR_BROKEN_PIPE:
+		case ERROR_INVALID_HANDLE:
+			return p_fatal;
+		default:
+			// Transient: peer not attached yet, would-block, buffer full.
+			return ERR_BUSY;
+	}
+}
+
 Error FileAccessWindowsPipe::open_existing(HANDLE p_rfd, HANDLE p_wfd) {
 	// Open pipe using handles created by CreatePipe(rfd, wfd, NULL, 4096) call in the OS.execute_with_pipe.
 	_close();
@@ -64,6 +75,9 @@ Error FileAccessWindowsPipe::open_internal(const String &p_path, int p_mode_flag
 			return last_error;
 		}
 		ConnectNamedPipe(h, NULL);
+	} else {
+		DWORD mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
+		SetNamedPipeHandleState(h, &mode, nullptr, nullptr);
 	}
 	fd[0] = h;
 	fd[1] = h;
@@ -100,7 +114,11 @@ uint64_t FileAccessWindowsPipe::get_length() const {
 	ERR_FAIL_COND_V_MSG(fd[0] == 0, -1, "Pipe must be opened before use.");
 
 	DWORD buf_rem = 0;
-	ERR_FAIL_COND_V(!PeekNamedPipe(fd[0], nullptr, 0, nullptr, &buf_rem, nullptr), 0);
+	if (!PeekNamedPipe(fd[0], nullptr, 0, nullptr, &buf_rem, nullptr)) {
+		last_error = classify_win_pipe_error(GetLastError(), ERR_FILE_CANT_READ);
+		return 0;
+	}
+	last_error = OK;
 	return buf_rem;
 }
 
@@ -122,11 +140,11 @@ uint64_t FileAccessWindowsPipe::get_buffer(uint8_t *p_dst, uint64_t p_length) co
 	ERR_FAIL_COND_V(!p_dst && p_length > 0, -1);
 
 	DWORD read = 0;
-	if (!ReadFile(fd[0], p_dst, p_length, &read, nullptr) || read != p_length) {
-		last_error = ERR_FILE_CANT_READ;
-	} else {
-		last_error = OK;
+	if (!ReadFile(fd[0], p_dst, p_length, &read, nullptr)) {
+		last_error = classify_win_pipe_error(GetLastError(), ERR_FILE_CANT_READ);
+		return read;
 	}
+	last_error = OK;
 	return read;
 }
 
@@ -147,13 +165,17 @@ void FileAccessWindowsPipe::store_buffer(const uint8_t *p_src, uint64_t p_length
 	ERR_FAIL_COND_MSG(fd[1] == 0, "Pipe must be opened before use.");
 	ERR_FAIL_COND(!p_src && p_length > 0);
 
-	DWORD read = -1;
-	bool ok = WriteFile(fd[1], p_src, p_length, &read, nullptr);
-	if (!ok || read != p_length) {
-		last_error = ERR_FILE_CANT_WRITE;
-	} else {
-		last_error = OK;
+	DWORD written = 0;
+	if (!WriteFile(fd[1], p_src, p_length, &written, nullptr)) {
+		last_error = classify_win_pipe_error(GetLastError(), ERR_FILE_CANT_WRITE);
+		return;
 	}
+	if (written != p_length) {
+		// PIPE_NOWAIT writes are atomic per MSDN: short write means zero bytes.
+		last_error = ERR_BUSY;
+		return;
+	}
+	last_error = OK;
 }
 
 void FileAccessWindowsPipe::close() {

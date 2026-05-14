@@ -31,12 +31,8 @@
 #ifndef TG_PIPE_IPC_H
 #define TG_PIPE_IPC_H
 
-#include "core/string/ustring.h"
-#include "core/templates/vector.h"
-
-#ifndef WINDOWS_ENABLED
 #include "core/io/file_access.h"
-#endif
+#include "core/templates/vector.h"
 
 class TgPipeIpc {
 public:
@@ -48,17 +44,8 @@ public:
 private:
 	String base_address;
 	Role role = ROLE_CONNECT;
-
-#ifdef WINDOWS_ENABLED
-	// Raw Win32 HANDLEs stored as void* to avoid leaking <windows.h>
-	// into every translation unit that includes this header.
-	void *read_handle = nullptr;
-	void *write_handle = nullptr;
-#else
 	Ref<FileAccess> read_pipe;
 	Ref<FileAccess> write_pipe;
-#endif
-
 	Vector<uint8_t> recv_stream;
 	Vector<Vector<uint8_t>> recv_queue;
 	Vector<Vector<uint8_t>> send_queue;
