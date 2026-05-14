@@ -16,7 +16,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	Error spawn_target(const Vector<String> &p_arguments);
+	Error spawn_target(const String &p_executable, const Vector<String> &p_arguments);
 	Error lower_token();
 
 	bool is_target() { return broker_service == nullptr; }
