@@ -145,6 +145,83 @@ ERR_FAIL_COND_V_MSG(filehandle == FileHandleInvalid, ERR_CANT_CREATE, "Unable to
 
 Read upstream `core/error/error_macros.h` for the full list.
 
+### Comments
+
+**Match upstream Godot's comment density and shape**, because that's the project's only C++ style and the fork code lives inside the same build. In a sample across `core/`, `scene/`, `servers/rendering/`, `drivers/vulkan/`, `platform/`, and several upstream modules, comments are **roughly 3–4% of lines**, the **modal function has zero**, and **~75–80% of comments are a single `//` line**. Multi-line blocks exist where a constraint genuinely requires them (Vulkan driver workarounds, math invariants in `basis.cpp`, ACL semantics in our `socket_acl_win.cpp`) — they aren't the default and they aren't a substitute for clear code.
+
+The unit of comment is **one line, sentence-case, ending with `.`**. Multi-line is an escalation, not a habit. The longest comment in `modules/the_gates/` is the 13-line SDDL doc on `socket_acl_win.h`'s public function; treat it as the **ceiling**, not the model.
+
+```cpp
+// BAD — 1-line label over 1 line of code is narration, not a divider (real upstream examples)
+// Create our OpenXR instance                              // openxr_api.cpp
+xrCreateInstance(&info, nullptr, &instance);
+
+// Get our project name                                    // openxr_api.cpp
+String name = ProjectSettings::get_singleton()->get("application/config/name");
+
+
+// GOOD — one line, names a constraint that isn't visible from the call (real upstream examples)
+// Disconnect all one-shot connections before emitting to prevent recursion.
+// Target might have been deleted during signal callback, this is expected and OK.
+// Keep this method in sync with `Node::to_string`.
+// Must take a copy instead of a reference (see GH-31736).
+
+
+// GOOD — section divider labeling a multi-line phase within a function (external_texture.cpp)
+// Duplicate handle
+PackedStringArray split = p_path.split("|");
+ERR_FAIL_COND_V_MSG(split.size() != 2, false, ...);
+int targetProcessId = split[1].to_int();
+
+HANDLE hTargetProcess = OpenProcess(...);
+ERR_FAIL_COND_V_MSG(hTargetProcess == INVALID_HANDLE_VALUE, false, ...);
+
+HANDLE hDuplicateHandle;
+bool success = DuplicateHandle(...);
+ERR_FAIL_COND_V_MSG(!success, false, ...);
+...
+
+// Clean up
+CloseHandle(hTargetProcess);
+if (!success) { CloseHandle(hDuplicateHandle); }
+```
+
+Section dividers exist at multiple scopes and are all the same pattern: labelling a *group* of related lines so a reader can scan the file or function in chunks. At file scope (`sandbox_diagnostics.cpp`'s `// Integrity level` / `// DEP` / `// ASLR` over each probe block), at the function-group level, and within a long function (`external_texture.cpp`'s `// Duplicate handle` over the dup phase, `// Clean up` over the closing handles). They earn their place as long as the block they label is genuinely multi-line and represents a single phase. A 1-line label over 1 line of code is narration, delete it.
+
+Workarounds for known bugs follow upstream's citation form — `(GH-12345)` or `see GH-12345` — so the next reader can find the issue:
+
+```cpp
+// Workaround for Vulkan not working on setups with AMD integrated graphics + NVIDIA dedicated GPU (GH-57708).
+// Workaround a driver bug on Adreno 730 GPUs that keeps leaking memory on each call to vkResetDescriptorPool.
+```
+
+**The test is intent, not line count: would this comment make more sense in the commit message?** If yes, delete it and let `git log` carry it. Comments that justify a change you just made age into noise. Comments that name an invariant or document something *outside* this codebase stay true.
+
+Two categories of multi-line that **are** legitimate, regardless of length:
+
+1. **External-contract documentation** — explaining something the codebase doesn't own: SDDL string syntax, Vulkan struct field semantics, RFC citations, file-format invariants, OS-API quirks. The alternative is "google it every time." The 13-line SDDL annotation on `socket_acl_win.cpp` is this category and it's fine.
+2. **Workaround comments with a `(GH-XXXXX)` reference**, math/algorithm invariants (`basis.cpp`-style), and `/*fieldName*/` Vulkan brace-init clusters — all upstream Godot patterns.
+
+What's the AI smell is **internal-decision prose** — multi-line blocks explaining "why I picked USER_LIMITED over USER_LOCKDOWN," "why we bind here and connect there," "why the third gate failed on Windows." That's PR-description content. It belongs in the commit message (searchable, durable, doesn't litter the call site) or in a note under `notes/`/`../docs/` with a one-line pointer if you need a marker. `sandboxing.cpp`'s seccomp-setup narration and most multi-line blocks in `modules/the_gates/` recent commits are this kind — cautionary examples, not models.
+
+**Agent-specific note:** if you (the AI) feel an urge to leave a comment proving you considered the edge cases of the fix you just made, that *is* the smell. Save it for the PR description.
+
+Approved kinds:
+
+| Style | When |
+|-------|------|
+| `// One line, sentence case, ending with a period.` | The default form. |
+| `// TODO description` / `// FIXME description` / `// NOTE: ...` | Upstream uses all three. No colon after `TODO`/`FIXME`; `NOTE:` does take one. Keep rare and actionable. |
+| `// Workaround ... (GH-12345).` | Standard form for bug workarounds. Cite the issue — the link is the real documentation. |
+| File-top `/* ... */` | The MIT license header, unchanged. The only `/* */` body comment that's a pattern is `// clang-format off`/`on`. |
+| `/*fieldName*/value` | Upstream Vulkan-driver convention for C-struct aggregate init. Use when extending Vulkan code; otherwise don't. |
+| `// SECTION HEADER` | Labels a multi-line group of related code so it can be scanned as one chunk. Works at file scope, function-group level, and within a long function (`external_texture.cpp`'s `// Duplicate handle` / `// Clean up` over multi-line phases, `sandbox_diagnostics.cpp`'s `// Integrity level` / `// DEP` / `// ASLR` over probe blocks). A 1-line label over 1 line of code is narration, not a divider. |
+| Multi-line stacked `//` | Reserved for external-contract docs (SDDL, Vulkan struct semantics, RFC citations) and the three upstream-pattern cases (workaround + GH link, math/algo invariants, Vulkan field-label clusters). Prose about an architecture choice goes in a note, not inline. |
+
+If a comment is needed because the symbol names or function decomposition don't read well, fix those first.
+
+**Don't enforce this rule retroactively.** Old terse 1-liners that predate the agent-assistance era are part of the codebase's vernacular and earned their place at the time. Cleanup passes target *uncommitted WIP* and *recent agent-flavored commits*, not legacy lines. Use `git blame` before deleting — if the line is old, leave it.
+
 ## Things that surprise people
 
 - **No `try` / `catch`.** Exceptions are off. Use `Error` returns or `ERR_FAIL_*` macros.
