@@ -57,13 +57,11 @@ class CommandSync : public Node {
 	zmq::socket_t monitor_sock;
 	bool peer_disconnected = false;
 
-	void _setup_monitor(const String &p_monitor_endpoint);
-
 protected:
 	static void _bind_methods();
 
 public:
-	void socket_bind(const String &p_address = COMMAND_SYNC_ADDRESS, const String &p_monitor_endpoint = COMMAND_SYNC_MONITOR_ENDPOINT);
+	void socket_bind(const String &p_address = COMMAND_SYNC_ADDRESS);
 	void socket_connect(const String &p_address = COMMAND_SYNC_ADDRESS, const String &p_monitor_endpoint = COMMAND_SYNC_MONITOR_ENDPOINT);
 
 	void send_command(const Ref<Command> &p_command);

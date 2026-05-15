@@ -30,26 +30,25 @@
 
 #include "command_sync.h"
 #include "core/input/input.h"
+#include "socket_acl_win.h"
 #include "variant_tools.h"
 #include "zmq_context.h"
 #include <zmq.h>
 
 CommandSync *CommandSync::singleton = nullptr;
 
-void CommandSync::_setup_monitor(const String &p_monitor_endpoint) {
-	std::string endpoint = p_monitor_endpoint.utf8().get_data();
-	zmq_socket_monitor(sock.handle(), endpoint.c_str(), ZMQ_EVENT_ALL);
-	monitor_sock.connect(endpoint);
-}
-
-void CommandSync::socket_bind(const String &p_address, const String &p_monitor_endpoint) {
-	sock.bind(tg_resolve_ipc_address(p_address).utf8().get_data());
-	_setup_monitor(p_monitor_endpoint);
+void CommandSync::socket_bind(const String &p_address) {
+	const String resolved = tg_resolve_ipc_address(p_address);
+	sock.bind(resolved.utf8().get_data());
+	tg_apply_socket_acl_for_sandbox(resolved);
 }
 
 void CommandSync::socket_connect(const String &p_address, const String &p_monitor_endpoint) {
 	sock.connect(tg_resolve_ipc_address(p_address).utf8().get_data());
-	_setup_monitor(p_monitor_endpoint);
+
+	std::string monitor_endpoint = p_monitor_endpoint.utf8().get_data();
+	zmq_socket_monitor(sock.handle(), monitor_endpoint.c_str(), ZMQ_EVENT_ALL);
+	monitor_sock.connect(monitor_endpoint);
 }
 
 void CommandSync::send_command(const Ref<Command> &p_command) {
@@ -142,7 +141,7 @@ void CommandSync::close() {
 }
 
 void CommandSync::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("socket_bind", "address", "monitor_endpoint"), &CommandSync::socket_bind, DEFVAL(COMMAND_SYNC_ADDRESS), DEFVAL(COMMAND_SYNC_MONITOR_ENDPOINT));
+	ClassDB::bind_method(D_METHOD("socket_bind", "address"), &CommandSync::socket_bind, DEFVAL(COMMAND_SYNC_ADDRESS));
 	ClassDB::bind_method(D_METHOD("socket_connect", "address", "monitor_endpoint"), &CommandSync::socket_connect, DEFVAL(COMMAND_SYNC_ADDRESS), DEFVAL(COMMAND_SYNC_MONITOR_ENDPOINT));
 	ClassDB::bind_method(D_METHOD("receive_commands"), &CommandSync::receive_commands);
 

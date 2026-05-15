@@ -21,10 +21,6 @@ if env["platform"] == "linuxbsd":
     thirdparty_sources += [thirdparty_flingfd_dir + file for file in thirdparty_flingfd_sources]
     env_tg.Prepend(CPPPATH=[thirdparty_flingfd_dir])
 
-# libzmq is vendored at thirdparty/libzmq/ and compiled into this module's
-# thirdparty object list. cppzmq is the header-only C++ wrapper. Both paths
-# are also prepended to `env` so main/main.cpp can include command_sync.h
-# under TG_RENDERER.
 thirdparty_zmq_dir = "#thirdparty/libzmq/"
 zmq_cpppath = ["#thirdparty/cppzmq", thirdparty_zmq_dir + "include"]
 env.Prepend(CPPPATH=zmq_cpppath)
@@ -32,17 +28,10 @@ env.Append(CPPDEFINES=["ZMQ_STATIC"])
 env_tg.Prepend(CPPPATH=zmq_cpppath)
 env_tg.Append(CPPDEFINES=["ZMQ_STATIC"])
 
-# Drop the WebSocket transports — wss_engine pulls in gnutls/openssl and we
-# only use the ipc:// transport.
+# Drop WebSocket transports — they pull in gnutls/openssl and we only use ipc://.
 zmq_sources_skip = {
-    "ws_address.cpp",
-    "ws_connecter.cpp",
-    "ws_decoder.cpp",
-    "ws_encoder.cpp",
-    "ws_engine.cpp",
-    "ws_listener.cpp",
-    "wss_address.cpp",
-    "wss_engine.cpp",
+    "ws_address.cpp", "ws_connecter.cpp", "ws_decoder.cpp", "ws_encoder.cpp",
+    "ws_engine.cpp", "ws_listener.cpp", "wss_address.cpp", "wss_engine.cpp",
 }
 zmq_sources_abs = Glob(thirdparty_zmq_dir + "src/*.cpp")
 zmq_sources = [
@@ -50,7 +39,6 @@ zmq_sources = [
     for f in zmq_sources_abs
     if os.path.basename(str(f)) not in zmq_sources_skip
 ]
-# Bundled SHA1 and (on Windows) wepoll.
 zmq_sources.append(thirdparty_zmq_dir + "external/sha1/sha1.c")
 if env["platform"] == "windows":
     zmq_sources.append(thirdparty_zmq_dir + "external/wepoll/wepoll.c")
@@ -69,24 +57,14 @@ if env["platform"] == "windows":
         "ZMQ_IOTHREAD_POLLER_USE_EPOLL",
         "ZMQ_POLL_BASED_ON_POLL",
         "ZMQ_USE_CV_IMPL_WIN32API",
-        # ipc:// transport on Windows requires afunix.h, available since
-        # Windows 10 1803. Our minimum target (_WIN32_WINNT=0x0A00 = Win10)
-        # covers it.
         "ZMQ_HAVE_IPC",
         "ZMQ_HAVE_STRUCT_SOCKADDR_UN",
-        # Tell libzmq's compat.hpp that the CRT already provides these — the
-        # ucrt libucrt.lib that LLVM links exposes strnlen, so libzmq's
-        # fallback definition would collide.
         "HAVE_STRNLEN",
         ("FD_SETSIZE", 16384),
         "_CRT_SECURE_NO_WARNINGS",
         "_WINSOCK_DEPRECATED_NO_WARNINGS",
     ])
-    # libzmq needs rpcrt4 (UUIDs); ws2_32/iphlpapi/advapi32 are already
-    # linked by platform/windows/detect.py. Use LINKFLAGS to bypass the
-    # per-module LIBSUFFIX mangling.
     env.Append(LINKFLAGS=["rpcrt4.lib"])
-
 env_zmq.add_source_files(thirdparty_obj, zmq_sources)
 
 env_thirdparty = env_tg.Clone()
