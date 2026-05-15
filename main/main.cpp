@@ -4705,7 +4705,7 @@ int Main::start() {
 	// CommandSync
 	command_sync = memnew(CommandSync);
 	command_sync->bind_commands();
-	command_sync->socket_bind();
+	command_sync->socket_connect();
 
 	// Set texture format RGBA8 or BGRA8
 	Array arg;
@@ -4745,7 +4745,7 @@ int Main::start() {
 
 	// InputSync
 	input_sync = memnew(InputSync);
-	input_sync->socket_bind();
+	input_sync->socket_connect();
 
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 	{

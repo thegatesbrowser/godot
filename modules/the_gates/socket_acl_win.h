@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  input_sync.cpp                                                        */
+/*  socket_acl_win.h                                                      */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,54 +28,30 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "input_sync.h"
-#include "core/input/input.h"
-#include "socket_acl_win.h"
-#include "variant_tools.h"
-#include "zmq_context.h"
+#ifndef SOCKET_ACL_WIN_H
+#define SOCKET_ACL_WIN_H
 
-void InputSync::socket_bind(const String &p_address) {
-	const String resolved = tg_resolve_ipc_address(p_address);
-	sock.bind(resolved.utf8().get_data());
-	tg_apply_socket_acl_for_sandbox(resolved);
-}
+#include "core/string/ustring.h"
 
-void InputSync::socket_connect(const String &p_address) {
-	sock.connect(tg_resolve_ipc_address(p_address).utf8().get_data());
-}
+// On Windows, stamps the AF_UNIX socket file at `p_zmq_address` with a
+// security descriptor permissive enough for a Chromium-sandboxed renderer
+// (USER_LIMITED token, UNTRUSTED integrity level) to connect() into it.
+//
+// What it sets:
+//   DACL: GENERIC_ALL grant to "Everyone" (S-1-1-0) — the USER_LIMITED
+//         token keeps Everyone as an enabled SID, so this is what the
+//         renderer's effective access check sees.
+//   SACL: SYSTEM_MANDATORY_LABEL_ACE with NO_WRITE_UP at integrity SID
+//         S-1-16-0 (UNTRUSTED). Default file integrity is Medium, which
+//         Windows MIC would otherwise block UNTRUSTED writes against.
+//
+// `p_zmq_address` accepts either a raw filesystem path or a zmq-style
+// "ipc://<path>" string — the "ipc://" prefix is stripped before the call
+// to SetNamedSecurityInfo.
+//
+// No-op on non-Windows platforms. Logs (but doesn't fail) on any Windows
+// error so a missing socket file or permissions issue doesn't kill the
+// whole IPC setup.
+void tg_apply_socket_acl_for_sandbox(const String &p_zmq_address);
 
-void InputSync::send_input_event(const Ref<InputEvent> &p_event) {
-	std::string msg_str = var_to_str(p_event).utf8().get_data();
-	zmq::message_t msg(msg_str);
-	auto result = sock.send(msg, zmq::send_flags::none);
-	if (!result) {
-		print_line("Failed to send input event");
-	}
-}
-
-void InputSync::receive_input_events() {
-	zmq::message_t msg;
-
-	while (sock.recv(msg, zmq::recv_flags::dontwait)) {
-		std::string msg_str(static_cast<const char *>(msg.data()), msg.size());
-		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(msg_str.c_str()));
-	}
-}
-
-void InputSync::close() {
-	sock.close();
-}
-
-void InputSync::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("socket_bind", "address"), &InputSync::socket_bind, DEFVAL(INPUT_SYNC_ADDRESS));
-	ClassDB::bind_method(D_METHOD("socket_connect", "address"), &InputSync::socket_connect, DEFVAL(INPUT_SYNC_ADDRESS));
-	ClassDB::bind_method(D_METHOD("send_input_event", "event"), &InputSync::send_input_event);
-	ClassDB::bind_method(D_METHOD("close"), &InputSync::close);
-}
-
-InputSync::InputSync() :
-		sock(ctx, zmq::socket_type::pair) {
-}
-
-InputSync::~InputSync() {
-}
+#endif // SOCKET_ACL_WIN_H
