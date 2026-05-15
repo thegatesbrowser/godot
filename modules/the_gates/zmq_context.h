@@ -37,24 +37,9 @@
 
 inline zmq::context_t ctx;
 
-// Defined in main/main.cpp, populated by the --tg-ipc-dir CLI arg the
-// launcher passes when spawning the renderer. Empty in the launcher
-// process (which uses its own OS::get_user_data_dir() as the fallback).
 extern String tg_ipc_dir_override;
 
-// Resolve a zmq address whose path component is `user://...` to an absolute
-// `ipc://<dir>/...` address. Returns p_address unchanged if no `user://`
-// marker is present.
-//
-// `<dir>` comes from tg_ipc_dir_override (set by --tg-ipc-dir) if present,
-// otherwise falls back to OS::get_user_data_dir(). The override exists
-// because the renderer's OS::get_user_data_dir() resolves to the loaded
-// gate's project name ("TheGates Tutorial" etc.), not the launcher's
-// "TheGates", so the two processes don't naturally agree on a path.
-//
-// TODO: longer-term, the launcher should own the renderer's whole working
-// directory (including the sockets it creates), removing the need for this
-// override at all.
+// TODO: launcher should own renderer's working dir, removing this override
 inline String tg_resolve_ipc_address(const String &p_address) {
 	const String marker = "user://";
 	const int idx = p_address.find(marker);

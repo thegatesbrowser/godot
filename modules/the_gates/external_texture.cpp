@@ -63,8 +63,6 @@ bool TGExternalTexture::send_filehandle(const String &p_path) {
 	bool success = DuplicateHandle(GetCurrentProcess(), (HANDLE)filehandle, hTargetProcess, &hDuplicateHandle, 0, FALSE, DUPLICATE_SAME_ACCESS);
 	ERR_FAIL_COND_V_MSG(!success, false, "Unable to DuplicateHandle. Error code: " + itos(GetLastError()));
 
-	// zmq's connect-before-bind queues the message internally, so it doesn't
-	// matter whether the renderer has called recv yet when we send here.
 	filehandle = (FileHandle)hDuplicateHandle;
 	zmq::socket_t sock(ctx, zmq::socket_type::pair);
 	sock.connect(tg_resolve_ipc_address(split[0]).utf8().get_data());
