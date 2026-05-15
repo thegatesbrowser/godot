@@ -10,24 +10,25 @@ tags: [fork, engine, module]
 
 ```
 godot/modules/the_gates/
-├── SCsub                ← module's SCons script
+├── SCsub                ← module's SCons script (also compiles vendored libzmq)
 ├── config.py            ← declares dependencies and Vulkan extensions for this module
-├── register_types.cpp   ← registers GDScript-visible classes
+├── register_types.cpp   ← registers GDScript-visible classes; logs zmq version
 ├── register_types.h
 ├── command.h            ← Command (RefCounted): {name: String, args: Array}
 ├── command.cpp
-├── command_sync.h       ← CommandSync (Node singleton): pipe-based command IPC
+├── command_sync.h       ← CommandSync (Node singleton): zmq-based command IPC
 ├── command_sync.cpp
-├── input_sync.h         ← InputSync: pipe-based input event forwarding
+├── input_sync.h         ← InputSync: zmq-based input event forwarding
 ├── input_sync.cpp
 ├── external_texture.h   ← TGExternalTexture: cross-process Vulkan texture sharing
 ├── external_texture.cpp
-├── tg_pipe_ipc.h        ← TgPipeIpc: thin layer over Godot's named-pipe FileAccess
-├── tg_pipe_ipc.cpp
+├── zmq_context.h        ← global zmq::context_t + tg_resolve_ipc_address(...)
 ├── sandboxing.h         ← Sandboxing (Linux: seccomp; others: not-implemented stub)
 ├── sandboxing.cpp
 └── variant_tools.h      ← misc Variant helpers
 ```
+
+Transport: all IPC goes through `ipc://` zmq sockets (AF_UNIX on every OS — `wepoll` provides the Win10+ shim). The launcher passes `--tg-ipc-dir <abs path>` when spawning the renderer so both ends resolve `ipc://user://name` to the same absolute file on disk; see `zmq_context.h::tg_resolve_ipc_address`. The renderer is always the listener (binds) and the launcher connects — this is forced by the Chromium sandbox on Windows, which lets a sandboxed renderer *create* AF_UNIX sockets in its allowed user data dir but blocks outbound `connect()` to existing sockets. libzmq is vendored at `thirdparty/libzmq/` and cppzmq at `thirdparty/cppzmq/`.
 
 ## Classes registered with GDScript
 
@@ -49,19 +50,20 @@ That means GDScript can `CommandSync.new()`, `TGExternalTexture.new()`, etc. —
 A request: `{name: String, args: Array}`. Used in both directions (only renderer→launcher today, but the type is symmetric).
 
 ### `CommandSync` (Node, has C++ singleton)
-A bidirectional command channel over one `TgPipeIpc`. API:
-- `socket_bind(addr)` — server side; the launcher calls this
-- `socket_connect(addr, monitor_endpoint)` — client side; the renderer calls this
+A bidirectional command channel over a single zmq PAIR socket. API:
+- `socket_bind(addr, monitor_endpoint)` — listener side; the renderer calls this
+- `socket_connect(addr, monitor_endpoint)` — caller side; the launcher calls this
 - `send_command(name, args)`
 - `receive_commands()` — invoke per frame to drain inbox
 - `set_execute_function(callable)` — what to run for each received command
+- `poll_monitor()` — drains the inproc monitor socket and updates connection state
 - `is_peer_connected()` — used by the renderer's intentional-crash check
 
-Pipe addresses default to `pipe://renderer/command_sync` (Win) / `pipe:///tmp/command_sync` (Unix).
+Default address: `ipc://user://command_sync` on Windows (resolved via `tg_resolve_ipc_address` to the renderer's sandbox-allowed user data dir) / `ipc:///tmp/command_sync` on macOS and Linux.
 
 ### `InputSync` (RefCounted)
-One-directional (launcher → renderer) input event forwarding. API:
-- `socket_bind(addr)` / `socket_connect(addr)`
+One-directional (launcher → renderer) input event forwarding over a zmq PAIR socket. API:
+- `socket_bind(addr)` / `socket_connect(addr)` — same listener/caller split as `CommandSync`
 - `send_input_event(InputEvent)` — launcher side
 - `receive_input_events()` — renderer side; pumps received events back into Godot's input system
 
@@ -69,24 +71,13 @@ One-directional (launcher → renderer) input event forwarding. API:
 The shared GPU texture wrapper. API:
 - `create(format, view)` — allocates a Vulkan image with exported memory; populates a local `filehandle`
 - `import(format, view)` — creates a Vulkan image backed by the *received* `filehandle`
-- `send_filehandle(path)` — DuplicateHandle (Win) or pass FD (Unix) or pass IOSurfaceID (Mac); send over its own pipe
-- `recv_filehandle(path)` — bind pipe; block waiting for the handle from the other process
+- `send_filehandle(path)` — DuplicateHandle (Win) or IOSurfaceID (Mac) sent over a one-shot zmq PAIR; flingfd ancillary-FD send on Linux
+- `recv_filehandle(path)` — binds a one-shot zmq PAIR (Win/Mac) or flingfd listener (Linux); blocks waiting for the handle
 - `copy_to(rid)` — RD::texture_copy from this shared image into a local RID
 - `copy_from(rid)` — RD::texture_copy from a local RID into this shared image
 - `copy_from_screen()` — RD::screen_copy of the current screen contents into this image
 
 Big-picture flow lives in [[External Texture Sharing]].
-
-### `TgPipeIpc` (C++ only — not GDScript-exposed)
-Thin layer over Godot 4.5's named-pipe `FileAccess`. Replaced ZMQ recently (commit `1adce7ef13`). API:
-- `bind(addr)` / `connect(addr)`
-- `queue_message(payload)` — buffered send
-- `poll()` — pump send/receive
-- `pop_message(out)` — drain inbox
-- `is_connected(idle_timeout_usec)` — liveness check
-- `close()`
-
-Frames are length-prefixed binary payloads.
 
 ### `Sandboxing` (RefCounted)
 - `static Error sandbox()` — Linux only today: seccomp filter built from a hardcoded allowlist of syscalls (about 100 of them, generated by observing what Godot actually calls). On other OSes returns `ERR_UNAVAILABLE`. Sandboxing on Windows/Mac is in progress per the [security model docs](https://docs.thegates.io/en/latest/about/security.html).

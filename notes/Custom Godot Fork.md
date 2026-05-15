@@ -33,10 +33,14 @@ godot/SConstruct
 ~line 2456 : rendering_driver = "vulkan"  ← hardcodes the Vulkan driver for renderer builds
 ~line 3240 : (skipped UI bits during setup)
 ~line 4323 : (skipped UI bits during start)
-~line 4686 : the handshake — connect command_sync, send_command(...), recv_filehandle, import
+~line 4686 : the handshake — bind command_sync (renderer is always the listener),
+             send_command("send_filehandle", ...) to ask launcher for the texture handle,
+             recv_filehandle, import, then bind input_sync
 ~line 4970 : per-iteration work — first_frame/heartbeat, copy_from_screen, receive_input_events,
              poll_monitor (CRASH_NOW if disconnected)
 ```
+
+There is also one TG_RENDERER-adjacent change *outside* any `#ifdef`: the `--tg-ipc-dir <abs path>` CLI argument and its backing `String tg_ipc_dir_override` global. The launcher passes this when spawning the renderer so both ends resolve `ipc://user://...` addresses (in `modules/the_gates/zmq_context.h::tg_resolve_ipc_address`) to the same on-disk path — the renderer's natural `OS::get_user_data_dir()` would otherwise resolve to the loaded gate's project name, not the launcher's. Not gated by `TG_RENDERER` because the launcher also includes the same resolver via `the_gates` and would otherwise see a dangling extern.
 
 ### Per-OS display server tweaks
 
@@ -64,19 +68,6 @@ godot/drivers/vulkan/rendering_device_driver_vulkan.cpp
 ```
 
 The Metal-side IOSurface export uses `VkExportMetalObjectsEXT` — that's why `modules/the_gates/config.py` and the build defaults touch the Metal extension on macOS. See the commit `9b5f90d209` ("default function bodies to build with metal").
-
-### Named-pipe `FileAccess` driver fixes
-
-Unconditional (not `#ifdef`'d) fixes in:
-
-```
-godot/drivers/windows/file_access_windows_pipe.cpp
-godot/drivers/unix/file_access_unix_pipe.cpp
-```
-
-Added in commit `170ccff0a9` ("fix named pipe IPC at the driver layer"). The original drivers were built for `OS.execute_with_pipe` (anonymous pipes to a child, always-connected, blocking-is-fine); they don't work for symmetric named-pipe IPC out of the box. The fork-side fixes set `PIPE_NOWAIT` on the Windows client handle, classify per-OS errors (`GetLastError` / `errno`) into `ERR_BUSY` vs fatal, wrap Unix read/write in `EINTR` retry, and stop spamming `PeekNamedPipe` errors when no peer is attached.
-
-Could be upstreamed — they're not TheGates-specific. See [[IPC Pipe Stack]] for context and the failure modes they fix.
 
 ## What is *not* changed
 
