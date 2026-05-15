@@ -35,9 +35,6 @@
 #include "scene/main/node.h"
 #include "thirdparty/cppzmq/zmq.hpp"
 
-// On Windows the path component is left as `user://`: it's resolved at call
-// time (see tg_resolve_ipc_address in zmq_context.h) so the AF_UNIX socket
-// file lands in the renderer's sandbox-allowed user data dir.
 #ifdef WINDOWS_ENABLED
 static const String COMMAND_SYNC_ADDRESS("ipc://user://command_sync");
 #else
@@ -57,7 +54,6 @@ class CommandSync : public Node {
 	zmq::socket_t sock;
 	Callable execute_function;
 
-	// Monitoring
 	zmq::socket_t monitor_sock;
 	bool peer_disconnected = false;
 
@@ -74,7 +70,6 @@ public:
 	void send_command(const String &p_name);
 	void send_command(const String &p_name, const Array &p_args);
 
-	// Monitor peer connection and report status.
 	void poll_monitor();
 	bool is_peer_connected() const { return !peer_disconnected; }
 
