@@ -35,9 +35,9 @@
 #include "servers/rendering/rendering_device_binds.h"
 
 #ifdef WINDOWS_ENABLED
-static const String FILEHANDLE_PATH("pipe://renderer/external_texture");
+static const String FILEHANDLE_PATH("ipc://user://external_texture");
 #elif MACOS_ENABLED
-static const String FILEHANDLE_PATH("pipe:///tmp/external_texture");
+static const String FILEHANDLE_PATH("ipc:///tmp/external_texture");
 #else
 static const String FILEHANDLE_PATH("/tmp/external_texture");
 #endif

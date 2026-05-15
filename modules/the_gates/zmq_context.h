@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  tg_pipe_ipc.h                                                         */
+/*  zmq_context.h                                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,44 +28,46 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#ifndef ZMQ_CONTEXT_H
+#define ZMQ_CONTEXT_H
 
-#include "core/io/file_access.h"
-#include "core/templates/vector.h"
+#include "core/os/os.h"
+#include "core/string/ustring.h"
+#include "thirdparty/cppzmq/zmq.hpp"
 
-class TgPipeIpc {
-public:
-	enum Role {
-		ROLE_BIND,
-		ROLE_CONNECT,
-	};
+inline zmq::context_t ctx;
 
-private:
-	String base_address;
-	Role role = ROLE_CONNECT;
-	Ref<FileAccess> read_pipe;
-	Ref<FileAccess> write_pipe;
-	Vector<uint8_t> recv_stream;
-	Vector<Vector<uint8_t>> recv_queue;
-	Vector<Vector<uint8_t>> send_queue;
-	uint64_t last_activity_usec = 0;
-	bool connected = false;
+// Defined in main/main.cpp, populated by the --tg-ipc-dir CLI arg the
+// launcher passes when spawning the renderer. Empty in the launcher
+// process (which uses its own OS::get_user_data_dir() as the fallback).
+extern String tg_ipc_dir_override;
 
-	String make_read_address() const;
-	String make_write_address() const;
-	bool try_open();
-	void close_handles();
-	bool pump_read();
-	bool pump_write();
-	void extract_frames();
-	void mark_activity();
+// Resolve a zmq address whose path component is `user://...` to an absolute
+// `ipc://<dir>/...` address. Returns p_address unchanged if no `user://`
+// marker is present.
+//
+// `<dir>` comes from tg_ipc_dir_override (set by --tg-ipc-dir) if present,
+// otherwise falls back to OS::get_user_data_dir(). The override exists
+// because the renderer's OS::get_user_data_dir() resolves to the loaded
+// gate's project name ("TheGates Tutorial" etc.), not the launcher's
+// "TheGates", so the two processes don't naturally agree on a path.
+//
+// TODO: longer-term, the launcher should own the renderer's whole working
+// directory (including the sockets it creates), removing the need for this
+// override at all.
+inline String tg_resolve_ipc_address(const String &p_address) {
+	const String marker = "user://";
+	const int idx = p_address.find(marker);
+	if (idx < 0) {
+		return p_address;
+	}
+	const String prefix = p_address.substr(0, idx);
+	const String suffix = p_address.substr(idx + marker.length());
+	const String dir = tg_ipc_dir_override.is_empty()
+			? OS::get_singleton()->get_user_data_dir()
+			: tg_ipc_dir_override;
+	String resolved = prefix + dir + "/" + suffix;
+	return resolved.replace("\\", "/");
+}
 
-public:
-	bool bind(const String &p_address);
-	bool connect(const String &p_address);
-	void queue_message(const Vector<uint8_t> &p_payload);
-	bool poll();
-	bool pop_message(Vector<uint8_t> &r_message);
-	bool is_connected(uint64_t p_idle_timeout_usec = 0) const;
-	void close();
-};
+#endif // ZMQ_CONTEXT_H

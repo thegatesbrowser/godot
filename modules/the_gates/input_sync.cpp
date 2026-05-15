@@ -29,43 +29,50 @@
 /**************************************************************************/
 
 #include "input_sync.h"
-
 #include "core/input/input.h"
 #include "variant_tools.h"
+#include "zmq_context.h"
 
 void InputSync::socket_bind(const String &p_address) {
-	socket.bind(p_address);
+	sock.bind(tg_resolve_ipc_address(p_address).utf8().get_data());
 }
 
 void InputSync::socket_connect(const String &p_address) {
-	socket.connect(p_address);
+	sock.connect(tg_resolve_ipc_address(p_address).utf8().get_data());
 }
 
 void InputSync::send_input_event(const Ref<InputEvent> &p_event) {
-	const CharString utf8 = var_to_str(p_event).utf8();
-	Vector<uint8_t> payload;
-	payload.resize(utf8.length());
-	memcpy(payload.ptrw(), utf8.get_data(), utf8.length());
-	socket.queue_message(payload);
-	socket.poll();
+	std::string msg_str = var_to_str(p_event).utf8().get_data();
+	zmq::message_t msg(msg_str);
+	auto result = sock.send(msg, zmq::send_flags::none);
+	if (!result) {
+		print_line("Failed to send input event");
+	}
 }
 
 void InputSync::receive_input_events() {
-	socket.poll();
+	zmq::message_t msg;
 
-	Vector<uint8_t> msg;
-	while (socket.pop_message(msg)) {
-		const String text = String::utf8((const char *)msg.ptr(), msg.size());
-		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(text));
+	while (sock.recv(msg, zmq::recv_flags::dontwait)) {
+		std::string msg_str(static_cast<const char *>(msg.data()), msg.size());
+		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(msg_str.c_str()));
 	}
 }
 
 void InputSync::close() {
-	socket.close();
+	sock.close();
 }
 
 void InputSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("socket_bind", "address"), &InputSync::socket_bind, DEFVAL(INPUT_SYNC_ADDRESS));
+	ClassDB::bind_method(D_METHOD("socket_connect", "address"), &InputSync::socket_connect, DEFVAL(INPUT_SYNC_ADDRESS));
 	ClassDB::bind_method(D_METHOD("send_input_event", "event"), &InputSync::send_input_event);
 	ClassDB::bind_method(D_METHOD("close"), &InputSync::close);
+}
+
+InputSync::InputSync() :
+		sock(ctx, zmq::socket_type::pair) {
+}
+
+InputSync::~InputSync() {
 }

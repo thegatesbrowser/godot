@@ -117,28 +117,27 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	// gates_data, etc.) under Godot's app_userdata dir. Chromium's file
 	// policy pattern wildcards don't span path separators, so we need
 	// multiple rules at different depths to cover the full tree we want
-	// brokered.
+	// brokered. The root comes from the engine's get_user_data_dir() so it
+	// tracks whatever the launcher project is configured to use.
 	{
-		wchar_t appdata[MAX_PATH] = {0};
-		DWORD plen = ::GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
-		if (plen > 0 && plen < MAX_PATH) {
-			const std::wstring root = std::wstring(appdata) + L"\\Godot\\app_userdata\\TheGates";
-			const wchar_t *globs[] = {
-				L"\\*",
-				L"\\*\\*",
-				L"\\*\\*\\*",
-				L"\\*\\*\\*\\*",
-				L"\\*\\*\\*\\*\\*",
-				L"\\*\\*\\*\\*\\*\\*",
-			};
-			for (const wchar_t *suffix : globs) {
-				std::wstring pattern = root + suffix;
-				sandbox::ResultCode rf = config->AllowFileAccess(
-						sandbox::FileSemantics::kAllowAny, pattern.c_str());
-				if (rf != sandbox::SBOX_ALL_OK) {
-					ERR_PRINT(vformat("SandboxingWin: AllowFileAccess(%s) returned %d",
-							String::utf16((const char16_t *)pattern.c_str()), (int)rf));
-				}
+		const String user_dir = OS::get_singleton()->get_user_data_dir();
+		const Char16String user_dir_utf16 = user_dir.utf16();
+		const std::wstring root = std::wstring((const wchar_t *)user_dir_utf16.get_data());
+		const wchar_t *globs[] = {
+			L"\\*",
+			L"\\*\\*",
+			L"\\*\\*\\*",
+			L"\\*\\*\\*\\*",
+			L"\\*\\*\\*\\*\\*",
+			L"\\*\\*\\*\\*\\*\\*",
+		};
+		for (const wchar_t *suffix : globs) {
+			std::wstring pattern = root + suffix;
+			sandbox::ResultCode rf = config->AllowFileAccess(
+					sandbox::FileSemantics::kAllowAny, pattern.c_str());
+			if (rf != sandbox::SBOX_ALL_OK) {
+				ERR_PRINT(vformat("SandboxingWin: AllowFileAccess(%s) returned %d",
+						String::utf16((const char16_t *)pattern.c_str()), (int)rf));
 			}
 		}
 	}
