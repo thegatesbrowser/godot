@@ -28,22 +28,23 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#ifndef INPUT_SYNC_H
+#define INPUT_SYNC_H
 
-#include "core/input/input_event.h"
+#include "core/input/input.h"
 #include "core/object/ref_counted.h"
-#include "tg_pipe_ipc.h"
+#include "thirdparty/cppzmq/zmq.hpp"
 
 #ifdef WINDOWS_ENABLED
-static const String INPUT_SYNC_ADDRESS("pipe://renderer/input_sync");
+static const String INPUT_SYNC_ADDRESS("ipc://user://input_sync");
 #else
-static const String INPUT_SYNC_ADDRESS("pipe:///tmp/input_sync");
+static const String INPUT_SYNC_ADDRESS("ipc:///tmp/input_sync");
 #endif
 
 class InputSync : public RefCounted {
 	GDCLASS(InputSync, RefCounted);
 
-	TgPipeIpc socket;
+	zmq::socket_t sock;
 
 protected:
 	static void _bind_methods();
@@ -56,4 +57,9 @@ public:
 	void receive_input_events();
 
 	void close();
+
+	InputSync();
+	~InputSync();
 };
+
+#endif // INPUT_SYNC_H

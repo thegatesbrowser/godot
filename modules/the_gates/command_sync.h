@@ -28,41 +28,55 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#ifndef COMMAND_SYNC_H
+#define COMMAND_SYNC_H
 
 #include "command.h"
 #include "scene/main/node.h"
-#include "tg_pipe_ipc.h"
+#include "thirdparty/cppzmq/zmq.hpp"
 
+// On Windows the path component is left as `user://`: it's resolved at call
+// time (see tg_resolve_ipc_address in zmq_context.h) so the AF_UNIX socket
+// file lands in the renderer's sandbox-allowed user data dir.
 #ifdef WINDOWS_ENABLED
-static const String COMMAND_SYNC_ADDRESS("pipe://renderer/command_sync");
+static const String COMMAND_SYNC_ADDRESS("ipc://user://command_sync");
 #else
-static const String COMMAND_SYNC_ADDRESS("pipe:///tmp/command_sync");
+static const String COMMAND_SYNC_ADDRESS("ipc:///tmp/command_sync");
 #endif
 
-static const uint64_t COMMAND_SYNC_HEARTBEAT_TIMEOUT_USEC = 15000 * 1000;
+static const String COMMAND_SYNC_MONITOR_ENDPOINT("inproc://command_sync_monitor");
+
+static const int COMMAND_SYNC_HEARTBEAT_IVL = 2000;
+static const int COMMAND_SYNC_HEARTBEAT_TIMEOUT = 15000;
 
 class CommandSync : public Node {
 	GDCLASS(CommandSync, Node);
 
 	static CommandSync *singleton;
 
-	TgPipeIpc socket;
+	zmq::socket_t sock;
 	Callable execute_function;
+
+	// Monitoring
+	zmq::socket_t monitor_sock;
+	bool peer_disconnected = false;
+
+	void _setup_monitor(const String &p_monitor_endpoint);
 
 protected:
 	static void _bind_methods();
 
 public:
-	void socket_bind(const String &p_address = COMMAND_SYNC_ADDRESS);
-	void socket_connect(const String &p_address = COMMAND_SYNC_ADDRESS);
+	void socket_bind(const String &p_address = COMMAND_SYNC_ADDRESS, const String &p_monitor_endpoint = COMMAND_SYNC_MONITOR_ENDPOINT);
+	void socket_connect(const String &p_address = COMMAND_SYNC_ADDRESS, const String &p_monitor_endpoint = COMMAND_SYNC_MONITOR_ENDPOINT);
 
 	void send_command(const Ref<Command> &p_command);
 	void send_command(const String &p_name);
 	void send_command(const String &p_name, const Array &p_args);
 
-	void poll_monitor() { socket.poll(); }
-	bool is_peer_connected() const { return socket.is_connected(COMMAND_SYNC_HEARTBEAT_TIMEOUT_USEC); }
+	// Monitor peer connection and report status.
+	void poll_monitor();
+	bool is_peer_connected() const { return !peer_disconnected; }
 
 	Variant call_execute_function(const Ref<Command> &p_command);
 	void set_execute_function(Callable p_execute_function) { execute_function = p_execute_function; }
@@ -73,6 +87,8 @@ public:
 
 	void close();
 
-	CommandSync();
+	CommandSync(zmq::socket_type type = zmq::socket_type::pair, zmq::socket_type monitor_type = zmq::socket_type::pair);
 	~CommandSync();
 };
+
+#endif // COMMAND_SYNC_H

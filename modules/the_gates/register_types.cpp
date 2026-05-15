@@ -35,6 +35,8 @@
 #include "external_texture.h"
 #include "input_sync.h"
 #include "sandboxing.h"
+#include "thirdparty/cppzmq/zmq.hpp"
+#include "zmq_context.h"
 
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 #include "sandbox/sandbox_win.h"
@@ -44,6 +46,10 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
+
+	int major = 0, minor = 0, patch = 0;
+	zmq_version(&major, &minor, &patch);
+	print_line(vformat("ZeroMQ version: %d.%d.%d", major, minor, patch));
 
 	GDREGISTER_CLASS(Sandboxing);
 	GDREGISTER_CLASS(InputSync);
@@ -59,5 +65,11 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
+	}
+
+	try {
+		ctx.close();
+	} catch (const std::exception &e) {
+		ERR_PRINT("ZeroMQ termination failure. Error: " + String(e.what()));
 	}
 }

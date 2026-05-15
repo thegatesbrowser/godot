@@ -133,6 +133,22 @@ Patches:
 - `0001-disable-exceptions.patch` (GH-80796)
 
 
+## cppzmq
+
+TheGates-only. C++ header-only wrapper for libzmq, used by
+`modules/the_gates/` for the launcher↔renderer IPC channels.
+
+- Upstream: https://github.com/zeromq/cppzmq
+- Version: 4.10.0
+- License: MIT
+
+Files extracted from upstream source:
+
+- `zmq.hpp`
+- `zmq_addon.hpp`
+- `LICENSE`
+
+
 ## cvtt
 
 - Upstream: https://github.com/elasota/ConvectionKernels
@@ -614,6 +630,29 @@ Files extracted from upstream source:
 - `lib/*` except from: `lookups.pl`, `Makefile.*`
 - `include/vorbis/*.h` as `vorbis/`
 - `COPYING`
+
+
+## libzmq
+
+TheGates-only. ZeroMQ messaging library, used by `modules/the_gates/`
+for the launcher↔renderer IPC channels (AF_UNIX `ipc://` transport
+only — websocket transports are excluded from the build, see
+`modules/the_gates/SCsub`). Statically linked into the_gates module.
+
+MPL 2.0 means binary distributions of the engine must include
+the MPL notice and make the libzmq source available; both are
+satisfied by shipping the vendored source tree alongside the binary.
+
+- Upstream: https://github.com/zeromq/libzmq
+- Version: 4.3.5
+- License: MPL 2.0
+
+Files extracted from upstream source:
+
+- `include/`, `src/`
+- `external/sha1/` (`ZMQ_USE_BUILTIN_SHA1`)
+- `external/wepoll/` (Windows AF_UNIX shim)
+- `LICENSE`, `NEWS`
 
 
 ## libwebp

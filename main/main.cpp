@@ -306,6 +306,7 @@ static bool first_frame_sent = false;
 static uint32_t heartbeat = 0;
 #endif
 String gdext_libs_dir = "";
+String tg_ipc_dir_override = "";
 
 // Constants.
 
@@ -1760,6 +1761,15 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				N = N->next();
 			} else {
 				OS::get_singleton()->print("Missing path to libraries directory.\n");
+				goto error;
+			}
+
+		} else if (arg == "--tg-ipc-dir") {
+			if (N) {
+				tg_ipc_dir_override = N->get();
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing path to IPC directory.\n");
 				goto error;
 			}
 
@@ -4695,7 +4705,7 @@ int Main::start() {
 	// CommandSync
 	command_sync = memnew(CommandSync);
 	command_sync->bind_commands();
-	command_sync->socket_connect();
+	command_sync->socket_bind();
 
 	// Set texture format RGBA8 or BGRA8
 	Array arg;
@@ -4735,7 +4745,7 @@ int Main::start() {
 
 	// InputSync
 	input_sync = memnew(InputSync);
-	input_sync->socket_connect();
+	input_sync->socket_bind();
 
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 	{
