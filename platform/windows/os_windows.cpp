@@ -1561,6 +1561,20 @@ bool OS_Windows::is_process_running(const ProcessID &p_pid) const {
 	return true;
 }
 
+#ifdef TG_SANDBOX
+void OS_Windows::track_external_process(ProcessID p_pid, HANDLE p_process, HANDLE p_thread) {
+	ProcessInfo info;
+	memset(&info.si, 0, sizeof(info.si));
+	info.pi.hProcess = p_process;
+	info.pi.hThread = p_thread;
+	info.pi.dwProcessId = (DWORD)p_pid;
+	info.pi.dwThreadId = 0;
+
+	MutexLock lock(process_map_mutex);
+	process_map->insert(p_pid, info);
+}
+#endif
+
 int OS_Windows::get_process_exit_code(const ProcessID &p_pid) const {
 	MutexLock lock(process_map_mutex);
 	if (!process_map->has(p_pid)) {
