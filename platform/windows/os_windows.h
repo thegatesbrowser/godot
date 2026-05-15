@@ -213,6 +213,10 @@ public:
 	virtual bool is_process_running(const ProcessID &p_pid) const override;
 	virtual int get_process_exit_code(const ProcessID &p_pid) const override;
 
+#ifdef TG_SANDBOX
+	void track_external_process(ProcessID p_pid, HANDLE p_process, HANDLE p_thread);
+#endif
+
 	virtual bool has_environment(const String &p_var) const override;
 	virtual String get_environment(const String &p_var) const override;
 	virtual void set_environment(const String &p_var, const String &p_value) const override;

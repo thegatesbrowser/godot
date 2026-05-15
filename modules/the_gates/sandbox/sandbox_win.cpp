@@ -7,6 +7,7 @@
 #include "BrokerServicesDelegateImpl.h"
 
 #include "core/string/print_string.h"
+#include "platform/windows/os_windows.h"
 
 #include <memory>
 #include <string>
@@ -230,12 +231,13 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 		::ResumeThread(pi.hThread);
 	}
 
+	// Make the child visible to OS.is_process_running / OS.kill. Without this
+	// the launcher's process_checker fires a spurious "Gate crashed on bootup".
+	static_cast<OS_Windows *>(OS::get_singleton())->track_external_process(
+			(OS::ProcessID)pi.dwProcessId, pi.hProcess, pi.hThread);
+
 	result["pid"] = (int64_t)pi.dwProcessId;
 	result["thread_id"] = (int64_t)pi.dwThreadId;
-	// Caller is responsible for closing handles via OS-level APIs, but Godot
-	// scripts don't manipulate Win32 HANDLEs directly. Convert to int64 for
-	// optional GDScript-side use; in practice we leave them open until the
-	// process exits and the OS reaps them.
 	result["process_handle"] = (int64_t)(uintptr_t)pi.hProcess;
 	result["thread_handle"] = (int64_t)(uintptr_t)pi.hThread;
 	return result;
