@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  register_types.cpp                                                    */
+/*  sandbox.cpp                                                           */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,42 +28,26 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "register_types.h"
-
-#include "core/object/class_db.h"
-#include "ipc/command.h"
-#include "ipc/command_sync.h"
-#include "ipc/external_texture.h"
-#include "ipc/input_sync.h"
-#include "ipc/zmq_runtime.h"
-#include "sandbox/sandbox.h"
-#include "sandboxing.h"
+#include "sandbox.h"
 
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-#include "sandbox/windows/sandbox_win.h"
+#include "windows/sandbox_win.h"
 #endif
 
-void initialize_the_gates_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
-
-	GDREGISTER_CLASS(Sandboxing);
-	GDREGISTER_CLASS(InputSync);
-	GDREGISTER_CLASS(Command);
-	GDREGISTER_CLASS(CommandSync);
-	GDREGISTER_CLASS(TGExternalTexture);
-
-	GDREGISTER_ABSTRACT_CLASS(Sandbox);
+Ref<Sandbox> Sandbox::create() {
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-	GDREGISTER_CLASS(SandboxWin);
+	return Ref<Sandbox>(memnew(SandboxWin));
+#else
+	return Ref<Sandbox>();
 #endif
 }
 
-void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
-
-	tg_zmq_shutdown();
+void Sandbox::_bind_methods() {
+	ClassDB::bind_static_method("Sandbox", D_METHOD("create"), &Sandbox::create);
+	ClassDB::bind_method(D_METHOD("spawn_target", "executable", "arguments", "stdout_log_path", "rw_dir", "rw_files", "ro_files"),
+			&Sandbox::spawn_target,
+			DEFVAL(String()), DEFVAL(String()), DEFVAL(Vector<String>()), DEFVAL(Vector<String>()));
+	ClassDB::bind_method(D_METHOD("apply_renderer_acl", "path"), &Sandbox::apply_renderer_acl);
+	ClassDB::bind_method(D_METHOD("lower_token"), &Sandbox::lower_token);
+	ClassDB::bind_method(D_METHOD("is_target"), &Sandbox::is_target);
 }

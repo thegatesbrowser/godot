@@ -103,7 +103,7 @@ void write_broker_policy_json(const String &p_log_path, const String &p_executab
 	const String json_path = p_log_path.get_base_dir().path_join("broker_policy.json");
 	Ref<FileAccess> file = FileAccess::open(json_path, FileAccess::WRITE);
 	if (file.is_null()) {
-		ERR_PRINT(vformat("SandboxingWin: cannot open %s for write", json_path));
+		ERR_PRINT(vformat("SandboxWin: cannot open %s for write", json_path));
 		return;
 	}
 	file->store_string(JSON::stringify(policy, "\t", false));
@@ -133,14 +133,14 @@ std::wstring build_command_line(const String &p_executable, const Vector<String>
 
 } // namespace
 
-Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<String> &p_arguments,
+Dictionary SandboxWin::spawn_target(const String &p_executable, const Vector<String> &p_arguments,
 		const String &p_stdout_log_path,
 		const String &p_rw_dir,
 		const Vector<String> &p_rw_files,
 		const Vector<String> &p_ro_files) {
 	Dictionary result;
 	if (broker_service == nullptr) {
-		ERR_PRINT("SandboxingWin::spawn_target called from a sandbox target process");
+		ERR_PRINT("SandboxWin::spawn_target called from a sandbox target process");
 		return result;
 	}
 
@@ -148,7 +148,7 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 		auto delegate = std::make_unique<BrokerDelegate>();
 		sandbox::ResultCode init = broker_service->Init(std::move(delegate));
 		if (init != sandbox::SBOX_ALL_OK) {
-			ERR_PRINT(vformat("SandboxingWin: BrokerServices::Init failed (%d)", (int)init));
+			ERR_PRINT(vformat("SandboxWin: BrokerServices::Init failed (%d)", (int)init));
 			return result;
 		}
 		broker_initialized = true;
@@ -161,7 +161,7 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 
 	// Job restrictions: lockdown blocks children, clipboard, global hooks.
 	r = config->SetJobLevel(sandbox::JobLevel::kLockdown, /*ui_exceptions=*/0);
-	ERR_FAIL_COND_V_MSG(r != sandbox::SBOX_ALL_OK, result, vformat("SandboxingWin: SetJobLevel failed (%d)", (int)r));
+	ERR_FAIL_COND_V_MSG(r != sandbox::SBOX_ALL_OK, result, vformat("SandboxWin: SetJobLevel failed (%d)", (int)r));
 
 	// Token: USER_LIMITED at lockdown is what Firefox's content process uses.
 	// USER_LOCKDOWN is strictly tighter but breaks our IPC (renderer can't
@@ -170,7 +170,7 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	// blocks USERPROFILE writes and HKCU registry writes — what we test for.
 	r = config->SetTokenLevel(sandbox::TokenLevel::USER_RESTRICTED_SAME_ACCESS,
 			sandbox::TokenLevel::USER_LIMITED);
-	ERR_FAIL_COND_V_MSG(r != sandbox::SBOX_ALL_OK, result, vformat("SandboxingWin: SetTokenLevel failed (%d)", (int)r));
+	ERR_FAIL_COND_V_MSG(r != sandbox::SBOX_ALL_OK, result, vformat("SandboxWin: SetTokenLevel failed (%d)", (int)r));
 
 	// Alternate desktop blocks window messages from reaching the user's real
 	// desktop. CreateAlternateDesktop is broker-global so calling it more than
@@ -179,7 +179,7 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	if (r != sandbox::SBOX_ALL_OK && r != sandbox::SBOX_ERROR_GENERIC) {
 		// Non-fatal: log and continue without alt-desktop rather than failing
 		// the whole spawn.
-		ERR_PRINT(vformat("SandboxingWin: CreateAlternateDesktop returned %d (continuing)", (int)r));
+		ERR_PRINT(vformat("SandboxWin: CreateAlternateDesktop returned %d (continuing)", (int)r));
 	}
 	config->SetDesktop(sandbox::Desktop::kAlternateDesktop);
 
@@ -203,7 +203,7 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	auto allow_file = [&](sandbox::FileSemantics sem, const std::wstring &pattern) {
 		sandbox::ResultCode rf = config->AllowFileAccess(sem, pattern.c_str());
 		if (rf != sandbox::SBOX_ALL_OK) {
-			ERR_PRINT(vformat("SandboxingWin: AllowFileAccess(%s) returned %d",
+			ERR_PRINT(vformat("SandboxWin: AllowFileAccess(%s) returned %d",
 					String::utf16((const char16_t *)pattern.c_str()), (int)rf));
 		}
 	};
@@ -219,7 +219,7 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	};
 
 	ERR_FAIL_COND_V_MSG(p_rw_dir.is_empty(), result,
-			"SandboxingWin: spawn_target requires p_rw_dir (per-gate user data dir)");
+			"SandboxWin: spawn_target requires p_rw_dir (per-gate user data dir)");
 
 	allow_dir_recursive(sandbox::FileSemantics::kAllowAny, p_rw_dir);
 	for (int i = 0; i < p_rw_files.size(); ++i) {
@@ -246,13 +246,13 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 			sandbox::MITIGATION_BOTTOM_UP_ASLR |
 			sandbox::MITIGATION_HIGH_ENTROPY_ASLR);
 	if (r != sandbox::SBOX_ALL_OK) {
-		ERR_PRINT(vformat("SandboxingWin: SetProcessMitigations returned %d", (int)r));
+		ERR_PRINT(vformat("SandboxWin: SetProcessMitigations returned %d", (int)r));
 	}
 
 	r = config->SetDelayedProcessMitigations(
 			sandbox::MITIGATION_DLL_SEARCH_ORDER);
 	if (r != sandbox::SBOX_ALL_OK) {
-		ERR_PRINT(vformat("SandboxingWin: SetDelayedProcessMitigations returned %d", (int)r));
+		ERR_PRINT(vformat("SandboxWin: SetDelayedProcessMitigations returned %d", (int)r));
 	}
 
 	const std::wstring exe_wide = to_wide(p_executable);
@@ -280,15 +280,15 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 				FILE_ATTRIBUTE_NORMAL,
 				nullptr);
 		if (log_handle == INVALID_HANDLE_VALUE) {
-			ERR_PRINT(vformat("SandboxingWin: CreateFile(log) failed win=%d", (int)::GetLastError()));
+			ERR_PRINT(vformat("SandboxWin: CreateFile(log) failed win=%d", (int)::GetLastError()));
 		} else {
 			sandbox::ResultCode rs = policy->SetStdoutHandle(log_handle);
 			if (rs != sandbox::SBOX_ALL_OK) {
-				ERR_PRINT(vformat("SandboxingWin: SetStdoutHandle returned %d", (int)rs));
+				ERR_PRINT(vformat("SandboxWin: SetStdoutHandle returned %d", (int)rs));
 			}
 			rs = policy->SetStderrHandle(log_handle);
 			if (rs != sandbox::SBOX_ALL_OK) {
-				ERR_PRINT(vformat("SandboxingWin: SetStderrHandle returned %d", (int)rs));
+				ERR_PRINT(vformat("SandboxWin: SetStderrHandle returned %d", (int)rs));
 			}
 		}
 	}
@@ -301,7 +301,7 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 		if (log_handle != INVALID_HANDLE_VALUE) {
 			::CloseHandle(log_handle);
 		}
-		ERR_PRINT(vformat("SandboxingWin: SpawnTarget failed (sbox=%d, win=%d)",
+		ERR_PRINT(vformat("SandboxWin: SpawnTarget failed (sbox=%d, win=%d)",
 				(int)spawn, (int)last_error));
 		return result;
 	}
@@ -334,41 +334,32 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	return result;
 }
 
-void SandboxingWin::apply_untrusted_acl(const String &p_path) {
+void SandboxWin::apply_renderer_acl(const String &p_path) {
 	tg_apply_untrusted_acl(p_path);
 }
 
-Error SandboxingWin::lower_token() {
+Error SandboxWin::lower_token() {
 	ERR_FAIL_COND_V_MSG(!is_target(), ERR_UNAVAILABLE,
-			"SandboxingWin: lower_token called from broker (not a sandbox target)");
+			"SandboxWin: lower_token called from broker (not a sandbox target)");
 
 	sandbox::TargetServices *target_service = sandbox::SandboxFactory::GetTargetServices();
 	ERR_FAIL_COND_V_MSG(target_service == nullptr, FAILED,
-			"SandboxingWin: GetTargetServices returned null");
+			"SandboxWin: GetTargetServices returned null");
 
 	sandbox::ResultCode init = target_service->Init();
 	ERR_FAIL_COND_V_MSG(init != sandbox::SBOX_ALL_OK, FAILED,
-			vformat("SandboxingWin: TargetServices::Init failed (%d)", (int)init));
+			vformat("SandboxWin: TargetServices::Init failed (%d)", (int)init));
 
 	target_service->LowerToken();
-	print_line("SandboxingWin: LowerToken complete; renderer is now sandboxed");
+	print_line("SandboxWin: LowerToken complete; renderer is now sandboxed");
 	return OK;
 }
 
-void SandboxingWin::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("spawn_target", "executable", "arguments", "stdout_log_path", "rw_dir", "rw_files", "ro_files"),
-			&SandboxingWin::spawn_target,
-			DEFVAL(String()), DEFVAL(String()), DEFVAL(Vector<String>()), DEFVAL(Vector<String>()));
-	ClassDB::bind_method(D_METHOD("lower_token"), &SandboxingWin::lower_token);
-	ClassDB::bind_method(D_METHOD("is_target"), &SandboxingWin::is_target);
-	ClassDB::bind_method(D_METHOD("apply_untrusted_acl", "path"), &SandboxingWin::apply_untrusted_acl);
-}
+bool SandboxWin::broker_initialized = false;
 
-bool SandboxingWin::broker_initialized = false;
-
-SandboxingWin::SandboxingWin() {
+SandboxWin::SandboxWin() {
 	broker_service = sandbox::SandboxFactory::GetBrokerServices();
 }
 
-SandboxingWin::~SandboxingWin() {
+SandboxWin::~SandboxWin() {
 }
