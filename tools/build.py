@@ -15,9 +15,16 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 GODOT_DIR = SCRIPT_DIR.parent
 
+# Standalone LLVM install on Windows. Pinned at the front of PATH so scons
+# resolves the same clang regardless of caller shell (PowerShell, Cursor's
+# terminal, Git Bash all have different PATH ordering; without this pin
+# scons sees the compiler "change" and invalidates every Windows .obj).
+LLVM_BIN_WINDOWS = Path(r"C:\Program Files\LLVM\bin")
+
 # --- Profiles -------------------------------------------------------------
 # Each profile is the scons arg list that defines a canonical build flavor.
-# Optional toggles (-j, --arch, --sandbox, extra args) are layered on top.
+# Optional toggles (-j, --scu, --no-sandbox, --mac-intel, extra args) are
+# layered on top.
 
 PROFILES: dict[str, list[str]] = {
     "launcher": [
@@ -63,6 +70,13 @@ def default_jobs() -> int:
     return max(1, cpu - 2)
 
 
+def stable_env() -> dict[str, str]:
+    env = dict(os.environ)
+    if sys.platform == "win32" and LLVM_BIN_WINDOWS.is_dir():
+        env["PATH"] = f"{LLVM_BIN_WINDOWS};{env.get('PATH', '')}"
+    return env
+
+
 def format_profile_table() -> str:
     rows = []
     for name in sorted(PROFILES):
@@ -79,6 +93,7 @@ examples:
   build.py launcher                       # dev launcher (the everyday build)
   build.py renderer                       # dev renderer
   build.py renderer --no-sandbox          # dev renderer without the chromium sandbox
+  build.py launcher --scu                 # fast local iteration via single compilation units
   build.py launcher-release               # production launcher (host arch)
   build.py renderer-release --mac-intel   # production renderer for Intel Macs
   build.py launcher -j 4                  # cap parallelism manually
@@ -87,10 +102,16 @@ examples:
 
 notes:
   - Runs scons from the godot/ submodule regardless of cwd.
+  - On Windows, prepends C:\\Program Files\\LLVM\\bin to PATH so scons
+    resolves the same clang every run. Without this the cache invalidates
+    every time you switch shells (PowerShell vs Cursor vs Git Bash).
   - Default -j is cpu_count - 2 so PowerShell + the OS stay responsive
     during long builds. Override with -j N.
   - tg_sandbox is on by default in scons; --no-sandbox opts out for
     faster iteration.
+  - --scu enables single compilation units, which dramatically speeds
+    up builds but can miss includes that a regular build would catch.
+    Run a normal build before opening a PR.
   - Anything after `--` is forwarded to scons verbatim (e.g. verbose=yes,
     a different target=, custom CCFLAGS).
 """
@@ -136,6 +157,11 @@ def main() -> int:
         help="opt out of the chromium sandbox (passes tg_sandbox=no); sandbox is on by default",
     )
     parser.add_argument(
+        "--scu",
+        action="store_true",
+        help="single compilation unit build (scu_build=yes); much faster but may miss includes - run a regular build before opening a PR",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="print the resolved scons command and exit without running it",
@@ -160,6 +186,8 @@ def main() -> int:
         cmd.append("arch=x86_64")
     if args.no_sandbox:
         cmd.append("tg_sandbox=no")
+    if args.scu:
+        cmd.append("scu_build=yes")
     cmd.extend(extra)
 
     print(f"[build] cwd={GODOT_DIR}")
@@ -168,7 +196,7 @@ def main() -> int:
         return 0
 
     try:
-        return subprocess.call(cmd, cwd=str(GODOT_DIR))
+        return subprocess.call(cmd, cwd=str(GODOT_DIR), env=stable_env())
     except KeyboardInterrupt:
         return 130
 
