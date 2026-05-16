@@ -21,13 +21,15 @@ work" signal. Three modes:
 1. [[Architecture]] — target state of the sandbox subsystem: file
    layout, class hierarchy, lifecycle, IPC topology, upstream surface,
    phase plan. **Start here.**
-2. [[Future Work]] — Tier 1–5 backlog beyond the rewrite (network
+2. [[Security]] — user-facing security overview: what the sandbox
+   provides, how to think about gate trust, how to report issues.
+3. [[Future Work]] — Tier 1–5 backlog beyond the rewrite (network
    brokering, win32k disable, audio brokering, AppContainer revisit,
    etc.).
-3. [[Reference Material]] — bug numbers, file paths, key quotes from
+4. [[Reference Material]] — bug numbers, file paths, key quotes from
    Chromium / Firefox / Project Zero sources. Use to verify a claim or
    pick up a research thread.
-4. [[GDExtension Loading]] — load-order constraints around `lower_token`
+5. [[GDExtension Loading]] — load-order constraints around `lower_token`
    (GDExtensions must be `LoadLibrary`'d pre-lockdown).
 
 ## Archived
