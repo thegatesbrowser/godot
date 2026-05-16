@@ -8,10 +8,15 @@ tags: [fork, engine]
 
 ## The diff, in shape
 
-1. **A new SCons option**: `tg_renderer=False` — defines the `TG_RENDERER` macro when true. (`SConstruct`, line ~188.)
+1. **Three new SCons options**: `tg_renderer=False` (renderer build → `TG_RENDERER`),
+   `tg_sandbox=True` (Windows sandbox → `TG_SANDBOX`), `tg_signature_pin=""` (Authenticode
+   thumbprint pin → `TG_SIGNATURE_PIN`).
 2. **A new module**: `modules/the_gates/` — see [[Custom Godot Module]].
-3. **`#ifdef TG_RENDERER` blocks** sprinkled across `main/main.cpp` and the per-OS display servers. Greppable.
-4. **New methods on `RenderingDevice`**: `external_texture_create`, `external_texture_import`, `screen_copy`. Implemented per-driver (currently Vulkan + Metal). See [[External Texture Sharing]].
+3. **`#ifdef TG_RENDERER` blocks** in `main/main.cpp` and the per-OS display servers.
+   After the Phase 4 cleanup, `main.cpp` is down to ~3 lines of orchestration calls
+   (`tg_renderer_boot`, `tg_renderer_loop_iterate`) plus the includes that back them.
+4. **New methods on `RenderingDevice`**: `external_texture_create`, `external_texture_import`,
+   `screen_copy`. Implemented per-driver (currently Vulkan + Metal). See [[External Texture Sharing]].
 5. Misc upstream contributions merged in (see commit log).
 
 ## Where to find each
@@ -27,25 +32,41 @@ godot/SConstruct
 
 ### `main/main.cpp` TG_RENDERER blocks
 
+After Phase 4, `main.cpp` is down to a handful of lines:
+
 ```
-~line 150  : forward declarations for ext_texture / command_sync / input_sync globals
-~line 296  : static TGExternalTexture *ext_texture = nullptr; (and command/input sync globals)
-~line 2456 : rendering_driver = "vulkan"  ← hardcodes the Vulkan driver for renderer builds
-~line 3240 : (skipped UI bits during setup)
-~line 4323 : (skipped UI bits during start)
-~line 4686 : the handshake — bind command_sync (renderer is always the listener),
-             send_command("send_filehandle", ...) to ask launcher for the texture handle,
-             recv_filehandle, import, then bind input_sync
-~line 4970 : per-iteration work — first_frame/heartbeat, copy_from_screen, receive_input_events,
-             poll_monitor (CRASH_NOW if disconnected)
+include of modules/the_gates/renderer/renderer_lifecycle.h    (#ifdef TG_RENDERER)
+tg_renderer_boot(display_server, tg_main_pack_path) in setup  (#ifdef TG_RENDERER)
+tg_renderer_loop_iterate(ticks_elapsed) in iteration          (#ifdef TG_RENDERER)
+rendering_driver = "vulkan" hardcode                          (#ifdef TG_RENDERER)
+embed_subwindows force, window_flag_borderless force          (#ifdef TG_RENDERER)
 ```
 
-There are two TG_RENDERER-adjacent changes *outside* any `#ifdef`: two CLI arguments and their backing globals.
+All IPC + sandbox + diagnostics orchestration lives module-side now (see
+[[Sandboxing/Architecture]] and [[Custom Godot Module]]); the file-scope
+statics that used to anchor it (`ext_texture`, `command_sync`,
+`input_sync`, `first_frame_sent`, `heartbeat`) are gone from main.cpp.
 
-- `--tg-user-data-dir <abs path>` → `String tg_user_data_dir_override`. The launcher allocates a per-gate folder under its own `OS::get_user_data_dir()` (`gates_storage/<id>/`) and passes it as this flag. Inside the renderer, `OS::get_user_data_dir()` returns that override (see the `#ifdef TG_RENDERER` block in `core/os/os.cpp`), so `user://` resolves to a sandbox-allowed path under the launcher's tree instead of the gate-project-named sibling Godot would otherwise pick.
-- `--tg-ipc-dir <abs path>` → `String tg_ipc_dir_override`. The launcher passes its own (shallow) `OS::get_user_data_dir()` here. `modules/the_gates/zmq_context.h::tg_resolve_ipc_address` substitutes this for `user://` when resolving `ipc://` addresses, so socket files land at a path short enough to fit AF_UNIX's 108-char `sun_path` limit. Kept separate from the user-data dir because the per-gate folder paths are too deep to use for sockets.
+There are two TG_RENDERER-adjacent changes *outside* any `#ifdef`: two
+CLI arguments and their backing globals.
 
-Both globals live outside `TG_RENDERER` because the launcher links the same code (the `the_gates` module's IPC resolver, the engine's `os.cpp`) and would otherwise see dangling externs.
+- `--tg-user-data-dir <abs path>` → `String tg_user_data_dir_override`.
+  The launcher allocates a per-gate folder under its own
+  `OS::get_user_data_dir()` (`gates_storage/<id>/`) and passes it as this
+  flag. Inside the renderer, `OS::get_user_data_dir()` returns that
+  override (see the `#ifdef TG_RENDERER` block in `core/os/os.cpp`), so
+  `user://` resolves to a sandbox-allowed path.
+- `--tg-ipc-dir <abs path>` → `String tg_ipc_dir_override`. The launcher
+  passes its own (shallow) `OS::get_user_data_dir()` here.
+  `modules/the_gates/ipc/zmq_runtime.cpp::tg_resolve_ipc_address`
+  substitutes this for `user://` when resolving `ipc://` addresses, so
+  socket files land at a path short enough to fit AF_UNIX's 108-char
+  `sun_path` limit. Kept separate from the user-data dir because the
+  per-gate folder paths are too deep to use for sockets.
+
+Both globals live in `main.cpp` because they're parsed from argv in the
+engine's CLI loop; the externs are picked up by the module + by
+`os.cpp`'s override block.
 
 ### Per-OS display server tweaks
 

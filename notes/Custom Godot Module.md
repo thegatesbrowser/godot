@@ -4,84 +4,151 @@ tags: [fork, engine, module]
 
 # Custom Godot Module
 
-`godot/modules/the_gates/` — the only new C++ module in the fork. Everything else under `godot/modules/` is upstream Godot. This module is what wires the engine into TheGates' two-process model.
+`godot/modules/the_gates/` — the only new C++ module in the fork.
+Everything else under `godot/modules/` is upstream Godot. This module
+holds the IPC primitives, the sandbox subsystem, and the renderer
+lifecycle hooks that wire the engine into TheGates' two-process model.
 
-## Files
+For the target-state layout, class hierarchy, and lifecycle diagrams see
+[[Sandboxing/Architecture]]. The summary below tracks what's actually on
+disk today.
+
+## File tree
 
 ```
 godot/modules/the_gates/
-├── SCsub                ← module's SCons script (also compiles vendored libzmq)
-├── config.py            ← declares dependencies and Vulkan extensions for this module
-├── register_types.cpp   ← registers GDScript-visible classes; logs zmq version
-├── register_types.h
-├── command.h            ← Command (RefCounted): {name: String, args: Array}
-├── command.cpp
-├── command_sync.h       ← CommandSync (Node singleton): zmq-based command IPC
-├── command_sync.cpp
-├── input_sync.h         ← InputSync: zmq-based input event forwarding
-├── input_sync.cpp
-├── external_texture.h   ← TGExternalTexture: cross-process Vulkan texture sharing
-├── external_texture.cpp
-├── zmq_context.h        ← global zmq::context_t + tg_resolve_ipc_address(...)
-├── sandboxing.h         ← Sandboxing (Linux: seccomp; others: not-implemented stub)
-├── sandboxing.cpp
-└── variant_tools.h      ← misc Variant helpers
+├── SCsub                ── top-level: dispatches to ipc/, sandbox/, renderer/
+├── config.py
+├── register_types.cpp/.h
+│
+├── ipc/                 ── inter-process plumbing
+│   ├── SCsub
+│   ├── command.{cpp,h}                Command (RefCounted): {name, args}
+│   ├── command_sync.{cpp,h}           CommandSync (Node singleton)
+│   ├── input_sync.{cpp,h}             InputSync (RefCounted)
+│   ├── external_texture.{cpp,h}       TGExternalTexture (RefCounted)
+│   ├── zmq_runtime.{cpp,h}            zmq context accessor + ipc:// resolver
+│   └── variant_tools.h
+│
+├── sandbox/             ── cross-platform sandbox subsystem
+│   ├── SCsub
+│   ├── sandbox.{cpp,h}                Sandbox base + factory create()
+│   ├── sandbox_policy.{cpp,h}         SandboxPolicy (RefCounted)
+│   ├── sandbox_diagnostics.{cpp,h}    target-side state reporter
+│   ├── socket_acl.{cpp,h}             tg_apply_untrusted_acl (Win) / no-op
+│   │
+│   └── windows/         ── chromium broker/target (TG_SANDBOX + WIN)
+│       ├── SCsub                      vendored chromium-sandbox build
+│       ├── sandbox_win.{cpp,h}        SandboxWin : Sandbox
+│       ├── broker_delegate.{cpp,h}    BrokerDelegate (chromium hook)
+│       ├── handle_scope.h             RAII HANDLE wrapper
+│       ├── signature_verify.{cpp,h}   WinVerifyTrust + thumbprint pin
+│       └── linker_stubs.cpp           shim for chromium symbols we don't use
+│
+└── renderer/            ── renderer-process lifecycle (TG_RENDERER)
+    ├── SCsub
+    └── renderer_lifecycle.{cpp,h}     tg_renderer_boot + tg_renderer_loop_iterate
 ```
 
-Transport: all IPC goes through `ipc://` zmq sockets (AF_UNIX on every OS — `wepoll` provides the Win10+ shim). Sockets live directly under the launcher's `OS::get_user_data_dir()` (kept shallow because AF_UNIX `sun_path` caps at 108 chars). The launcher passes that dir to the renderer as `--tg-ipc-dir <abs path>` so both ends resolve `ipc://user://name` (via `zmq_context.h::tg_resolve_ipc_address`) to the same file. Per-gate user data (the renderer's `user://`) is a separate path passed as `--tg-user-data-dir <abs path>` — see `notes/Custom Godot Fork.md`. libzmq is vendored at `thirdparty/libzmq/` and cppzmq at `thirdparty/cppzmq/`.
+`sandbox/linux/` and `sandbox/macos/` are placeholders for upcoming
+Phase 3 work; see [[Sandboxing/Architecture]] § Phase plan.
 
 ## Classes registered with GDScript
 
-In `register_types.cpp::initialize_the_gates_module`, at `MODULE_INITIALIZATION_LEVEL_SCENE`:
+`register_types.cpp::initialize_the_gates_module`, at
+`MODULE_INITIALIZATION_LEVEL_SCENE`:
 
 ```cpp
-GDREGISTER_CLASS(Sandboxing);
 GDREGISTER_CLASS(InputSync);
 GDREGISTER_CLASS(Command);
 GDREGISTER_CLASS(CommandSync);
 GDREGISTER_CLASS(TGExternalTexture);
+
+GDREGISTER_CLASS(SandboxPolicy);
+GDREGISTER_ABSTRACT_CLASS(Sandbox);
+#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
+GDREGISTER_CLASS(SandboxWin);
+#endif
 ```
 
-That means GDScript can `CommandSync.new()`, `TGExternalTexture.new()`, etc. — and `app/`'s scripts do.
+GDScript instantiates the sandbox via the factory:
+
+```gdscript
+var broker: Sandbox = Sandbox.create()   # null if no backend on this platform
+```
 
 ## Class summary
 
-### `Command` (RefCounted)
-A request: `{name: String, args: Array}`. Used in both directions (only renderer→launcher today, but the type is symmetric).
+### IPC
 
-### `CommandSync` (Node, has C++ singleton)
-A bidirectional command channel over a single zmq PAIR socket. API:
-- `socket_bind(addr, monitor_endpoint)` — listener side; the renderer calls this
-- `socket_connect(addr, monitor_endpoint)` — caller side; the launcher calls this
-- `send_command(name, args)`
-- `receive_commands()` — invoke per frame to drain inbox
-- `set_execute_function(callable)` — what to run for each received command
-- `poll_monitor()` — drains the inproc monitor socket and updates connection state
-- `is_peer_connected()` — used by the renderer's intentional-crash check
+- **`Command`** (RefCounted): `{name: String, args: Array}`. Symmetric;
+  used in both directions, but today renderer→launcher only.
+- **`CommandSync`** (Node singleton): bidirectional command channel over
+  a zmq PAIR. `socket_bind` (listener / renderer), `socket_connect`
+  (caller / launcher), `send_command`, `receive_commands`,
+  `set_execute_function`, `poll_monitor`, `is_peer_connected`.
+- **`InputSync`** (RefCounted): launcher → renderer input events over a
+  zmq PAIR. Same bind/connect split as CommandSync.
+- **`TGExternalTexture`** (RefCounted): shared Vulkan texture.
+  `create` / `import`, `send_filehandle` / `recv_filehandle`, `copy_to`
+  / `copy_from` / `copy_from_screen`. Big-picture flow in
+  [[External Texture Sharing]].
 
-Default address: `ipc://user://command_sync` on Windows (resolved via `tg_resolve_ipc_address` to the renderer's sandbox-allowed user data dir) / `ipc:///tmp/command_sync` on macOS and Linux.
+### Sandbox
 
-### `InputSync` (RefCounted)
-One-directional (launcher → renderer) input event forwarding over a zmq PAIR socket. API:
-- `socket_bind(addr)` / `socket_connect(addr)` — same listener/caller split as `CommandSync`
-- `send_input_event(InputEvent)` — launcher side
-- `receive_input_events()` — renderer side; pumps received events back into Godot's input system
+- **`Sandbox`** (abstract base): broker-side `spawn_target`,
+  `apply_renderer_acl`, `verify_binary`, `is_target_running`,
+  `kill_target`; target-side `lower_token`, `is_target`. Factory
+  `Sandbox::create()` returns the platform impl (or null Ref<> on
+  builds without a backend).
+- **`SandboxPolicy`** (RefCounted): cross-platform policy description
+  (rw_dir, rw_files, ro_files, child_stdout_log_path, allow_network,
+  allow_audio, integrity_floor). Each `Sandbox` impl translates this
+  into native primitives.
+- **`SandboxWin`** : `Sandbox` (Windows + tg_sandbox only): Chromium
+  broker. Builds a chromium `TargetPolicy` from the `SandboxPolicy`,
+  applies SANDBOX_EXPORTS interception, calls
+  `BrokerServices::SpawnTarget`. Holds the target's `HANDLE` for
+  `is_target_running` / `kill_target` — no `OS_Windows::process_map`
+  reach-around.
+- **`SandboxDiagnostics`** (plain class, not GDClass): target-side
+  reporter. `to_dict()` returns the canonical Dictionary, `to_json_block()`
+  emits the `SANDBOX-DIAG-BEGIN/END` framed string the harness reads,
+  `write_verify_file(path)` persists.
 
-### `TGExternalTexture` (RefCounted)
-The shared GPU texture wrapper. API:
-- `create(format, view)` — allocates a Vulkan image with exported memory; populates a local `filehandle`
-- `import(format, view)` — creates a Vulkan image backed by the *received* `filehandle`
-- `send_filehandle(path)` — DuplicateHandle (Win) or IOSurfaceID (Mac) sent over a one-shot zmq PAIR; flingfd ancillary-FD send on Linux
-- `recv_filehandle(path)` — binds a one-shot zmq PAIR (Win/Mac) or flingfd listener (Linux); blocks waiting for the handle
-- `copy_to(rid)` — RD::texture_copy from this shared image into a local RID
-- `copy_from(rid)` — RD::texture_copy from a local RID into this shared image
-- `copy_from_screen()` — RD::screen_copy of the current screen contents into this image
+### Renderer lifecycle
 
-Big-picture flow lives in [[External Texture Sharing]].
+- **`tg_renderer_boot`** (free function in `renderer/renderer_lifecycle.cpp`):
+  brings up CommandSync + InputSync + TGExternalTexture, calls
+  `Sandbox::lower_token` (fail-closed), prints the diagnostics block.
+  Called once from `Main::start()` inside `#ifdef TG_RENDERER`.
+- **`tg_renderer_loop_iterate`** (same file): per-frame first-frame
+  signal, heartbeat, `copy_from_screen`, `receive_input_events`,
+  `CRASH_NOW` on CommandSync peer disconnect. Called from
+  `Main::iteration()`.
 
-### `Sandboxing` (RefCounted)
-- `static Error sandbox()` — Linux only today: seccomp filter built from a hardcoded allowlist of syscalls (about 100 of them, generated by observing what Godot actually calls). On other OSes returns `ERR_UNAVAILABLE`. Sandboxing on Windows/Mac is in progress per the [security model docs](https://docs.thegates.io/en/latest/about/security.html).
+The five static globals (`command_sync`, `ext_texture`, `input_sync`,
+`first_frame_sent`, `heartbeat`) live in `renderer_lifecycle.cpp`'s
+anonymous namespace, not in `main.cpp`.
+
+## Transport notes
+
+All IPC goes through `ipc://` zmq sockets (AF_UNIX on every OS — `wepoll`
+provides the Win10+ shim). Sockets live directly under the launcher's
+`OS::get_user_data_dir()` (kept shallow because AF_UNIX `sun_path` caps
+at 108 chars). The launcher passes that dir to the renderer as
+`--tg-ipc-dir <abs path>`; both ends resolve `ipc://user://name` via
+`tg_resolve_ipc_address` in `ipc/zmq_runtime.cpp`. Per-gate user data
+(the renderer's `user://`) is a separate path passed as
+`--tg-user-data-dir <abs path>` — see [[Custom Godot Fork]].
+
+libzmq is vendored at `thirdparty/libzmq/` and cppzmq at
+`thirdparty/cppzmq/`.
 
 ## Dependencies
 
-`config.py` and `SCsub` declare the module's deps. The Vulkan external memory extensions live in upstream Godot's Vulkan driver; the module hooks into them via the `external_texture_create` / `external_texture_import` methods we added on `RenderingDevice`. See [[Custom Godot Fork]] § "RenderingDevice additions".
+`config.py` and the per-subfolder `SCsub` files declare deps. The Vulkan
+external-memory extensions live in upstream Godot's Vulkan driver; the
+module hooks into them via `external_texture_create` /
+`external_texture_import` we added on `RenderingDevice`. See
+[[Custom Godot Fork]] § "RenderingDevice additions".
