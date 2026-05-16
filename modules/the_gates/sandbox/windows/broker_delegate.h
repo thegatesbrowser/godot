@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  socket_acl_win.h                                                      */
+/*  BrokerDelegate.h                                          */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,26 +30,18 @@
 
 #pragma once
 
-#include "core/string/ustring.h"
+#include <sandbox/win/src/sandbox.h>
 
-// On Windows, stamps a path with a security descriptor permissive enough
-// for a Chromium-sandboxed renderer (USER_LIMITED token, UNTRUSTED
-// integrity level) to access it.
-//
-// What it sets:
-//   DACL: GENERIC_ALL grant to "Everyone" (S-1-1-0).
-//   SACL: SYSTEM_MANDATORY_LABEL_ACE with NO_WRITE_UP at integrity SID
-//         S-1-16-0 (UNTRUSTED).
-//   Both ACEs carry OBJECT_INHERIT + CONTAINER_INHERIT flags so new
-//   children inherit them.
-//
-// If the path is a directory, the function walks it recursively and
-// re-stamps every existing file and subdir — necessary so files created
-// before the ACL stamp existed (older sessions, pre-fix saves) still
-// open for write inside the sandbox.
-//
-// `p_path` accepts either a raw filesystem path or a zmq-style
-// "ipc://<path>" string — the "ipc://" prefix is stripped.
-//
-// No-op on non-Windows. Logs (doesn't fail) on errors.
-void tg_apply_untrusted_acl(const String &p_path);
+class BrokerDelegate : public sandbox::BrokerServicesDelegate {
+public:
+	bool ParallelLaunchEnabled() override;
+	void ParallelLaunchPostTaskAndReplyWithResult(
+			const base::Location &from_here,
+			base::OnceCallback<sandbox::CreateTargetResult()> task,
+			base::OnceCallback<void(sandbox::CreateTargetResult)> reply) override;
+	void BeforeTargetProcessCreateOnCreationThread(const void *trace_id) override;
+	void AfterTargetProcessCreateOnCreationThread(const void *trace_id, DWORD process_id) override;
+	void OnCreateThreadActionCreateFailure(DWORD last_error) override;
+	void OnCreateThreadActionDuplicateFailure(DWORD last_error) override;
+	~BrokerDelegate() override = default;
+};

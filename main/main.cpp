@@ -157,7 +157,7 @@
 #endif
 
 #if defined(TG_RENDERER) && defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-#include "modules/the_gates/sandbox/sandbox_win.h"
+#include "modules/the_gates/sandbox/windows/sandbox_win.h"
 #endif
 
 /* Static members */

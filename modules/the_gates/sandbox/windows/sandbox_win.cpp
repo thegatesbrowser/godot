@@ -30,9 +30,8 @@
 
 #include "sandbox_win.h"
 
-#include "BrokerServicesDelegateImpl.h"
-
-#include "../socket_acl_win.h"
+#include "../socket_acl.h"
+#include "broker_delegate.h"
 #include "core/io/file_access.h"
 #include "core/io/json.h"
 #include "core/string/print_string.h"
@@ -146,7 +145,7 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	}
 
 	if (!broker_initialized) {
-		auto delegate = std::make_unique<BrokerServicesDelegateImpl>();
+		auto delegate = std::make_unique<BrokerDelegate>();
 		sandbox::ResultCode init = broker_service->Init(std::move(delegate));
 		if (init != sandbox::SBOX_ALL_OK) {
 			ERR_PRINT(vformat("SandboxingWin: BrokerServices::Init failed (%d)", (int)init));
