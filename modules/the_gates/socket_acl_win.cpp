@@ -42,25 +42,58 @@
 #include <aclapi.h>
 #include <sddl.h>
 
-// SDDL:
-//   D:(A;;GA;;;WD)         DACL: allow GENERIC_ALL to Everyone (WD).
-//   S:(ML;;NW;;;LW)        SACL: mandatory label, NO_WRITE_UP at LW
-//                            (Low). Note: there is no SDDL alias for the
-//                            UNTRUSTED level — "LW" maps to Low (S-1-16-4096)
-//                            and any process at IL >= Low (which includes
-//                            UNTRUSTED S-1-16-0 under NO_WRITE_UP semantics
-//                            inverted: NW means "no write UP from below this
-//                            label", so a Low label allows writes from
-//                            anything at Low or higher; UNTRUSTED is BELOW
-//                            Low). We want UNTRUSTED to be able to write, so
-//                            we need the label AT UNTRUSTED. Use the raw SID
-//                            S-1-16-0 directly.
-static const wchar_t *kSocketSddl =
-		L"D:(A;;GA;;;WD)S:(ML;;NW;;;S-1-16-0)";
+#include <string>
 
-void tg_apply_socket_acl_for_sandbox(const String &p_zmq_address) {
-	// Strip the zmq transport prefix.
-	String path = p_zmq_address;
+// DACL: Everyone GENERIC_ALL. SACL: UNTRUSTED (S-1-16-0) mandatory label
+// with NO_WRITE_UP. OICI = OBJECT_INHERIT + CONTAINER_INHERIT — applied to
+// a directory the ACEs propagate to new files and subdirs; on a plain file
+// the inheritance flags are ignored.
+static const wchar_t *kSocketSddl =
+		L"D:(A;OICI;GA;;;WD)S:(ML;OICI;NW;;;S-1-16-0)";
+
+namespace {
+
+void stamp_path(const wchar_t *path, PACL pdacl, PACL psacl) {
+	const DWORD r = ::SetNamedSecurityInfoW(
+			const_cast<LPWSTR>(path),
+			SE_FILE_OBJECT,
+			DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
+			/*owner=*/nullptr, /*group=*/nullptr,
+			pdacl, psacl);
+	if (r != ERROR_SUCCESS) {
+		print_line(vformat("tg_apply_untrusted_acl: "
+						   "SetNamedSecurityInfo(%s) failed (win=%d)",
+				String::utf16((const char16_t *)path), (int)r));
+	}
+}
+
+void stamp_recursive(const std::wstring &dir, PACL pdacl, PACL psacl) {
+	stamp_path(dir.c_str(), pdacl, psacl);
+
+	std::wstring pattern = dir + L"\\*";
+	WIN32_FIND_DATAW fd;
+	HANDLE h = ::FindFirstFileW(pattern.c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	do {
+		if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) {
+			continue;
+		}
+		std::wstring child = dir + L"\\" + fd.cFileName;
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+			stamp_recursive(child, pdacl, psacl);
+		} else {
+			stamp_path(child.c_str(), pdacl, psacl);
+		}
+	} while (::FindNextFileW(h, &fd));
+	::FindClose(h);
+}
+
+} // namespace
+
+void tg_apply_untrusted_acl(const String &p_path) {
+	String path = p_path;
 	const String prefix = "ipc://";
 	if (path.begins_with(prefix)) {
 		path = path.substr(prefix.length());
@@ -72,7 +105,7 @@ void tg_apply_socket_acl_for_sandbox(const String &p_zmq_address) {
 	PSECURITY_DESCRIPTOR psd = nullptr;
 	if (!::ConvertStringSecurityDescriptorToSecurityDescriptorW(
 				kSocketSddl, SDDL_REVISION_1, &psd, nullptr)) {
-		print_line(vformat("tg_apply_socket_acl_for_sandbox: "
+		print_line(vformat("tg_apply_untrusted_acl: "
 						   "ConvertStringSecurityDescriptor failed (win=%d)",
 				(int)::GetLastError()));
 		return;
@@ -86,29 +119,24 @@ void tg_apply_socket_acl_for_sandbox(const String &p_zmq_address) {
 	::GetSecurityDescriptorSacl(psd, &sacl_present, &psacl, &sacl_defaulted);
 
 	const Char16String path_utf16 = path.utf16();
-	const DWORD r = ::SetNamedSecurityInfoW(
-			(LPWSTR)path_utf16.get_data(),
-			SE_FILE_OBJECT,
-			DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
-			/*owner=*/nullptr, /*group=*/nullptr,
-			pdacl, psacl);
+	const wchar_t *path_w = (const wchar_t *)path_utf16.get_data();
+	const DWORD attrs = ::GetFileAttributesW(path_w);
+	if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+		stamp_recursive(std::wstring(path_w), pdacl, psacl);
+	} else {
+		stamp_path(path_w, pdacl, psacl);
+	}
 
 	::LocalFree(psd);
-
-	if (r != ERROR_SUCCESS) {
-		print_line(vformat("tg_apply_socket_acl_for_sandbox: "
-						   "SetNamedSecurityInfo(%s) failed (win=%d)",
-				path, (int)r));
-	}
 }
 
 #else // !WINDOWS_ENABLED
 
-void tg_apply_socket_acl_for_sandbox(const String & /*p_zmq_address*/) {
-	// No-op: MIC and AF_UNIX-via-afunix.sys are Windows specifics. On
-	// Linux / macOS the AF_UNIX socket file permissions inherit from the
-	// process umask and the parent dir, which is enough — the launcher's
-	// user_data_dir is already in the user's home tree.
+void tg_apply_untrusted_acl(const String & /*p_path*/) {
+	// No-op: MIC is a Windows specific. On Linux / macOS the AF_UNIX socket
+	// file permissions inherit from the process umask and the parent dir,
+	// which is enough — the launcher's user_data_dir is already in the
+	// user's home tree.
 }
 
 #endif // WINDOWS_ENABLED

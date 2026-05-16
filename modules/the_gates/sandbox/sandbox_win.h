@@ -52,22 +52,32 @@ protected:
 
 public:
 	// Broker-side: spawn an executable as a locked-down child. Returns a
-	// Dictionary {pid, handle} on success or {} on failure. The child starts
-	// suspended at the kernel level until the sandbox finishes wiring up
-	// interceptions, then is resumed automatically.
+	// Dictionary {pid, handle} on success or {} on failure.
 	//
-	// p_stdout_log_path: optional path to a file that will receive the
-	// renderer's stdout AND stderr. Opened in the broker (medium integrity)
-	// so the lockdown-stripped renderer can still emit print_line() to disk —
-	// the LOW-integrity renderer can't write under %APPDATA% directly, so we
-	// hand it a pre-opened handle to write through. Empty string disables.
+	// p_stdout_log_path: file the target's stdout + stderr write to. Opened
+	// in the broker at Medium IL so the locked-down child has a writeable
+	// handle even though its own token can't open files under %APPDATA%.
+	//
+	// p_rw_dir / p_rw_files / p_ro_files: the file-access allow-list.
+	// p_rw_dir is required and gets recursive R/W via single-asterisk
+	// globs up to 6 levels deep. rw_files and ro_files are exact file
+	// paths. Anything outside this list is denied.
 	Dictionary spawn_target(const String &p_executable, const Vector<String> &p_arguments,
-			const String &p_stdout_log_path = String());
+			const String &p_stdout_log_path = String(),
+			const String &p_rw_dir = String(),
+			const Vector<String> &p_rw_files = Vector<String>(),
+			const Vector<String> &p_ro_files = Vector<String>());
 
 	// Target-side: drop the impersonation token, apply the delayed integrity
 	// level, and finalize the lockdown. Called from main.cpp in the renderer
 	// after all initial OS access is done.
 	Error lower_token();
+
+	// Broker-side: stamp `p_path` (a directory or file) with an UNTRUSTED
+	// mandatory label + Everyone GENERIC_ALL DACL so a sandbox target at
+	// INTEGRITY_LEVEL_UNTRUSTED can write to it. Without this, MIC blocks
+	// writes from UNTRUSTED into objects the broker (Medium IL) created.
+	void apply_untrusted_acl(const String &p_path);
 
 	// True iff this process is a sandbox target (was spawned by a broker that
 	// already wrote shared state into us). Determined by whether

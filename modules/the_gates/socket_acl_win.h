@@ -32,23 +32,24 @@
 
 #include "core/string/ustring.h"
 
-// On Windows, stamps the AF_UNIX socket file at `p_zmq_address` with a
-// security descriptor permissive enough for a Chromium-sandboxed renderer
-// (USER_LIMITED token, UNTRUSTED integrity level) to connect() into it.
+// On Windows, stamps a path with a security descriptor permissive enough
+// for a Chromium-sandboxed renderer (USER_LIMITED token, UNTRUSTED
+// integrity level) to access it.
 //
 // What it sets:
-//   DACL: GENERIC_ALL grant to "Everyone" (S-1-1-0) — the USER_LIMITED
-//         token keeps Everyone as an enabled SID, so this is what the
-//         renderer's effective access check sees.
+//   DACL: GENERIC_ALL grant to "Everyone" (S-1-1-0).
 //   SACL: SYSTEM_MANDATORY_LABEL_ACE with NO_WRITE_UP at integrity SID
-//         S-1-16-0 (UNTRUSTED). Default file integrity is Medium, which
-//         Windows MIC would otherwise block UNTRUSTED writes against.
+//         S-1-16-0 (UNTRUSTED).
+//   Both ACEs carry OBJECT_INHERIT + CONTAINER_INHERIT flags so new
+//   children inherit them.
 //
-// `p_zmq_address` accepts either a raw filesystem path or a zmq-style
-// "ipc://<path>" string — the "ipc://" prefix is stripped before the call
-// to SetNamedSecurityInfo.
+// If the path is a directory, the function walks it recursively and
+// re-stamps every existing file and subdir — necessary so files created
+// before the ACL stamp existed (older sessions, pre-fix saves) still
+// open for write inside the sandbox.
 //
-// No-op on non-Windows platforms. Logs (but doesn't fail) on any Windows
-// error so a missing socket file or permissions issue doesn't kill the
-// whole IPC setup.
-void tg_apply_socket_acl_for_sandbox(const String &p_zmq_address);
+// `p_path` accepts either a raw filesystem path or a zmq-style
+// "ipc://<path>" string — the "ipc://" prefix is stripped.
+//
+// No-op on non-Windows. Logs (doesn't fail) on errors.
+void tg_apply_untrusted_acl(const String &p_path);

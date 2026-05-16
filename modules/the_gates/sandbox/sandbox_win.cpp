@@ -32,6 +32,7 @@
 
 #include "BrokerServicesDelegateImpl.h"
 
+#include "../socket_acl_win.h"
 #include "core/string/print_string.h"
 #include "platform/windows/os_windows.h"
 
@@ -86,7 +87,10 @@ std::wstring build_command_line(const String &p_executable, const Vector<String>
 } // namespace
 
 Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<String> &p_arguments,
-		const String &p_stdout_log_path) {
+		const String &p_stdout_log_path,
+		const String &p_rw_dir,
+		const Vector<String> &p_rw_files,
+		const Vector<String> &p_ro_files) {
 	Dictionary result;
 	if (broker_service == nullptr) {
 		ERR_PRINT("SandboxingWin::spawn_target called from a sandbox target process");
@@ -139,33 +143,43 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	// we don't need to drop to LOW the way Firefox content processes do.
 	config->SetDelayedIntegrityLevel(sandbox::IntegrityLevel::INTEGRITY_LEVEL_UNTRUSTED);
 
-	// Allow the renderer to write its per-gate log file (and shader cache,
-	// gates_data, etc.) under Godot's app_userdata dir. Chromium's file
-	// policy pattern wildcards don't span path separators, so we need
-	// multiple rules at different depths to cover the full tree we want
-	// brokered. The root comes from the engine's get_user_data_dir() so it
-	// tracks whatever the launcher project is configured to use.
-	{
-		const String user_dir = OS::get_singleton()->get_user_data_dir();
-		const Char16String user_dir_utf16 = user_dir.utf16();
-		const std::wstring root = std::wstring((const wchar_t *)user_dir_utf16.get_data());
-		const wchar_t *globs[] = {
-			L"\\*",
-			L"\\*\\*",
-			L"\\*\\*\\*",
-			L"\\*\\*\\*\\*",
-			L"\\*\\*\\*\\*\\*",
-			L"\\*\\*\\*\\*\\*\\*",
+	// Chromium's policy matcher compares pattern bytes against the
+	// NtCreateFile input path, which Win32 normalizes to backslashes.
+	// Patterns with forward slashes never match. Single-asterisk globs
+	// don't cross path separators either, so a dir needs one rule per
+	// depth level.
+	auto path_to_wstring = [](const String &p_path) {
+		const String normalized = p_path.replace_char('/', '\\');
+		const Char16String utf16 = normalized.utf16();
+		return std::wstring((const wchar_t *)utf16.get_data());
+	};
+	auto allow_file = [&](sandbox::FileSemantics sem, const std::wstring &pattern) {
+		sandbox::ResultCode rf = config->AllowFileAccess(sem, pattern.c_str());
+		if (rf != sandbox::SBOX_ALL_OK) {
+			ERR_PRINT(vformat("SandboxingWin: AllowFileAccess(%s) returned %d",
+					String::utf16((const char16_t *)pattern.c_str()), (int)rf));
+		}
+	};
+	auto allow_dir_recursive = [&](sandbox::FileSemantics sem, const String &p_dir) {
+		const std::wstring root = path_to_wstring(p_dir);
+		static const wchar_t *globs[] = {
+			L"\\*", L"\\*\\*", L"\\*\\*\\*",
+			L"\\*\\*\\*\\*", L"\\*\\*\\*\\*\\*", L"\\*\\*\\*\\*\\*\\*",
 		};
 		for (const wchar_t *suffix : globs) {
-			std::wstring pattern = root + suffix;
-			sandbox::ResultCode rf = config->AllowFileAccess(
-					sandbox::FileSemantics::kAllowAny, pattern.c_str());
-			if (rf != sandbox::SBOX_ALL_OK) {
-				ERR_PRINT(vformat("SandboxingWin: AllowFileAccess(%s) returned %d",
-						String::utf16((const char16_t *)pattern.c_str()), (int)rf));
-			}
+			allow_file(sem, root + suffix);
 		}
+	};
+
+	ERR_FAIL_COND_V_MSG(p_rw_dir.is_empty(), result,
+			"SandboxingWin: spawn_target requires p_rw_dir (per-gate user data dir)");
+
+	allow_dir_recursive(sandbox::FileSemantics::kAllowAny, p_rw_dir);
+	for (int i = 0; i < p_rw_files.size(); ++i) {
+		allow_file(sandbox::FileSemantics::kAllowAny, path_to_wstring(p_rw_files[i]));
+	}
+	for (int i = 0; i < p_ro_files.size(); ++i) {
+		allow_file(sandbox::FileSemantics::kAllowReadonly, path_to_wstring(p_ro_files[i]));
 	}
 
 	// Baseline process mitigations applied at process creation — ASLR + DEP
@@ -267,6 +281,10 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	return result;
 }
 
+void SandboxingWin::apply_untrusted_acl(const String &p_path) {
+	tg_apply_untrusted_acl(p_path);
+}
+
 Error SandboxingWin::lower_token() {
 	ERR_FAIL_COND_V_MSG(!is_target(), ERR_UNAVAILABLE,
 			"SandboxingWin: lower_token called from broker (not a sandbox target)");
@@ -285,10 +303,12 @@ Error SandboxingWin::lower_token() {
 }
 
 void SandboxingWin::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("spawn_target", "executable", "arguments", "stdout_log_path"),
-			&SandboxingWin::spawn_target, DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("spawn_target", "executable", "arguments", "stdout_log_path", "rw_dir", "rw_files", "ro_files"),
+			&SandboxingWin::spawn_target,
+			DEFVAL(String()), DEFVAL(String()), DEFVAL(Vector<String>()), DEFVAL(Vector<String>()));
 	ClassDB::bind_method(D_METHOD("lower_token"), &SandboxingWin::lower_token);
 	ClassDB::bind_method(D_METHOD("is_target"), &SandboxingWin::is_target);
+	ClassDB::bind_method(D_METHOD("apply_untrusted_acl", "path"), &SandboxingWin::apply_untrusted_acl);
 }
 
 bool SandboxingWin::broker_initialized = false;

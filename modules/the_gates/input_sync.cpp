@@ -37,7 +37,7 @@
 void InputSync::socket_bind(const String &p_address) {
 	const String resolved = tg_resolve_ipc_address(p_address);
 	sock.bind(resolved.utf8().get_data());
-	tg_apply_socket_acl_for_sandbox(resolved);
+	tg_apply_untrusted_acl(resolved);
 }
 
 void InputSync::socket_connect(const String &p_address) {

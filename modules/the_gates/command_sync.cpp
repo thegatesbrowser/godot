@@ -40,7 +40,7 @@ CommandSync *CommandSync::singleton = nullptr;
 void CommandSync::socket_bind(const String &p_address) {
 	const String resolved = tg_resolve_ipc_address(p_address);
 	sock.bind(resolved.utf8().get_data());
-	tg_apply_socket_acl_for_sandbox(resolved);
+	tg_apply_untrusted_acl(resolved);
 }
 
 void CommandSync::socket_connect(const String &p_address, const String &p_monitor_endpoint) {

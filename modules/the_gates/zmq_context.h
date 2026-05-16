@@ -38,7 +38,6 @@ inline zmq::context_t ctx;
 
 extern String tg_ipc_dir_override;
 
-// TODO: launcher should own renderer's working dir, removing this override
 inline String tg_resolve_ipc_address(const String &p_address) {
 	const String marker = "user://";
 	const int idx = p_address.find(marker);
@@ -51,5 +50,5 @@ inline String tg_resolve_ipc_address(const String &p_address) {
 			? OS::get_singleton()->get_user_data_dir()
 			: tg_ipc_dir_override;
 	String resolved = prefix + dir + "/" + suffix;
-	return resolved.replace("\\", "/");
+	return resolved.replace_char('\\', '/');
 }

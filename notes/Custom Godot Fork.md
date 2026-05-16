@@ -40,7 +40,12 @@ godot/SConstruct
              poll_monitor (CRASH_NOW if disconnected)
 ```
 
-There is also one TG_RENDERER-adjacent change *outside* any `#ifdef`: the `--tg-ipc-dir <abs path>` CLI argument and its backing `String tg_ipc_dir_override` global. The launcher passes this when spawning the renderer so both ends resolve `ipc://user://...` addresses (in `modules/the_gates/zmq_context.h::tg_resolve_ipc_address`) to the same on-disk path — the renderer's natural `OS::get_user_data_dir()` would otherwise resolve to the loaded gate's project name, not the launcher's. Not gated by `TG_RENDERER` because the launcher also includes the same resolver via `the_gates` and would otherwise see a dangling extern.
+There are two TG_RENDERER-adjacent changes *outside* any `#ifdef`: two CLI arguments and their backing globals.
+
+- `--tg-user-data-dir <abs path>` → `String tg_user_data_dir_override`. The launcher allocates a per-gate folder under its own `OS::get_user_data_dir()` (`gates_storage/<id>/`) and passes it as this flag. Inside the renderer, `OS::get_user_data_dir()` returns that override (see the `#ifdef TG_RENDERER` block in `core/os/os.cpp`), so `user://` resolves to a sandbox-allowed path under the launcher's tree instead of the gate-project-named sibling Godot would otherwise pick.
+- `--tg-ipc-dir <abs path>` → `String tg_ipc_dir_override`. The launcher passes its own (shallow) `OS::get_user_data_dir()` here. `modules/the_gates/zmq_context.h::tg_resolve_ipc_address` substitutes this for `user://` when resolving `ipc://` addresses, so socket files land at a path short enough to fit AF_UNIX's 108-char `sun_path` limit. Kept separate from the user-data dir because the per-gate folder paths are too deep to use for sockets.
+
+Both globals live outside `TG_RENDERER` because the launcher links the same code (the `the_gates` module's IPC resolver, the engine's `os.cpp`) and would otherwise see dangling externs.
 
 ### Per-OS display server tweaks
 

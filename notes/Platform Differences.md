@@ -27,7 +27,7 @@ The two-process architecture has to bridge OS boundaries — every step of cross
 
 ### IPC
 - libzmq's `ipc://` transport, backed by AF_UNIX sockets (Win10 1803+ exposes the type via `afunix.h`; libzmq's `wepoll` provides the I/O loop).
-- Socket files live under the launcher's `OS::get_user_data_dir()`. The launcher passes the directory to the renderer via `--tg-ipc-dir <abs path>` so both ends resolve `ipc://user://<name>` to the same file; see `zmq_context.h::tg_resolve_ipc_address`.
+- Socket files live directly under the launcher's `OS::get_user_data_dir()` — kept shallow so the absolute path stays within the AF_UNIX 108-char `sun_path` limit. The launcher passes its dir to the renderer via `--tg-ipc-dir <abs path>` so both ends resolve `ipc://user://<name>` (via `zmq_context.h::tg_resolve_ipc_address`) to the same file. Per-gate user data lives elsewhere — see `--tg-user-data-dir` in `notes/Custom Godot Fork.md`.
 - The renderer is always the listener (`bind`); the launcher is the caller (`connect`). Chromium sandbox forces this — a sandboxed renderer can create AF_UNIX sockets in its allowed user data dir but cannot outbound-`connect` to existing ones.
 
 ### Driver constraints
