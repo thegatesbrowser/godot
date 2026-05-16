@@ -13,9 +13,12 @@ in mozilla-central for the canonical example.
 
 - **Source:** `chromium/src` at branch `137.0.7151.69`
 - **Snapshot date:** 2026-05-14
-- **Vendoring scripts:** `godot/tools/vendor-chromium-sandbox.ps1` and
-  `godot/tools/vendor-chromium-base.ps1` re-run from `C:/code/chromium_git/chromium/src/`
-  when bumping the snapshot.
+- **Vendoring procedure:** the original copy was done by two one-shot PowerShell
+  scripts that walked `chromium/src/sandbox/{win,linux,mac,policy}/` and the
+  curated `base/` subset and copied them into this directory. The scripts
+  themselves were removed once vendoring was complete; recover them from
+  git history (commit `95d334b56b`) if you need to re-vendor against a
+  newer Chromium snapshot.
 
 ## Layout
 

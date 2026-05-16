@@ -7,10 +7,10 @@ read notes/Sandboxing/Index.md → Agent Session 2026-05-14.md → Vendoring Opt
 
 /goal: scons builds the sandbox lib from thirdparty/chromium-sandbox/. config.py no longer references C:/code for headers or libs. launcher + renderer still link a SANDBOX_EXPORTS-aware sandbox lib but it's our build.
 
-done condition: pwsh godot/tools/run-sandbox-test.ps1 -Build -SandboxBuild returns [VERIFY-OK] integrity=untrusted canary_file=blocked. verify.json proves it.
+done condition: pwsh godot/tools/run-sandbox-test.ps1 -Build returns [VERIFY-OK] integrity=untrusted canary_file=blocked. verify.json proves it.
 
 iteration loop:
-  pwsh godot/tools/run-sandbox-test.ps1 -Build -SandboxBuild     (after c++/scsub edits)
+  pwsh godot/tools/run-sandbox-test.ps1 -Build     (after c++/scsub edits)
   pwsh godot/tools/run-sandbox-test.ps1                          (gdscript-only)
 
 approach: translate sandbox/win/BUILD.gn to SCons. paint the base/ dep set by following compile errors — Firefox's security/sandbox/chromium/ moz.build is your structural reference, their chromium-shim/patches/ tell you what they stub or work around (we already have 08_add_back_SANDBOX_EXPORTS applied; the others are mostly compat patches we'll need).

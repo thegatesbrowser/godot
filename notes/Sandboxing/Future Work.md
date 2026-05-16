@@ -68,7 +68,7 @@ Each of these is real engineering. They take what's already a strong sandbox and
 
 - **Document the SANDBOX_EXPORTS replacement-attack mitigation.** Even with sign-verify (Tier 1), the threat model entry for "what if the renderer binary on disk is swapped" needs a written-down answer.
 
-- **Decide fate of the Chromium fork at `C:\code`.** The vendored build no longer depends on it — `cef_sandbox.lib` is unused, `tools/rebuild-cef-sandbox-lib.ps1` is dead. The fork remains useful as the source-of-truth for future Chromium uprevs of the vendor (the SANDBOX_EXPORTS patches live there and our snapshot was made from it). Recommendation: keep but mark as reference-only. The fork is no longer in the build's critical path.
+- **Decide fate of the Chromium fork at `C:\code`.** The vendored build no longer depends on it — `cef_sandbox.lib` is unused, and the rebuild helper script (`tools/rebuild-cef-sandbox-lib.ps1`) has been removed from the tree (recover from git history at commit `22fcf94c88` if you need it). The fork remains useful as the source-of-truth for future Chromium uprevs of the vendor (the SANDBOX_EXPORTS patches live there and our snapshot was made from it). Recommendation: keep but mark as reference-only. The fork is no longer in the build's critical path.
 
 - **Cross-platform autotest harness.** `run-sandbox-test.ps1` is Windows-only PowerShell. Equivalent runners for macOS / Linux as those platforms come online.
 

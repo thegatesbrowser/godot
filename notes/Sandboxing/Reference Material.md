@@ -48,7 +48,7 @@ godot/
 │   ├── SCsub                               # platform=windows && tg_sandbox guard
 │   └── config.py                           # clang-cl switch, CEF LIBPATH, CPPPATH
 ├── main/main.cpp                           # lower_token call near end of Main::start
-├── SConstruct                              # tg_sandbox=False flag, .sandbox suffix
+├── SConstruct                              # tg_sandbox=True flag (default on), .sandbox suffix
 └── godot.manifest                          # Win10/11 compat OS GUID
 ```
 
