@@ -33,13 +33,13 @@
 #ifdef WINDOWS_ENABLED
 #define WIN32_LEAN_AND_MEAN
 #include "thirdparty/cppzmq/zmq.hpp"
-#include "zmq_context.h"
+#include "zmq_runtime.h"
 #include <windows.h>
 #endif
 
 #if MACOS_ENABLED
 #include "thirdparty/cppzmq/zmq.hpp"
-#include "zmq_context.h"
+#include "zmq_runtime.h"
 #include <IOSurface/IOSurface.h>
 #endif
 
@@ -64,7 +64,7 @@ bool TGExternalTexture::send_filehandle(const String &p_path) {
 	ERR_FAIL_COND_V_MSG(!success, false, "Unable to DuplicateHandle. Error code: " + itos(GetLastError()));
 
 	filehandle = (FileHandle)hDuplicateHandle;
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
+	zmq::socket_t sock(tg_zmq_context(), zmq::socket_type::pair);
 	sock.connect(tg_resolve_ipc_address(split[0]).utf8().get_data());
 
 	int64_t data = reinterpret_cast<int64_t>(filehandle);
@@ -83,7 +83,7 @@ bool TGExternalTexture::send_filehandle(const String &p_path) {
 #elif MACOS_ENABLED
 	uint32_t surfaceID = IOSurfaceGetID(filehandle);
 
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
+	zmq::socket_t sock(tg_zmq_context(), zmq::socket_type::pair);
 	sock.connect(tg_resolve_ipc_address(p_path).utf8().get_data());
 
 	zmq::message_t msg(sizeof(uint32_t));
@@ -99,7 +99,7 @@ bool TGExternalTexture::send_filehandle(const String &p_path) {
 
 bool TGExternalTexture::recv_filehandle(const String &p_path) {
 #ifdef WINDOWS_ENABLED
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
+	zmq::socket_t sock(tg_zmq_context(), zmq::socket_type::pair);
 	sock.bind(tg_resolve_ipc_address(p_path).utf8().get_data());
 
 	zmq::message_t msg;
@@ -113,7 +113,7 @@ bool TGExternalTexture::recv_filehandle(const String &p_path) {
 
 	filehandle = reinterpret_cast<void *>(data);
 #elif MACOS_ENABLED
-	zmq::socket_t sock(ctx, zmq::socket_type::pair);
+	zmq::socket_t sock(tg_zmq_context(), zmq::socket_type::pair);
 	sock.bind(tg_resolve_ipc_address(p_path).utf8().get_data());
 
 	zmq::message_t msg;

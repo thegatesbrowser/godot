@@ -148,12 +148,12 @@
 #endif // MODULE_GDSCRIPT_ENABLED
 
 #ifdef TG_RENDERER
-#include "modules/the_gates/command_sync.h"
-#include "modules/the_gates/external_texture.h"
-#include "modules/the_gates/input_sync.h"
+#include "modules/the_gates/ipc/command_sync.h"
+#include "modules/the_gates/ipc/external_texture.h"
+#include "modules/the_gates/ipc/input_sync.h"
+#include "modules/the_gates/ipc/zmq_runtime.h"
 #include "modules/the_gates/sandbox_diagnostics.h"
 #include "modules/the_gates/sandboxing.h"
-#include "modules/the_gates/zmq_context.h"
 #endif
 
 #if defined(TG_RENDERER) && defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
