@@ -67,8 +67,10 @@ The cherry-pick is mechanical. The SHA on `tg-master` will differ from `tg-4.5` 
 Build commands are in the parent [`README.md`](../README.md). They change; trust the README, not memory.
 
 Day-to-day:
-- Editor / launcher binary: `scons -j$(nproc) dev_build=yes tg_renderer=no compiledb=yes use_llvm=yes linker=lld disable_exceptions=no`
-- Renderer binary: same with `tg_renderer=yes target=template_debug`
+- Editor / launcher binary: `python tools/build.py launcher`
+- Renderer binary: `python tools/build.py renderer`
+
+`tools/build.py` wraps scons with the canonical flag set and is the single source of truth — VSCode tasks, agent instructions, and the sandbox test loop all route through it. Run `python tools/build.py --help` for profiles (`launcher`, `renderer`, `launcher-release`, `renderer-release`) and flags (`--mac-intel`, `--no-sandbox`, `-j N`).
 
 Output binaries land in `bin/`. On Windows, the `.console.exe` variants are invaluable for renderer logging.
 

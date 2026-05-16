@@ -12,13 +12,21 @@ From `godot/`:
 
 ```bash
 # Editor / launcher binary
-scons -j $(nproc) dev_build=yes tg_renderer=no compiledb=yes use_llvm=yes linker=lld disable_exceptions=no
+python tools/build.py launcher
 
 # Renderer binary
-scons -j $(nproc) dev_build=yes target=template_debug tg_renderer=yes compiledb=yes use_llvm=yes linker=lld disable_exceptions=no
+python tools/build.py renderer
 ```
 
-(Copied from the parent README.) Substitute `target=template_release` for production renderer.
+`tools/build.py` is the canonical entry point — it owns the scons flag combinations so they don't drift between VSCode tasks, agent instructions, and the sandbox test loop. The four profiles are `launcher`, `renderer`, `launcher-release`, `renderer-release`. Flags: `--mac-intel` (sets `arch=x86_64` for Intel Mac targets), `--no-sandbox` (sets `tg_sandbox=no` — sandbox is on by default), `-j N` (default `cpu_count - 2`). Anything after `--` is forwarded verbatim to scons. See `python tools/build.py --help`.
+
+If you ever need to invoke scons directly (debugging an unusual flag combo, running an upstream Godot task), the raw command for the dev launcher is:
+
+```bash
+scons dev_build=yes tg_renderer=no compiledb=yes use_llvm=yes linker=lld disable_exceptions=no
+```
+
+— but route everyday work through `build.py`.
 
 ## Output binaries land in `godot/bin/`
 
