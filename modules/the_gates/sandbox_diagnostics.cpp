@@ -35,11 +35,12 @@
 #include "core/variant/dictionary.h"
 
 #ifdef WINDOWS_ENABLED
+#include <windows.h>
+
 #include <fileapi.h>
 #include <processthreadsapi.h>
 #include <sddl.h>
 #include <securitybaseapi.h>
-#include <windows.h>
 #include <winternl.h>
 #endif
 
