@@ -36,6 +36,7 @@
 #include "core/io/file_access.h"
 #include "core/io/json.h"
 #include "core/string/print_string.h"
+#include "handle_scope.h"
 #include "platform/windows/os_windows.h"
 
 #include <memory>
@@ -250,35 +251,30 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	const std::wstring exe_wide = to_wide(p_executable);
 	const std::wstring cmd_wide = build_command_line(p_executable, p_arguments);
 
-	// Pre-open the renderer's stdout/stderr log file at broker integrity so
-	// the locked-down child has a writable handle to its own log even after
-	// dropping to LOW. Without this, sandbox-spawned children write nowhere
-	// (they don't inherit the launcher's console handles).
-	HANDLE log_handle = INVALID_HANDLE_VALUE;
+	// Pre-open the renderer's stdout/stderr log file at broker integrity so the
+	// locked-down child has a writable handle to its own log post-lockdown.
+	HandleScope log_handle;
 	if (!stdout_log_path.is_empty()) {
 		const std::wstring log_path_wide = to_wide(stdout_log_path);
-		// Ensure parent dirs exist. SHCreateDirectoryExW would be ideal but
-		// we keep this minimal — Godot will have already mkdir'd via
-		// DirAccess from the GDScript wrapper.
 		SECURITY_ATTRIBUTES sa = {};
 		sa.nLength = sizeof(sa);
 		sa.bInheritHandle = TRUE;
-		log_handle = ::CreateFileW(
+		log_handle.reset(::CreateFileW(
 				log_path_wide.c_str(),
 				FILE_GENERIC_WRITE | FILE_APPEND_DATA,
 				FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 				&sa,
 				CREATE_ALWAYS,
 				FILE_ATTRIBUTE_NORMAL,
-				nullptr);
-		if (log_handle == INVALID_HANDLE_VALUE) {
+				nullptr));
+		if (!log_handle.is_valid()) {
 			ERR_PRINT(vformat("SandboxWin: CreateFile(log) failed win=%d", (int)::GetLastError()));
 		} else {
-			sandbox::ResultCode rs = policy->SetStdoutHandle(log_handle);
+			sandbox::ResultCode rs = policy->SetStdoutHandle(log_handle.get());
 			if (rs != sandbox::SBOX_ALL_OK) {
 				ERR_PRINT(vformat("SandboxWin: SetStdoutHandle returned %d", (int)rs));
 			}
-			rs = policy->SetStderrHandle(log_handle);
+			rs = policy->SetStderrHandle(log_handle.get());
 			if (rs != sandbox::SBOX_ALL_OK) {
 				ERR_PRINT(vformat("SandboxWin: SetStderrHandle returned %d", (int)rs));
 			}
@@ -290,19 +286,12 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	sandbox::ResultCode spawn = broker_service->SpawnTarget(
 			exe_wide.c_str(), cmd_wide.c_str(), std::move(policy), &last_error, &pi);
 	if (spawn != sandbox::SBOX_ALL_OK) {
-		if (log_handle != INVALID_HANDLE_VALUE) {
-			::CloseHandle(log_handle);
-		}
 		ERR_PRINT(vformat("SandboxWin: SpawnTarget failed (sbox=%d, win=%d)",
 				(int)spawn, (int)last_error));
 		return result;
 	}
 
-	// We can release our broker-side copy of the log handle now — the child
-	// inherited its own dup and will keep the file open until it exits.
-	if (log_handle != INVALID_HANDLE_VALUE) {
-		::CloseHandle(log_handle);
-	}
+	// log_handle drops on return; the child inherited its own dup.
 
 	// Resume the initial thread — SpawnTarget creates suspended.
 	if (pi.hThread) {
