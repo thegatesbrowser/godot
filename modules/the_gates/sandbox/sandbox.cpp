@@ -50,6 +50,8 @@ void Sandbox::_bind_methods() {
 			&Sandbox::spawn_target);
 	ClassDB::bind_method(D_METHOD("apply_renderer_acl", "path"), &Sandbox::apply_renderer_acl);
 	ClassDB::bind_method(D_METHOD("verify_binary", "path"), &Sandbox::verify_binary);
+	ClassDB::bind_method(D_METHOD("is_target_running"), &Sandbox::is_target_running);
+	ClassDB::bind_method(D_METHOD("kill_target"), &Sandbox::kill_target);
 	ClassDB::bind_method(D_METHOD("lower_token"), &Sandbox::lower_token);
 	ClassDB::bind_method(D_METHOD("is_target"), &Sandbox::is_target);
 }

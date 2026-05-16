@@ -59,6 +59,13 @@ public:
 	// (invalid signature, wrong thumbprint, missing cert).
 	virtual Error verify_binary(const String &p_path) = 0;
 
+	// Liveness of the most recently spawned target. The launcher used to ask
+	// the engine via OS.is_process_running(pid); that required a fork-side
+	// hook in OS_Windows for sandbox-spawned children. The Sandbox instance
+	// holds its own handle and answers locally — no engine touchpoint.
+	virtual bool is_target_running() const = 0;
+	virtual Error kill_target() = 0;
+
 	// Target-side (called from the renderer process). Fail-closed: returns
 	// non-OK if the lockdown step fails — caller MUST abort.
 	virtual Error lower_token() = 0;

@@ -270,13 +270,21 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 		::ResumeThread(pi.hThread);
 	}
 
-	// Register the child with OS_Windows so OS.is_process_running / OS.kill cover it.
-	static_cast<OS_Windows *>(OS::get_singleton())->track_external_process((OS::ProcessID)pi.dwProcessId, pi.hProcess, pi.hThread);
+	// Close any stale handles from a previous spawn on this SandboxWin
+	// instance, then take ownership of the fresh ones. is_target_running /
+	// kill_target query these directly — no engine OS.process_map needed.
+	if (target_process != nullptr) {
+		::CloseHandle((HANDLE)target_process);
+	}
+	if (target_thread != nullptr) {
+		::CloseHandle((HANDLE)target_thread);
+	}
+	target_process = pi.hProcess;
+	target_thread = pi.hThread;
+	target_pid = (int64_t)pi.dwProcessId;
 
 	result["pid"] = (int64_t)pi.dwProcessId;
 	result["thread_id"] = (int64_t)pi.dwThreadId;
-	result["process_handle"] = (int64_t)(uintptr_t)pi.hProcess;
-	result["thread_handle"] = (int64_t)(uintptr_t)pi.hThread;
 
 	if (!stdout_log_path.is_empty()) {
 		write_broker_policy_json(stdout_log_path, p_executable, pi.dwProcessId, p_policy);
@@ -304,6 +312,27 @@ Error SandboxWin::verify_binary(const String &p_path) {
 	print_line(vformat("[VERIFY-BYPASSED] signature_check disabled at build time for %s (no tg_signature_pin)", p_path));
 	return OK;
 #endif
+}
+
+bool SandboxWin::is_target_running() const {
+	if (target_process == nullptr) {
+		return false;
+	}
+	DWORD exit_code = 0;
+	if (!::GetExitCodeProcess((HANDLE)target_process, &exit_code)) {
+		return false;
+	}
+	return exit_code == STILL_ACTIVE;
+}
+
+Error SandboxWin::kill_target() {
+	if (target_process == nullptr) {
+		return ERR_DOES_NOT_EXIST;
+	}
+	if (!::TerminateProcess((HANDLE)target_process, 1)) {
+		ERR_FAIL_V_MSG(FAILED, vformat("SandboxWin::kill_target: TerminateProcess failed (win=%d)", (int)::GetLastError()));
+	}
+	return OK;
 }
 
 Error SandboxWin::lower_token() {
@@ -337,4 +366,10 @@ SandboxWin::SandboxWin() {
 }
 
 SandboxWin::~SandboxWin() {
+	if (target_process != nullptr) {
+		::CloseHandle((HANDLE)target_process);
+	}
+	if (target_thread != nullptr) {
+		::CloseHandle((HANDLE)target_thread);
+	}
 }
