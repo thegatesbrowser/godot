@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_win.h                                                         */
+/*  sandbox_policy.h                                                      */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,31 +30,55 @@
 
 #pragma once
 
-#include "../sandbox.h"
+#include "core/object/ref_counted.h"
+#include "core/variant/dictionary.h"
 
-namespace sandbox {
-class BrokerServices;
-}
+// Cross-platform sandbox policy description. Each Sandbox impl translates
+// these into native primitives: Windows -> chromium TargetPolicy + DACL/MIC;
+// Linux -> seccomp + landlock; macOS -> Seatbelt profile.
+class SandboxPolicy : public RefCounted {
+	GDCLASS(SandboxPolicy, RefCounted);
 
-class SandboxWin : public Sandbox {
-	GDCLASS(SandboxWin, Sandbox);
+	String rw_dir;
+	PackedStringArray rw_files;
+	PackedStringArray ro_files;
+	String child_stdout_log_path;
+	bool allow_network = false;
+	bool allow_audio = false;
+	int integrity_floor = 0;
 
-	sandbox::BrokerServices *broker_service = nullptr;
-	// Per-process. BrokerServices is a SandboxFactory singleton — Init() twice
-	// returns SBOX_ERROR_UNEXPECTED_CALL. Static so multiple SandboxWin
-	// instances (one per gate spawn) share the same initialised broker.
-	static bool broker_initialized;
+protected:
+	static void _bind_methods();
 
 public:
-	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
-			const String &p_executable, const Vector<String> &p_arguments) override;
+	void set_rw_dir(const String &p_path) { rw_dir = p_path; }
+	String get_rw_dir() const { return rw_dir; }
 
-	void apply_renderer_acl(const String &p_path) override;
+	void add_rw_file(const String &p_path) { rw_files.push_back(p_path); }
+	PackedStringArray get_rw_files() const { return rw_files; }
+	void set_rw_files(const PackedStringArray &p_files) { rw_files = p_files; }
 
-	Error lower_token() override;
+	void add_ro_file(const String &p_path) { ro_files.push_back(p_path); }
+	PackedStringArray get_ro_files() const { return ro_files; }
+	void set_ro_files(const PackedStringArray &p_files) { ro_files = p_files; }
 
-	bool is_target() const override { return broker_service == nullptr; }
+	void set_child_stdout_log_path(const String &p_path) { child_stdout_log_path = p_path; }
+	String get_child_stdout_log_path() const { return child_stdout_log_path; }
 
-	SandboxWin();
-	~SandboxWin();
+	void set_allow_network(bool p_allow) { allow_network = p_allow; }
+	bool is_network_allowed() const { return allow_network; }
+
+	void set_allow_audio(bool p_allow) { allow_audio = p_allow; }
+	bool is_audio_allowed() const { return allow_audio; }
+
+	// Platform-specific severity dial: Windows passes IntegrityLevel enum
+	// values, Linux uses 0 for "default seccomp+landlock", macOS is binary
+	// (Seatbelt active or not). Default 0 means "tightest available."
+	void set_integrity_floor(int p_level) { integrity_floor = p_level; }
+	int get_integrity_floor() const { return integrity_floor; }
+
+	Dictionary to_dict() const;
+
+	SandboxPolicy() = default;
+	~SandboxPolicy() = default;
 };

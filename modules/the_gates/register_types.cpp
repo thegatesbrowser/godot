@@ -37,6 +37,7 @@
 #include "ipc/input_sync.h"
 #include "ipc/zmq_runtime.h"
 #include "sandbox/sandbox.h"
+#include "sandbox/sandbox_policy.h"
 #include "sandboxing.h"
 
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
@@ -54,6 +55,7 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(CommandSync);
 	GDREGISTER_CLASS(TGExternalTexture);
 
+	GDREGISTER_CLASS(SandboxPolicy);
 	GDREGISTER_ABSTRACT_CLASS(Sandbox);
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 	GDREGISTER_CLASS(SandboxWin);

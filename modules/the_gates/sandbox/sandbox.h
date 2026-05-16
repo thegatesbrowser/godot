@@ -33,6 +33,8 @@
 #include "core/object/ref_counted.h"
 #include "core/variant/dictionary.h"
 
+class SandboxPolicy;
+
 class Sandbox : public RefCounted {
 	GDCLASS(Sandbox, RefCounted);
 
@@ -46,11 +48,10 @@ public:
 	static Ref<Sandbox> create();
 
 	// Broker-side (called from the launcher process).
-	virtual Dictionary spawn_target(const String &p_executable, const Vector<String> &p_arguments,
-			const String &p_stdout_log_path,
-			const String &p_rw_dir,
-			const Vector<String> &p_rw_files,
-			const Vector<String> &p_ro_files) = 0;
+	// Returns Dictionary { pid, thread_id, process_handle, thread_handle }
+	// on success, empty Dictionary on failure.
+	virtual Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
+			const String &p_executable, const Vector<String> &p_arguments) = 0;
 	virtual void apply_renderer_acl(const String &p_path) = 0;
 
 	// Target-side (called from the renderer process). Fail-closed: returns

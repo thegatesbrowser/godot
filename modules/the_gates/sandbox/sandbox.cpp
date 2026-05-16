@@ -30,6 +30,8 @@
 
 #include "sandbox.h"
 
+#include "sandbox_policy.h"
+
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 #include "windows/sandbox_win.h"
 #endif
@@ -44,9 +46,8 @@ Ref<Sandbox> Sandbox::create() {
 
 void Sandbox::_bind_methods() {
 	ClassDB::bind_static_method("Sandbox", D_METHOD("create"), &Sandbox::create);
-	ClassDB::bind_method(D_METHOD("spawn_target", "executable", "arguments", "stdout_log_path", "rw_dir", "rw_files", "ro_files"),
-			&Sandbox::spawn_target,
-			DEFVAL(String()), DEFVAL(String()), DEFVAL(Vector<String>()), DEFVAL(Vector<String>()));
+	ClassDB::bind_method(D_METHOD("spawn_target", "policy", "executable", "arguments"),
+			&Sandbox::spawn_target);
 	ClassDB::bind_method(D_METHOD("apply_renderer_acl", "path"), &Sandbox::apply_renderer_acl);
 	ClassDB::bind_method(D_METHOD("lower_token"), &Sandbox::lower_token);
 	ClassDB::bind_method(D_METHOD("is_target"), &Sandbox::is_target);
