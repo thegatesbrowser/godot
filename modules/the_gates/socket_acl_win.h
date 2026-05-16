@@ -28,8 +28,7 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifndef SOCKET_ACL_WIN_H
-#define SOCKET_ACL_WIN_H
+#pragma once
 
 #include "core/string/ustring.h"
 
@@ -53,5 +52,3 @@
 // error so a missing socket file or permissions issue doesn't kill the
 // whole IPC setup.
 void tg_apply_socket_acl_for_sandbox(const String &p_zmq_address);
-
-#endif // SOCKET_ACL_WIN_H

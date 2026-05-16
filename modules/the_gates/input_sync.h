@@ -28,8 +28,7 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifndef INPUT_SYNC_H
-#define INPUT_SYNC_H
+#pragma once
 
 #include "core/input/input.h"
 #include "core/object/ref_counted.h"
@@ -61,5 +60,3 @@ public:
 	InputSync();
 	~InputSync();
 };
-
-#endif // INPUT_SYNC_H

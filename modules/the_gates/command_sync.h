@@ -28,8 +28,7 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifndef COMMAND_SYNC_H
-#define COMMAND_SYNC_H
+#pragma once
 
 #include "command.h"
 #include "scene/main/node.h"
@@ -83,5 +82,3 @@ public:
 	CommandSync(zmq::socket_type type = zmq::socket_type::pair, zmq::socket_type monitor_type = zmq::socket_type::pair);
 	~CommandSync();
 };
-
-#endif // COMMAND_SYNC_H

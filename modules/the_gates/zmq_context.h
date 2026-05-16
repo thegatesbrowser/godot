@@ -28,8 +28,7 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifndef ZMQ_CONTEXT_H
-#define ZMQ_CONTEXT_H
+#pragma once
 
 #include "core/os/os.h"
 #include "core/string/ustring.h"
@@ -54,5 +53,3 @@ inline String tg_resolve_ipc_address(const String &p_address) {
 	String resolved = prefix + dir + "/" + suffix;
 	return resolved.replace("\\", "/");
 }
-
-#endif // ZMQ_CONTEXT_H

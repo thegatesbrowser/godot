@@ -1,3 +1,33 @@
+/**************************************************************************/
+/*  sandbox_diagnostics.cpp                                               */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
 #include "sandbox_diagnostics.h"
 
 #include "core/io/json.h"
@@ -5,11 +35,11 @@
 #include "core/variant/dictionary.h"
 
 #ifdef WINDOWS_ENABLED
-#include <windows.h>
 #include <fileapi.h>
 #include <processthreadsapi.h>
 #include <sddl.h>
 #include <securitybaseapi.h>
+#include <windows.h>
 #include <winternl.h>
 #endif
 
@@ -131,7 +161,7 @@ String current_desktop_name() {
 	if (!desk) {
 		return "";
 	}
-	wchar_t name[256] = {0};
+	wchar_t name[256] = { 0 };
 	DWORD needed = 0;
 	GetUserObjectInformationW(desk, UOI_NAME, name, sizeof(name), &needed);
 	return String::utf16((const char16_t *)name);
@@ -142,7 +172,7 @@ Dictionary run_canaries() {
 	// File write canary: try to create a file in user's profile root,
 	// somewhere we don't expect the renderer to have access post-lockdown.
 	{
-		wchar_t profile[MAX_PATH] = {0};
+		wchar_t profile[MAX_PATH] = { 0 };
 		DWORD plen = GetEnvironmentVariableW(L"USERPROFILE", profile, MAX_PATH);
 		if (plen > 0 && plen < MAX_PATH) {
 			String path = String::utf16((const char16_t *)profile) + "\\thegates-sandbox-canary.txt";
