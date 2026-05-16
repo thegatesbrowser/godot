@@ -28,7 +28,7 @@ godot/modules/the_gates/
 └── variant_tools.h      ← misc Variant helpers
 ```
 
-Transport: all IPC goes through `ipc://` zmq sockets (AF_UNIX on every OS — `wepoll` provides the Win10+ shim). The launcher passes `--tg-ipc-dir <abs path>` when spawning the renderer so both ends resolve `ipc://user://name` to the same absolute file on disk; see `zmq_context.h::tg_resolve_ipc_address`. The renderer is always the listener (binds) and the launcher connects — this is forced by the Chromium sandbox on Windows, which lets a sandboxed renderer *create* AF_UNIX sockets in its allowed user data dir but blocks outbound `connect()` to existing sockets. libzmq is vendored at `thirdparty/libzmq/` and cppzmq at `thirdparty/cppzmq/`.
+Transport: all IPC goes through `ipc://` zmq sockets (AF_UNIX on every OS — `wepoll` provides the Win10+ shim). Sockets live directly under the launcher's `OS::get_user_data_dir()` (kept shallow because AF_UNIX `sun_path` caps at 108 chars). The launcher passes that dir to the renderer as `--tg-ipc-dir <abs path>` so both ends resolve `ipc://user://name` (via `zmq_context.h::tg_resolve_ipc_address`) to the same file. Per-gate user data (the renderer's `user://`) is a separate path passed as `--tg-user-data-dir <abs path>` — see `notes/Custom Godot Fork.md`. libzmq is vendored at `thirdparty/libzmq/` and cppzmq at `thirdparty/cppzmq/`.
 
 ## Classes registered with GDScript
 

@@ -25,6 +25,40 @@ above. Specifically:
 - `config.py` no longer references `C:/code` or any hardcoded MSVC/SDK
   paths.
 - Hardcoded user-specific dev-machine paths in `sandbox_win.cpp` are gone.
+- Renderer's `user://` now resolves to a launcher-owned per-gate folder
+  (`user://gates_storage/<id>/`) via the new `--tg-user-data-dir` arg.
+  Replaces the old `--tg-ipc-dir` (still accepted as an alias). Gate
+  saves persist across sessions; before this, the renderer wrote into a
+  sibling `app_userdata/<gate-project-name>/` outside the sandbox file
+  allow-list and writes silently failed.
+- Per-gate folder is stamped with `Everyone:(F)` DACL + UNTRUSTED
+  mandatory label (OICI inheritance) by `SandboxingWin::apply_untrusted_acl`
+  before spawn. Without this, the launcher creates the dir at Medium IL
+  and `FileAccess.open("user://config.cfg", WRITE)` fails inside the
+  sandboxed renderer — only writes to renderer-created subdirs (which
+  inherit UNTRUSTED IL from process token) would succeed. The helper
+  recursively re-stamps existing children so saves persisted by a prior
+  session are still openable after the fix lands.
+- Cross-gate isolation: `spawn_target` takes a per-spawn allow-list
+  (`rw_dir`, `rw_files`, `ro_files`) instead of allowing the launcher's
+  full user_data_dir tree. The launcher passes only this gate's
+  `gates_storage/<id>/` folder (R/W, globbed up to 6 levels), the three
+  IPC socket files (`command_sync`, `input_sync`, `external_texture`,
+  R/W), and the gate's own `.pck` (read-only). Other gates' folders,
+  the launcher's own files (DataSaver, analytics), and downloaded
+  `.pck`s belonging to other gates are all denied. Verified by the
+  `canary_sibling_gate_write` probe in `sandbox_diagnostics`, which
+  attempts a write into a sibling under `gates_storage/` and asserts
+  it returns blocked.
+- Allow-list paths are forward-slash normalized to backslashes before
+  being handed to `AllowFileAccess`. Chromium's policy matcher compares
+  pattern bytes against the NtCreateFile input path (always backslashes
+  via the `\??\` NT prefix); patterns with forward slashes — which is
+  what Godot's `globalize_path` returns — never match. Without this
+  normalization, a gate's runtime `load("res://…")` calls fail because
+  Godot's ZIP reader re-opens the `.pck` file on every resource lookup
+  and the broker denies the read. Verified by `canary_pck_read` in
+  `sandbox_diagnostics`.
 
 ---
 

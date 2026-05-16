@@ -153,6 +153,7 @@
 #include "modules/the_gates/input_sync.h"
 #include "modules/the_gates/sandbox_diagnostics.h"
 #include "modules/the_gates/sandboxing.h"
+#include "modules/the_gates/zmq_context.h"
 #endif
 
 #if defined(TG_RENDERER) && defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
@@ -306,7 +307,9 @@ static bool first_frame_sent = false;
 static uint32_t heartbeat = 0;
 #endif
 String gdext_libs_dir = "";
+String tg_user_data_dir_override = "";
 String tg_ipc_dir_override = "";
+String tg_main_pack_path = "";
 
 // Constants.
 
@@ -1749,6 +1752,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		} else if (arg == "--main-pack") {
 			if (N) {
 				main_pack = N->get();
+				tg_main_pack_path = main_pack;
 				N = N->next();
 			} else {
 				OS::get_singleton()->print("Missing path to main pack file, aborting.\n");
@@ -1761,6 +1765,15 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				N = N->next();
 			} else {
 				OS::get_singleton()->print("Missing path to libraries directory.\n");
+				goto error;
+			}
+
+		} else if (arg == "--tg-user-data-dir") {
+			if (N) {
+				tg_user_data_dir_override = N->get();
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing path to renderer user data directory.\n");
 				goto error;
 			}
 
@@ -4714,10 +4727,11 @@ int Main::start() {
 
 	// TGExternalTexture
 	arg.clear();
+	const String filehandle_addr = tg_resolve_ipc_address(FILEHANDLE_PATH);
 #ifdef WINDOWS_ENABLED
-	arg.append(FILEHANDLE_PATH + "|" + itos(OS::get_singleton()->get_process_id()));
+	arg.append(filehandle_addr + "|" + itos(OS::get_singleton()->get_process_id()));
 #else
-	arg.append(FILEHANDLE_PATH);
+	arg.append(filehandle_addr);
 #endif
 	command_sync->send_command("send_filehandle", arg);
 
