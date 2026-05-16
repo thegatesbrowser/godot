@@ -30,9 +30,12 @@
 
 #include "sandbox_diagnostics.h"
 
+#include "core/io/file_access.h"
 #include "core/io/json.h"
 #include "core/string/print_string.h"
 #include "core/variant/dictionary.h"
+
+extern String tg_main_pack_path;
 
 #ifdef WINDOWS_ENABLED
 #include <windows.h>
@@ -201,6 +204,53 @@ Dictionary run_canaries() {
 		} else {
 			out["canary_reg_write"] = "blocked";
 			out["canary_reg_write_error"] = (int)res;
+		}
+	}
+	// Positive canary: write a file directly under user_data_dir. Tests the
+	// path most gates take with FileAccess.open("user://config.cfg", WRITE).
+	{
+		Error err = OK;
+		Ref<FileAccess> f = FileAccess::open("user://sandbox-positive-canary.txt", FileAccess::WRITE, &err);
+		if (f.is_valid()) {
+			f->store_string(vformat("pid=%d", (int)GetCurrentProcessId()));
+			f->close();
+			out["canary_user_dir_write"] = "allowed";
+		} else {
+			out["canary_user_dir_write"] = "blocked";
+			out["canary_user_dir_write_error"] = (int)err;
+		}
+	}
+	// Isolation canary: try to write to a sibling gate's folder under
+	// gates_storage/. Should be blocked by the per-spawn allow-list.
+	{
+		const String sibling = OS::get_singleton()->get_user_data_dir()
+				.path_join("..").path_join("sandbox-isolation-canary.txt");
+		Error err = OK;
+		Ref<FileAccess> f = FileAccess::open(sibling, FileAccess::WRITE, &err);
+		if (f.is_valid()) {
+			f->store_string(vformat("pid=%d", (int)GetCurrentProcessId()));
+			f->close();
+			out["canary_sibling_gate_write"] = "allowed";
+		} else {
+			out["canary_sibling_gate_write"] = "blocked";
+			out["canary_sibling_gate_write_error"] = (int)err;
+		}
+	}
+	// .pck access canary: open the .pck file directly by its absolute path,
+	// the same call Godot's ZIP reader makes for every load() at runtime.
+	{
+		out["canary_pck_read_path"] = tg_main_pack_path;
+		if (!tg_main_pack_path.is_empty()) {
+			Error err = OK;
+			Ref<FileAccess> f = FileAccess::open(tg_main_pack_path, FileAccess::READ, &err);
+			if (f.is_valid()) {
+				out["canary_pck_read"] = "allowed";
+			} else {
+				out["canary_pck_read"] = "blocked";
+				out["canary_pck_read_error"] = (int)err;
+			}
+		} else {
+			out["canary_pck_read"] = "skipped_no_pck_path";
 		}
 	}
 	return out;
