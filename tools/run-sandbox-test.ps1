@@ -80,6 +80,14 @@
       canary_sibling_gate_allowed
                               renderer wrote into a sibling gate's folder
                               (cross-gate isolation broken — allow-list too broad)
+      broker_policy_parse_failed
+                              broker_policy.json exists but isn't valid JSON
+      broker_renderer_integrity_mismatch
+                              broker configured a different integrity level than
+                              the renderer reports observing (cross-check failed)
+      broker_token_lockdown_regression
+                              broker_policy.json shows USER_LOCKDOWN token level
+                              (regression: known to break IPC, see Architecture.md)
 #>
 
 [CmdletBinding()]
@@ -345,4 +353,35 @@ if ($diagCanaryPck -ne "allowed" -and $diagCanaryPck -ne "skipped_no_main_scene"
     Emit-Fail "canary_pck_read_blocked value=$diagCanaryPck (gate cannot load resources from .pck post-lockdown)" 25
 }
 
-Emit-Pass "integrity=$diagIntegrity renderer_pid=$diagPid canary_file=$diagCanaryFile canary_user_dir=$diagCanaryUser canary_sibling=$diagCanarySibling canary_pck=$diagCanaryPck per_gate_files=$perGateFiles build=$diagBuild"
+# --- Step 11: Broker/renderer cross-check --------------------------------
+# Diff broker_policy.json (what SandboxingWin claims to have configured)
+# against the renderer's SANDBOX-DIAG. Divergence means either the renderer
+# is lying about its state or the broker silently applied something
+# different from what it claimed.
+$brokerPolicyPath = Join-Path $rendererLogFile.Directory.FullName "broker_policy.json"
+$brokerCrossCheck = "skipped"
+if (Test-Path $brokerPolicyPath) {
+    Copy-Item $brokerPolicyPath (Join-Path $ResultsDir "broker_policy.json") -Force
+    try {
+        $brokerPolicy = Get-Content $brokerPolicyPath -Raw | ConvertFrom-Json
+    } catch {
+        Emit-Fail "broker_policy_parse_failed see=$brokerPolicyPath" 26
+    }
+
+    $brokerIntegrity = ""
+    if ($brokerPolicy.PSObject.Properties["integrity_target"]) {
+        $brokerIntegrity = [string]($brokerPolicy.integrity_target).ToLower()
+    }
+    if ($brokerIntegrity -and $diagIntegrity -and $brokerIntegrity -ne "?" -and $diagIntegrity -ne "?" -and $brokerIntegrity -ne $diagIntegrity) {
+        Emit-Fail "broker_renderer_integrity_mismatch broker=$brokerIntegrity renderer=$diagIntegrity" 27
+    }
+
+    if ($brokerPolicy.PSObject.Properties["token_lockdown"] -and
+            [string]($brokerPolicy.token_lockdown) -eq "USER_LOCKDOWN") {
+        Emit-Fail "broker_token_lockdown_regression value=USER_LOCKDOWN" 28
+    }
+
+    $brokerCrossCheck = "ok"
+}
+
+Emit-Pass "integrity=$diagIntegrity renderer_pid=$diagPid canary_file=$diagCanaryFile canary_user_dir=$diagCanaryUser canary_sibling=$diagCanarySibling canary_pck=$diagCanaryPck per_gate_files=$perGateFiles broker_xcheck=$brokerCrossCheck build=$diagBuild"
