@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_stubs.cpp                                                     */
+/*  linker_stubs.cpp                                                      */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,19 +28,22 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-// the_gates: catch-all stub for chromium 137 symbols the sandbox lib calls
-// transitively but our wrapper never exercises. Each stub uses the real
-// chromium headers so signatures stay in lockstep with whatever the .cc that
-// references them sees.
+// Catch-all stubs for chromium-sandbox library symbols our wrapper never
+// exercises. Each stub uses the real chromium header so the signature stays
+// in lockstep with whatever the upstream .cc that calls it expects.
 
 #include <windows.h>
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/location.h"
 #include "base/memory/protected_memory.h"
 #include "base/path_service.h"
 #include "base/task/current_thread.h"
 #include "base/threading/hang_watcher.h"
+#include "base/time/time.h"
+#include "sandbox/win/src/sandbox_policy_base.h"
+#include "sandbox/win/src/sandbox_policy_diagnostic.h"
 
 namespace base {
 
@@ -148,3 +151,32 @@ const char kForceHighResTimeTicks[] = "force-high-res-time-ticks";
 // PR_ParseTimeString + double_conversion now provided by their real .cc
 // files (vendored under base/third_party/{nspr,double_conversion}/), no
 // stubs needed.
+
+// DumpWithoutCrashing — chromium 137's win_util.cc references this via
+// SCOPED_CRASH_KEY_NUMBER and some intercept paths. Firefox's shim has it
+// as a no-op stub via patch 37.
+namespace base::debug {
+bool DumpWithoutCrashing(const base::Location & /*location*/,
+		base::TimeDelta /*time_between_dumps*/) {
+	return false;
+}
+} // namespace base::debug
+
+// PolicyDiagnostic — the chromium sandbox_policy_diagnostic.cc builds a JSON
+// representation of the policy via base::Value/DictValue/ListValue, which we
+// don't want to vendor. We never call BrokerServices::GetPolicyDiagnostics();
+// stub so the link succeeds and JsonString() returns empty.
+namespace sandbox {
+
+PolicyDiagnostic::PolicyDiagnostic(PolicyBase * /*policy*/) {}
+
+PolicyDiagnostic::~PolicyDiagnostic() = default;
+
+const std::string &PolicyDiagnostic::JsonString() const {
+	if (!json_string_) {
+		json_string_.emplace();
+	}
+	return *json_string_;
+}
+
+} // namespace sandbox

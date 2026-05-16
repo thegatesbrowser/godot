@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  BrokerServicesDelegateImpl.h                                          */
+/*  broker_delegate.cpp                                                   */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,20 +28,31 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "broker_delegate.h"
 
-#include <sandbox/win/src/sandbox.h>
+bool BrokerDelegate::ParallelLaunchEnabled() {
+	return false;
+}
 
-class BrokerServicesDelegateImpl : public sandbox::BrokerServicesDelegate {
-public:
-	bool ParallelLaunchEnabled() override;
-	void ParallelLaunchPostTaskAndReplyWithResult(
-			const base::Location &from_here,
-			base::OnceCallback<sandbox::CreateTargetResult()> task,
-			base::OnceCallback<void(sandbox::CreateTargetResult)> reply) override;
-	void BeforeTargetProcessCreateOnCreationThread(const void *trace_id) override;
-	void AfterTargetProcessCreateOnCreationThread(const void *trace_id, DWORD process_id) override;
-	void OnCreateThreadActionCreateFailure(DWORD last_error) override;
-	void OnCreateThreadActionDuplicateFailure(DWORD last_error) override;
-	~BrokerServicesDelegateImpl() override = default;
-};
+void BrokerDelegate::ParallelLaunchPostTaskAndReplyWithResult(
+		const base::Location & /*from_here*/,
+		base::OnceCallback<sandbox::CreateTargetResult()> /*task*/,
+		base::OnceCallback<void(sandbox::CreateTargetResult)> /*reply*/) {
+	// Stub: No parallel launch support
+}
+
+void BrokerDelegate::BeforeTargetProcessCreateOnCreationThread(const void * /*trace_id*/) {
+	// Stub
+}
+
+void BrokerDelegate::AfterTargetProcessCreateOnCreationThread(const void * /*trace_id*/, DWORD /*process_id*/) {
+	// Stub
+}
+
+void BrokerDelegate::OnCreateThreadActionCreateFailure(DWORD /*last_error*/) {
+	// Stub
+}
+
+void BrokerDelegate::OnCreateThreadActionDuplicateFailure(DWORD /*last_error*/) {
+	// Stub
+}

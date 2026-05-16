@@ -39,7 +39,7 @@
 #include "sandboxing.h"
 
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-#include "sandbox/sandbox_win.h"
+#include "sandbox/windows/sandbox_win.h"
 #endif
 
 void initialize_the_gates_module(ModuleInitializationLevel p_level) {
