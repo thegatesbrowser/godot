@@ -148,15 +148,7 @@
 #endif // MODULE_GDSCRIPT_ENABLED
 
 #ifdef TG_RENDERER
-#include "modules/the_gates/ipc/command_sync.h"
-#include "modules/the_gates/ipc/external_texture.h"
-#include "modules/the_gates/ipc/input_sync.h"
-#include "modules/the_gates/ipc/zmq_runtime.h"
-#include "modules/the_gates/sandbox/sandbox_diagnostics.h"
-#endif
-
-#ifdef TG_RENDERER
-#include "modules/the_gates/sandbox/sandbox.h"
+#include "modules/the_gates/renderer/renderer_lifecycle.h"
 #endif
 
 /* Static members */
@@ -298,13 +290,6 @@ static String validate_extension_api_file;
 bool profile_gpu = false;
 
 // TheGates
-#ifdef TG_RENDERER
-static TGExternalTexture *ext_texture = nullptr;
-static CommandSync *command_sync = nullptr;
-static InputSync *input_sync = nullptr;
-static bool first_frame_sent = false;
-static uint32_t heartbeat = 0;
-#endif
 String gdext_libs_dir = "";
 String tg_user_data_dir_override = "";
 String tg_ipc_dir_override = "";
@@ -4711,70 +4696,9 @@ int Main::start() {
 	OS::get_singleton()->benchmark_dump();
 
 #ifdef TG_RENDERER
-	print_line("[RENDERER-START]");
-	Error err;
-
-	// CommandSync
-	command_sync = memnew(CommandSync);
-	command_sync->bind_commands();
-	command_sync->socket_connect();
-
-	// Set texture format RGBA8 or BGRA8
-	Array arg;
-	arg.append(RD::get_singleton()->screen_get_format());
-	command_sync->send_command("ext_texture_format", arg);
-
-	// TGExternalTexture
-	arg.clear();
-	const String filehandle_addr = tg_resolve_ipc_address(FILEHANDLE_PATH);
-#ifdef WINDOWS_ENABLED
-	arg.append(filehandle_addr + "|" + itos(OS::get_singleton()->get_process_id()));
-#else
-	arg.append(filehandle_addr);
-#endif
-	command_sync->send_command("send_filehandle", arg);
-
-	print_line("TGExternalTexture: waiting for filehandle");
-	ext_texture = memnew(TGExternalTexture);
-	bool success = ext_texture->recv_filehandle(FILEHANDLE_PATH); // WARNING: BLOCKING COMMAND
-	if (!success) {
+	if (!tg_renderer_boot(display_server, tg_main_pack_path)) {
 		return false;
 	}
-
-	RenderingDevice::TextureView view;
-	RenderingDevice::TextureFormat format;
-
-	Size2i size = display_server->window_get_size(DisplayServer::MAIN_WINDOW_ID);
-	format.format = RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM;
-	format.usage_bits = RenderingDevice::TEXTURE_USAGE_CAN_COPY_TO_BIT;
-	format.width = static_cast<uint32_t>(size.width);
-	format.height = static_cast<uint32_t>(size.height);
-	format.depth = 1;
-
-	err = ext_texture->import(format, view);
-	if (err != OK) {
-		return false;
-	}
-
-	// InputSync
-	input_sync = memnew(InputSync);
-	input_sync->socket_connect();
-
-	{
-		Ref<Sandbox> sandbox = Sandbox::create();
-		if (sandbox.is_valid() && sandbox->is_target()) {
-			Error sandbox_err = sandbox->lower_token();
-			if (sandbox_err != OK) {
-				CRASH_NOW_MSG("Sandbox::lower_token failed; renderer aborting (sandbox lockdown is required).");
-			}
-		}
-	}
-
-	{
-		SandboxDiagnostics diag(tg_main_pack_path);
-		print_line(diag.to_json_block());
-	}
-	print_line("[RENDERER-READY]");
 #endif
 
 	return EXIT_SUCCESS;
@@ -5013,30 +4937,8 @@ bool Main::iteration() {
 	}
 
 #ifdef TG_RENDERER
-	if (!first_frame_sent && Engine::get_singleton()->frames_drawn > 2) {
-		// Send first frame drawn
-		command_sync->send_command("first_frame", Array());
-		first_frame_sent = true;
-	}
-
-	heartbeat += ticks_elapsed;
-	if (heartbeat > 1000000 && first_frame_sent) {
-		command_sync->send_command("heartbeat", Array());
-		heartbeat %= 1000000;
-	}
-
-	// Render send
-	ext_texture->copy_from_screen();
-
-	// Input sync
-	input_sync->receive_input_events();
-
-	// If our command socket lost its peer (parent), request exit.
-	command_sync->poll_monitor();
-	if (!command_sync->is_peer_connected()) {
-		CRASH_NOW_MSG("CommandSync peer disconnected. Exiting child."); // hack to avoid hanging because of uncleaned pipes created by OS::execute_with_pipe
-	}
-#endif // TG_RENDERER
+	tg_renderer_loop_iterate(ticks_elapsed);
+#endif
 
 	iterating--;
 
