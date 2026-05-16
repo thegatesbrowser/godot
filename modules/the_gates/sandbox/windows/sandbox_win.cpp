@@ -37,8 +37,8 @@
 #include "core/io/json.h"
 #include "core/string/print_string.h"
 #include "handle_scope.h"
-#include "platform/windows/os_windows.h"
 #include "signature_verify.h"
+#include "string_utils.h"
 
 #include <memory>
 #include <string>
@@ -52,21 +52,6 @@
 
 namespace {
 
-std::wstring to_wide(const String &p_string) {
-	CharString utf8 = p_string.utf8();
-	int wlen = ::MultiByteToWideChar(CP_UTF8, 0, utf8.get_data(), -1, nullptr, 0);
-	if (wlen <= 0) {
-		return {};
-	}
-	std::wstring out;
-	out.resize(static_cast<size_t>(wlen - 1));
-	if (wlen > 1) {
-		::MultiByteToWideChar(CP_UTF8, 0, utf8.get_data(), -1, out.data(), wlen);
-	}
-	return out;
-}
-
-// Dumps the policy the broker just configured to JSON for the test harness.
 void write_broker_policy_json(const String &p_log_path, const String &p_executable, DWORD p_pid,
 		const Ref<SandboxPolicy> &p_policy) {
 	Dictionary policy = p_policy->to_dict();
@@ -99,16 +84,15 @@ void write_broker_policy_json(const String &p_log_path, const String &p_executab
 	file->store_string(JSON::stringify(policy, "\t", false));
 }
 
-// Build a Windows-style command line, quoting arguments that contain spaces.
 std::wstring build_command_line(const String &p_executable, const Vector<String> &p_arguments) {
 	std::wstring out;
 	out.reserve(256);
 	out.push_back(L'"');
-	out += to_wide(p_executable);
+	out += tg_to_wide(p_executable);
 	out.push_back(L'"');
 	for (int i = 0; i < p_arguments.size(); ++i) {
 		out.push_back(L' ');
-		const std::wstring arg = to_wide(p_arguments[i]);
+		const std::wstring arg = tg_to_wide(p_arguments[i]);
 		const bool needs_quotes = arg.find_first_of(L" \t") != std::wstring::npos;
 		if (needs_quotes) {
 			out.push_back(L'"');
@@ -223,13 +207,13 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 		ERR_PRINT(vformat("SandboxWin: SetDelayedProcessMitigations returned %d", (int)r));
 	}
 
-	const std::wstring exe_wide = to_wide(p_executable);
+	const std::wstring exe_wide = tg_to_wide(p_executable);
 	const std::wstring cmd_wide = build_command_line(p_executable, p_arguments);
 
 	// Pre-open the log at broker integrity — the locked-down child inherits a writable handle.
 	HandleScope log_handle;
 	if (!stdout_log_path.is_empty()) {
-		const std::wstring log_path_wide = to_wide(stdout_log_path);
+		const std::wstring log_path_wide = tg_to_wide(stdout_log_path);
 		SECURITY_ATTRIBUTES sa = {};
 		sa.nLength = sizeof(sa);
 		sa.bInheritHandle = TRUE;
@@ -270,17 +254,8 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 		::ResumeThread(pi.hThread);
 	}
 
-	// Close any stale handles from a previous spawn on this SandboxWin
-	// instance, then take ownership of the fresh ones. is_target_running /
-	// kill_target query these directly — no engine OS.process_map needed.
-	if (target_process != nullptr) {
-		::CloseHandle((HANDLE)target_process);
-	}
-	if (target_thread != nullptr) {
-		::CloseHandle((HANDLE)target_thread);
-	}
-	target_process = pi.hProcess;
-	target_thread = pi.hThread;
+	target_process.reset(pi.hProcess);
+	target_thread.reset(pi.hThread);
 	target_pid = (int64_t)pi.dwProcessId;
 
 	result["pid"] = (int64_t)pi.dwProcessId;
@@ -315,21 +290,20 @@ Error SandboxWin::verify_binary(const String &p_path) {
 }
 
 bool SandboxWin::is_target_running() const {
-	if (target_process == nullptr) {
+	if (!target_process.is_valid()) {
 		return false;
 	}
-	DWORD exit_code = 0;
-	if (!::GetExitCodeProcess((HANDLE)target_process, &exit_code)) {
-		return false;
-	}
-	return exit_code == STILL_ACTIVE;
+	// GetExitCodeProcess + STILL_ACTIVE comparison is unreliable: a process
+	// that exits with code 259 looks alive. WaitForSingleObject is the
+	// recommended probe (Microsoft Learn: GetExitCodeProcess remarks).
+	return ::WaitForSingleObject(target_process.get(), 0) == WAIT_TIMEOUT;
 }
 
 Error SandboxWin::kill_target() {
-	if (target_process == nullptr) {
+	if (!target_process.is_valid()) {
 		return ERR_DOES_NOT_EXIST;
 	}
-	if (!::TerminateProcess((HANDLE)target_process, 1)) {
+	if (!::TerminateProcess(target_process.get(), 1)) {
 		ERR_FAIL_V_MSG(FAILED, vformat("SandboxWin::kill_target: TerminateProcess failed (win=%d)", (int)::GetLastError()));
 	}
 	return OK;
@@ -363,13 +337,4 @@ bool SandboxWin::broker_initialized = false;
 
 SandboxWin::SandboxWin() {
 	broker_service = sandbox::SandboxFactory::GetBrokerServices();
-}
-
-SandboxWin::~SandboxWin() {
-	if (target_process != nullptr) {
-		::CloseHandle((HANDLE)target_process);
-	}
-	if (target_thread != nullptr) {
-		::CloseHandle((HANDLE)target_thread);
-	}
 }

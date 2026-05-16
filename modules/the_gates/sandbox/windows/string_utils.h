@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_win.h                                                         */
+/*  string_utils.h                                                        */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,37 +30,25 @@
 
 #pragma once
 
-#include "../sandbox.h"
-#include "handle_scope.h"
+#include "core/string/ustring.h"
 
-namespace sandbox {
-class BrokerServices;
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+#include <string>
+
+inline std::wstring tg_to_wide(const String &p_string) {
+	CharString utf8 = p_string.utf8();
+	int wlen = ::MultiByteToWideChar(CP_UTF8, 0, utf8.get_data(), -1, nullptr, 0);
+	if (wlen <= 0) {
+		return {};
+	}
+	std::wstring out;
+	out.resize(static_cast<size_t>(wlen - 1));
+	if (wlen > 1) {
+		::MultiByteToWideChar(CP_UTF8, 0, utf8.get_data(), -1, out.data(), wlen);
+	}
+	return out;
 }
-
-class SandboxWin : public Sandbox {
-	GDCLASS(SandboxWin, Sandbox);
-
-	sandbox::BrokerServices *broker_service = nullptr;
-	// BrokerServices::Init() returns SBOX_ERROR_UNEXPECTED_CALL if called twice.
-	static bool broker_initialized;
-
-	HandleScope target_process;
-	HandleScope target_thread;
-	int64_t target_pid = 0;
-
-public:
-	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
-			const String &p_executable, const Vector<String> &p_arguments) override;
-
-	void apply_renderer_acl(const String &p_path) override;
-	Error verify_binary(const String &p_path) override;
-
-	bool is_target_running() const override;
-	Error kill_target() override;
-
-	Error lower_token() override;
-
-	bool is_target() const override { return broker_service == nullptr; }
-
-	SandboxWin();
-};

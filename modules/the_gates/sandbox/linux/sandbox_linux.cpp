@@ -45,11 +45,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-// TODO(Phase 3 platform-side): wire landlock_create_ruleset +
-// LANDLOCK_ACCESS_FS_READ_FILE / WRITE_FILE / EXECUTE / MAKE_DIR rules from
-// SandboxPolicy.rw_dir / rw_files / ro_files. ABI v3+ (kernel 6.7+).
-// Older kernels: log "[VERIFY-BYPASSED] landlock_unavailable" and rely on
-// seccomp + filesystem perms only.
+// TODO Phase 3: wire landlock rules from SandboxPolicy.
 
 extern char **environ;
 
@@ -61,10 +57,6 @@ Error apply_seccomp_filter() {
 		ERR_FAIL_V_MSG(FAILED, "SandboxLinux: seccomp_init failed");
 	}
 
-	// Allowlist generated from observing Godot's syscall set during normal
-	// operation. Conservative: missing entries trip SIGSYS. TODO(Phase 3):
-	// audit against renderer-only operation; the launcher's allowlist
-	// shouldn't apply to a sandboxed-renderer-only world.
 	static const int allowed[] = {
 		SCMP_SYS(read), SCMP_SYS(write), SCMP_SYS(close), SCMP_SYS(fstat),
 		SCMP_SYS(lseek), SCMP_SYS(mmap), SCMP_SYS(mprotect), SCMP_SYS(munmap),
@@ -148,8 +140,6 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	}
 	argv.push_back(nullptr);
 
-	// The child reads TG_TARGET=1 in is_target() to know it's the renderer.
-	// posix_spawn inherits the parent env; setenv before spawn.
 	setenv("TG_TARGET", "1", 1);
 
 	pid_t pid = 0;
@@ -170,16 +160,12 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 }
 
 void SandboxLinux::apply_renderer_acl(const String &p_path) {
-	// POSIX: AF_UNIX socket file permissions inherit from process umask +
-	// parent dir. No MIC-style label work needed on Linux. The renderer
-	// will inherit the launcher's uid (no userns yet) and write fine.
+	// No-op: AF_UNIX socket perms inherit umask + parent dir on POSIX.
 	(void)p_path;
 }
 
 Error SandboxLinux::verify_binary(const String &p_path) {
-	// TODO(Phase 3 platform-side): SHA-256 of renderer binary against a
-	// compile-time pin (tg_signature_pin SCons flag). Optionally a detached
-	// .sig using an embedded ed25519 public key.
+	// TODO Phase 3: SHA-256 against tg_signature_pin.
 	(void)p_path;
 	print_line("[VERIFY-BYPASSED] SandboxLinux: signature_verify not yet implemented");
 	return OK;
@@ -190,6 +176,8 @@ bool SandboxLinux::is_target_running() const {
 	if (target_pid == 0) {
 		return false;
 	}
+	// TODO Phase 3: pid reuse — kill(pid, 0) lies after the child dies
+	// and the kernel rebinds the pid. Replace with pidfd_open or waitpid.
 	return ::kill((pid_t)target_pid, 0) == 0;
 #else
 	return false;
@@ -201,9 +189,15 @@ Error SandboxLinux::kill_target() {
 	if (target_pid == 0) {
 		return ERR_DOES_NOT_EXIST;
 	}
-	if (::kill((pid_t)target_pid, SIGTERM) != 0) {
+	const pid_t pid = (pid_t)target_pid;
+	if (::kill(pid, SIGTERM) != 0) {
 		ERR_FAIL_V_MSG(FAILED, vformat("SandboxLinux::kill_target: kill failed errno=%d", errno));
 	}
+	// Non-blocking reap; clears target_pid so future probes return false.
+	// If the child hasn't exited yet, init reaps the zombie on launcher exit.
+	int status = 0;
+	::waitpid(pid, &status, WNOHANG);
+	target_pid = 0;
 	return OK;
 #else
 	return ERR_UNAVAILABLE;
@@ -212,8 +206,7 @@ Error SandboxLinux::kill_target() {
 
 Error SandboxLinux::lower_token() {
 #ifdef LINUXBSD_ENABLED
-	// TODO(Phase 3 platform-side): landlock + user-namespace before
-	// seccomp_load. For now seccomp-only matches the pre-rewrite behavior.
+	// TODO Phase 3: landlock + user-namespace before seccomp_load.
 	return apply_seccomp_filter();
 #else
 	return ERR_UNAVAILABLE;
