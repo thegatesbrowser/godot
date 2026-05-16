@@ -34,17 +34,7 @@
 
 class DisplayServer;
 
-// Renderer-process orchestration moved out of main.cpp. main.cpp's
-// #ifdef TG_RENDERER blocks shrink to one-line calls into these functions
-// — the engine touchpoint stays minimal (good for fork merge ergonomics).
-//
-// tg_renderer_boot: brings up CommandSync + InputSync + the shared Vulkan
-// texture, then calls Sandbox::lower_token (fail-closed) and dumps the
-// SandboxDiagnostics block. Returns false to abort engine startup, true on
-// success.
-//
-// tg_renderer_loop_iterate: per-frame first-frame signal, heartbeat,
-// copy_from_screen, receive_input_events, CRASH_NOW on CommandSync peer
-// disconnect.
+// Returns false to abort engine startup.
 bool tg_renderer_boot(DisplayServer *p_display_server, const String &p_pack_path);
+
 void tg_renderer_loop_iterate(uint64_t p_ticks_elapsed);
