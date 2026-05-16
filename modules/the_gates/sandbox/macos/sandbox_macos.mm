@@ -42,11 +42,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-// sandbox_init / sandbox_init_with_parameters are private SPI. The headers
-// are in <sandbox.h> on the system but the calls are not on the public ABI.
-// Stable since 10.5; Firefox content processes and Chrome renderers ride
-// the same SPI. Forward-declared here to avoid pulling the system header
-// into a Godot TU that doesn't need it.
+// sandbox_init is private Apple SPI (stable since 10.5; same ABI Firefox
+// and Chrome ride). Forward-declared to avoid pulling <sandbox.h>.
 extern "C" {
 int sandbox_init(const char *profile, uint64_t flags, char **errorbuf);
 void sandbox_free_error(char *errorbuf);
@@ -96,14 +93,13 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 }
 
 void SandboxMacOS::apply_renderer_acl(const String &p_path) {
-	// POSIX: AF_UNIX socket file permissions inherit from process umask +
-	// parent dir. Seatbelt profile gates real access — no ACL stamping.
+	// No-op: AF_UNIX socket perms inherit umask + parent dir; the Seatbelt
+	// profile gates real access.
 	(void)p_path;
 }
 
 Error SandboxMacOS::verify_binary(const String &p_path) {
-	// TODO(Phase 3 platform-side): SecStaticCodeCheckValidity against an
-	// embedded cert thumbprint (tg_signature_pin SCons flag).
+	// TODO Phase 3: SecStaticCodeCheckValidity against tg_signature_pin.
 	(void)p_path;
 	print_line("[VERIFY-BYPASSED] SandboxMacOS: codesign verify not yet implemented");
 	return OK;
@@ -114,6 +110,8 @@ bool SandboxMacOS::is_target_running() const {
 	if (target_pid == 0) {
 		return false;
 	}
+	// TODO Phase 3: pid reuse — kill(pid, 0) lies after the child dies
+	// and the kernel rebinds the pid. Replace with kqueue NOTE_EXIT.
 	return ::kill((pid_t)target_pid, 0) == 0;
 #else
 	return false;
@@ -125,9 +123,15 @@ Error SandboxMacOS::kill_target() {
 	if (target_pid == 0) {
 		return ERR_DOES_NOT_EXIST;
 	}
-	if (::kill((pid_t)target_pid, SIGTERM) != 0) {
+	const pid_t pid = (pid_t)target_pid;
+	if (::kill(pid, SIGTERM) != 0) {
 		ERR_FAIL_V_MSG(FAILED, vformat("SandboxMacOS::kill_target: kill failed errno=%d", errno));
 	}
+	// Non-blocking reap; clears target_pid so future probes return false.
+	// If the child hasn't exited yet, launchd reaps the zombie on launcher exit.
+	int status = 0;
+	::waitpid(pid, &status, WNOHANG);
+	target_pid = 0;
 	return OK;
 #else
 	return ERR_UNAVAILABLE;
@@ -136,12 +140,8 @@ Error SandboxMacOS::kill_target() {
 
 Error SandboxMacOS::lower_token() {
 #ifdef MACOS_ENABLED
-	// Minimal Seatbelt profile: deny everything except the per-gate dir,
-	// the .pck, and the IPC sockets the SandboxPolicy declared. The full
-	// profile is constructed from SandboxPolicy in Phase 3 follow-up;
-	// today we use a conservative built-in template.
-	// TODO(Phase 3 platform-side): generate the profile from p_policy
-	// fields and parameterise via sandbox_init_with_parameters.
+	// TODO Phase 3: generate the profile from SandboxPolicy via
+	// sandbox_init_with_parameters; built-in template for now.
 	static const char *profile =
 			"(version 1)\n"
 			"(deny default)\n"

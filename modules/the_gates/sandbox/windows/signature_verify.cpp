@@ -31,6 +31,7 @@
 #include "signature_verify.h"
 
 #include "core/string/print_string.h"
+#include "string_utils.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -44,20 +45,6 @@
 #include <string>
 
 namespace {
-
-std::wstring to_wide(const String &p_string) {
-	CharString utf8 = p_string.utf8();
-	int wlen = ::MultiByteToWideChar(CP_UTF8, 0, utf8.get_data(), -1, nullptr, 0);
-	if (wlen <= 0) {
-		return {};
-	}
-	std::wstring out;
-	out.resize(static_cast<size_t>(wlen - 1));
-	if (wlen > 1) {
-		::MultiByteToWideChar(CP_UTF8, 0, utf8.get_data(), -1, out.data(), wlen);
-	}
-	return out;
-}
 
 Error verify_authenticode_chain(const wchar_t *p_path_w) {
 	WINTRUST_FILE_INFO file_info = {};
@@ -160,7 +147,7 @@ Error fingerprint_signer_sha1(const wchar_t *p_path_w, String &r_thumbprint) {
 } // namespace
 
 Error tg_verify_renderer_binary(const String &p_path, const String &p_expected_thumbprint) {
-	const std::wstring path_w = to_wide(p_path);
+	const std::wstring path_w = tg_to_wide(p_path);
 
 	Error err = verify_authenticode_chain(path_w.c_str());
 	if (err != OK) {
