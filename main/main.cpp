@@ -156,8 +156,8 @@
 #include "modules/the_gates/sandboxing.h"
 #endif
 
-#if defined(TG_RENDERER) && defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-#include "modules/the_gates/sandbox/windows/sandbox_win.h"
+#ifdef TG_RENDERER
+#include "modules/the_gates/sandbox/sandbox.h"
 #endif
 
 /* Static members */
@@ -4761,18 +4761,15 @@ int Main::start() {
 	input_sync = memnew(InputSync);
 	input_sync->socket_connect();
 
-#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 	{
-		Ref<SandboxingWin> sandboxing_win;
-		sandboxing_win.instantiate();
-		if (sandboxing_win->is_target()) {
-			Error sandbox_err = sandboxing_win->lower_token();
+		Ref<Sandbox> sandbox = Sandbox::create();
+		if (sandbox.is_valid() && sandbox->is_target()) {
+			Error sandbox_err = sandbox->lower_token();
 			if (sandbox_err != OK) {
-				ERR_PRINT("SandboxingWin::lower_token failed; renderer continues without sandbox.");
+				ERR_PRINT("Sandbox::lower_token failed; renderer continues without sandbox.");
 			}
 		}
 	}
-#endif
 
 	// Always dump diagnostics in renderer mode so the autotest harness can
 	// observe sandbox state (engaged or not) without parsing engine logs.

@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  register_types.cpp                                                    */
+/*  sandbox.h                                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,42 +28,36 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "register_types.h"
+#pragma once
 
-#include "core/object/class_db.h"
-#include "ipc/command.h"
-#include "ipc/command_sync.h"
-#include "ipc/external_texture.h"
-#include "ipc/input_sync.h"
-#include "ipc/zmq_runtime.h"
-#include "sandbox/sandbox.h"
-#include "sandboxing.h"
+#include "core/object/ref_counted.h"
+#include "core/variant/dictionary.h"
 
-#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-#include "sandbox/windows/sandbox_win.h"
-#endif
+class Sandbox : public RefCounted {
+	GDCLASS(Sandbox, RefCounted);
 
-void initialize_the_gates_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
+protected:
+	static void _bind_methods();
 
-	GDREGISTER_CLASS(Sandboxing);
-	GDREGISTER_CLASS(InputSync);
-	GDREGISTER_CLASS(Command);
-	GDREGISTER_CLASS(CommandSync);
-	GDREGISTER_CLASS(TGExternalTexture);
+public:
+	// Returns the platform-appropriate Sandbox impl, or a null Ref<> on
+	// platforms/builds with no backend (a launcher built with --no-sandbox,
+	// or a platform with no implementation yet).
+	static Ref<Sandbox> create();
 
-	GDREGISTER_ABSTRACT_CLASS(Sandbox);
-#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-	GDREGISTER_CLASS(SandboxWin);
-#endif
-}
+	// Broker-side (called from the launcher process).
+	virtual Dictionary spawn_target(const String &p_executable, const Vector<String> &p_arguments,
+			const String &p_stdout_log_path,
+			const String &p_rw_dir,
+			const Vector<String> &p_rw_files,
+			const Vector<String> &p_ro_files) = 0;
+	virtual void apply_renderer_acl(const String &p_path) = 0;
 
-void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
+	// Target-side (called from the renderer process). Fail-closed: returns
+	// non-OK if the lockdown step fails — caller MUST abort.
+	virtual Error lower_token() = 0;
+	virtual bool is_target() const = 0;
 
-	tg_zmq_shutdown();
-}
+	Sandbox() = default;
+	virtual ~Sandbox() = default;
+};
