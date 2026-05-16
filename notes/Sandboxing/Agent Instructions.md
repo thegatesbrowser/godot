@@ -32,8 +32,8 @@ Default behavior:
 - Writes results to `%TEMP%\thegates-autotest\`
 
 Useful switches:
-- `-Build` — rebuild launcher + renderer first
-- `-SandboxBuild` — pass `tg_sandbox=yes` to scons (combine with `-Build`)
+- `-Build` — rebuild launcher + renderer first (via `tools/build.py`, sandbox on by default)
+- `-NoSandbox` — combine with `-Build` to pass `tg_sandbox=no` for faster iteration
 - `-Timeout <s>` — change the in-launcher autotest timeout
 - `-GateUrl <url>` — different gate
 - `-VerboseLogs` — pass `--verbose` everywhere (huge logs; only for deep debug)
@@ -219,10 +219,10 @@ When stopping, write a brief summary to a new file `notes/Sandboxing/Agent Sessi
 
 ## Long-running operations
 
-`scons` builds on this machine take 5-10 minutes. The Bash tool can hang on long foreground invocations. **Always run scons in background** when invoking from Bash:
+`scons` builds on this machine take 5-10 minutes. The Bash tool can hang on long foreground invocations. **Always run builds in background** when invoking from Bash:
 
 ```
-Bash(command="scons -j8 ...", run_in_background=True)
+Bash(command="python tools/build.py renderer", run_in_background=True)
 ```
 
 Then wait for the harness notification. Do not poll.
@@ -239,7 +239,7 @@ A typical iteration:
 
 ```
 1. Edit code (Edit tool)
-2. Bash: pwsh ... run-sandbox-test.ps1 -Build -SandboxBuild   # first iter only
+2. Bash: pwsh ... run-sandbox-test.ps1 -Build   # first iter only; sandbox is default-on
 3. Read the 2-3 line output
 4. If [VERIFY-OK]: parse the diag fields; assess against goal; either done or pick next thing to harden
 5. If [VERIFY-FAIL] <reason>:

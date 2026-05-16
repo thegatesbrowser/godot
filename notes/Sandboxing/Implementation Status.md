@@ -106,7 +106,7 @@ Best-effort. A failure does not abort the renderer.
 
 ### SCons flag
 
-`SConstruct` exposes `tg_sandbox=False`. When enabled:
+`SConstruct` exposes `tg_sandbox=True` (default on; pass `tg_sandbox=no` or `--no-sandbox` to `tools/build.py` to opt out for faster iteration). When enabled:
 
 - Sets `CPPDEFINES += TG_SANDBOX`
 - Adds `.sandbox` to the binary suffix

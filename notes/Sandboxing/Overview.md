@@ -94,10 +94,10 @@ A few directions that didn't show up in the work history but are worth weighing:
 Build commands haven't changed. From the `godot/` submodule:
 
 ```
-scons -j$(nproc) dev_build=yes tg_renderer=yes target=template_debug \
-      tg_sandbox=yes compiledb=yes use_llvm=yes linker=lld \
-      disable_exceptions=no
+python tools/build.py renderer
 ```
+
+(`tg_sandbox=yes` is the scons default now; the `--no-sandbox` flag opts out for fast iteration.)
 
 For this to link, `cef_sandbox.lib` must exist at `C:\code\chromium_git\chromium\src\cef\binary_distrib\cef_binary_137.*_windows64_sandbox\Release\`. If it doesn't, run the three batch files in `C:\code` (`setup_build.bat`, `ninja_build.bat`, `distrib_bin.bat`). Be warned: the first one downloads the entire Chromium source tree (tens of gigabytes) and the second compiles a meaningful subset of Chromium (hours of CPU even on a fast machine).
 
