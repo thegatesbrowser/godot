@@ -45,12 +45,22 @@ class SandboxWin : public Sandbox {
 	// instances (one per gate spawn) share the same initialised broker.
 	static bool broker_initialized;
 
+	// HANDLEs owned by this SandboxWin instance from the most recent
+	// spawn_target. Closed in the destructor; replaced atomically on a fresh
+	// spawn. No CloseHandle leaks because the launcher never sees raw HANDLEs.
+	void *target_process = nullptr; // HANDLE
+	void *target_thread = nullptr; // HANDLE
+	int64_t target_pid = 0;
+
 public:
 	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
 			const String &p_executable, const Vector<String> &p_arguments) override;
 
 	void apply_renderer_acl(const String &p_path) override;
 	Error verify_binary(const String &p_path) override;
+
+	bool is_target_running() const override;
+	Error kill_target() override;
 
 	Error lower_token() override;
 
