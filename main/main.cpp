@@ -4765,7 +4765,7 @@ int Main::start() {
 		if (sandbox.is_valid() && sandbox->is_target()) {
 			Error sandbox_err = sandbox->lower_token();
 			if (sandbox_err != OK) {
-				ERR_PRINT("Sandbox::lower_token failed; renderer continues without sandbox.");
+				CRASH_NOW_MSG("Sandbox::lower_token failed; renderer aborting (sandbox lockdown is required).");
 			}
 		}
 	}
