@@ -156,38 +156,22 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	r = config->SetJobLevel(sandbox::JobLevel::kLockdown, /*ui_exceptions=*/0);
 	ERR_FAIL_COND_V_MSG(r != sandbox::SBOX_ALL_OK, result, vformat("SandboxWin: SetJobLevel failed (%d)", (int)r));
 
-	// Token: USER_LIMITED at lockdown is what Firefox's content process uses.
-	// USER_LOCKDOWN is strictly tighter but breaks our IPC (renderer can't
-	// open the launcher's named pipes) and the renderer's own log file under
-	// %APPDATA% becomes unwritable. USER_LIMITED + Low integrity still
-	// blocks USERPROFILE writes and HKCU registry writes — what we test for.
+	// Initial / lockdown token levels. USER_LOCKDOWN breaks IPC (renderer
+	// can't open the launcher's AF_UNIX sockets); USER_LIMITED keeps IPC.
 	r = config->SetTokenLevel(sandbox::TokenLevel::USER_RESTRICTED_SAME_ACCESS,
 			sandbox::TokenLevel::USER_LIMITED);
 	ERR_FAIL_COND_V_MSG(r != sandbox::SBOX_ALL_OK, result, vformat("SandboxWin: SetTokenLevel failed (%d)", (int)r));
 
-	// Alternate desktop blocks window messages from reaching the user's real
-	// desktop. CreateAlternateDesktop is broker-global so calling it more than
-	// once is fine — Chromium handles the dedupe.
 	r = broker_service->CreateAlternateDesktop(sandbox::Desktop::kAlternateDesktop);
 	if (r != sandbox::SBOX_ALL_OK && r != sandbox::SBOX_ERROR_GENERIC) {
-		// Non-fatal: log and continue without alt-desktop rather than failing
-		// the whole spawn.
 		ERR_PRINT(vformat("SandboxWin: CreateAlternateDesktop returned %d (continuing)", (int)r));
 	}
 	config->SetDesktop(sandbox::Desktop::kAlternateDesktop);
 
-	// Delayed integrity: applied at LowerToken() time so initial bootstrap
-	// has medium IL. UNTRUSTED is the strictest level — Chrome's renderer
-	// runs here. The 4.3 prototype confirmed Vulkan rendering works at
-	// UNTRUSTED on this hardware (per Implementation Status.md notes), so
-	// we don't need to drop to LOW the way Firefox content processes do.
 	config->SetDelayedIntegrityLevel(sandbox::IntegrityLevel::INTEGRITY_LEVEL_UNTRUSTED);
 
-	// Chromium's policy matcher compares pattern bytes against the
-	// NtCreateFile input path, which Win32 normalizes to backslashes.
-	// Patterns with forward slashes never match. Single-asterisk globs
-	// don't cross path separators either, so a dir needs one rule per
-	// depth level.
+	// Chromium's policy matcher uses NT-style paths (backslashes); single-asterisk globs
+	// don't cross path separators, so a dir needs one rule per depth level.
 	auto path_to_wstring = [](const String &p_path) {
 		const String normalized = p_path.replace_char('/', '\\');
 		const Char16String utf16 = normalized.utf16();
@@ -222,16 +206,6 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 		allow_file(sandbox::FileSemantics::kAllowReadonly, path_to_wstring(ro_files[i]));
 	}
 
-	// Baseline process mitigations applied at process creation — ASLR + DEP
-	// hardening, no inherited handles surprises.
-	//
-	// Deliberately NOT set:
-	//   - MITIGATION_WIN32K_DISABLE: needs GDI brokering, renderer does
-	//     win32k syscalls during Vulkan + windowing init.
-	//   - MITIGATION_STRICT_HANDLE_CHECKS: drives AMD/NVIDIA UMD double-
-	//     CloseHandle / dangling-handle bugs to crash the renderer (per
-	//     the research subagent run during the renderer build). Chromium's
-	//     renderer never calls Vulkan; ours does.
 	r = config->SetProcessMitigations(
 			sandbox::MITIGATION_DEP |
 			sandbox::MITIGATION_DEP_NO_ATL_THUNK |
@@ -251,8 +225,7 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	const std::wstring exe_wide = to_wide(p_executable);
 	const std::wstring cmd_wide = build_command_line(p_executable, p_arguments);
 
-	// Pre-open the renderer's stdout/stderr log file at broker integrity so the
-	// locked-down child has a writable handle to its own log post-lockdown.
+	// Pre-open the log at broker integrity — the locked-down child inherits a writable handle.
 	HandleScope log_handle;
 	if (!stdout_log_path.is_empty()) {
 		const std::wstring log_path_wide = to_wide(stdout_log_path);
@@ -291,15 +264,12 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 		return result;
 	}
 
-	// log_handle drops on return; the child inherited its own dup.
-
-	// Resume the initial thread — SpawnTarget creates suspended.
+	// SpawnTarget creates the child suspended.
 	if (pi.hThread) {
 		::ResumeThread(pi.hThread);
 	}
 
-	// Make the child visible to OS.is_process_running / OS.kill. Without this
-	// the launcher's process_checker fires a spurious "Gate crashed on bootup". // codespell:ignore bootup
+	// Register the child with OS_Windows so OS.is_process_running / OS.kill cover it.
 	static_cast<OS_Windows *>(OS::get_singleton())->track_external_process((OS::ProcessID)pi.dwProcessId, pi.hProcess, pi.hThread);
 
 	result["pid"] = (int64_t)pi.dwProcessId;
