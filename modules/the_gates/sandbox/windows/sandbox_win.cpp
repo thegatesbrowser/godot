@@ -30,6 +30,7 @@
 
 #include "sandbox_win.h"
 
+#include "../sandbox_policy.h"
 #include "../socket_acl.h"
 #include "broker_delegate.h"
 #include "core/io/file_access.h"
@@ -65,8 +66,8 @@ std::wstring to_wide(const String &p_string) {
 
 // Dumps the policy the broker just configured to JSON for the test harness.
 void write_broker_policy_json(const String &p_log_path, const String &p_executable, DWORD p_pid,
-		const String &p_rw_dir, const Vector<String> &p_rw_files, const Vector<String> &p_ro_files) {
-	Dictionary policy;
+		const Ref<SandboxPolicy> &p_policy) {
+	Dictionary policy = p_policy->to_dict();
 	policy["executable"] = p_executable;
 	policy["pid"] = (int64_t)p_pid;
 	policy["token_initial"] = "USER_RESTRICTED_SAME_ACCESS";
@@ -74,19 +75,6 @@ void write_broker_policy_json(const String &p_log_path, const String &p_executab
 	policy["integrity_target"] = "UNTRUSTED";
 	policy["job_level"] = "LOCKDOWN";
 	policy["alternate_desktop"] = true;
-	policy["rw_dir"] = p_rw_dir;
-
-	Array rw_arr;
-	for (int i = 0; i < p_rw_files.size(); ++i) {
-		rw_arr.push_back(p_rw_files[i]);
-	}
-	policy["rw_files"] = rw_arr;
-
-	Array ro_arr;
-	for (int i = 0; i < p_ro_files.size(); ++i) {
-		ro_arr.push_back(p_ro_files[i]);
-	}
-	policy["ro_files"] = ro_arr;
 
 	PackedStringArray mit_initial;
 	mit_initial.push_back("DEP");
@@ -133,16 +121,20 @@ std::wstring build_command_line(const String &p_executable, const Vector<String>
 
 } // namespace
 
-Dictionary SandboxWin::spawn_target(const String &p_executable, const Vector<String> &p_arguments,
-		const String &p_stdout_log_path,
-		const String &p_rw_dir,
-		const Vector<String> &p_rw_files,
-		const Vector<String> &p_ro_files) {
+Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
+		const String &p_executable, const Vector<String> &p_arguments) {
 	Dictionary result;
+	ERR_FAIL_COND_V_MSG(p_policy.is_null(), result,
+			"SandboxWin::spawn_target requires a non-null SandboxPolicy");
 	if (broker_service == nullptr) {
 		ERR_PRINT("SandboxWin::spawn_target called from a sandbox target process");
 		return result;
 	}
+
+	const String stdout_log_path = p_policy->get_child_stdout_log_path();
+	const String rw_dir = p_policy->get_rw_dir();
+	const PackedStringArray rw_files = p_policy->get_rw_files();
+	const PackedStringArray ro_files = p_policy->get_ro_files();
 
 	if (!broker_initialized) {
 		auto delegate = std::make_unique<BrokerDelegate>();
@@ -218,15 +210,15 @@ Dictionary SandboxWin::spawn_target(const String &p_executable, const Vector<Str
 		}
 	};
 
-	ERR_FAIL_COND_V_MSG(p_rw_dir.is_empty(), result,
-			"SandboxWin: spawn_target requires p_rw_dir (per-gate user data dir)");
+	ERR_FAIL_COND_V_MSG(rw_dir.is_empty(), result,
+			"SandboxWin: spawn_target requires policy.rw_dir (per-gate user data dir)");
 
-	allow_dir_recursive(sandbox::FileSemantics::kAllowAny, p_rw_dir);
-	for (int i = 0; i < p_rw_files.size(); ++i) {
-		allow_file(sandbox::FileSemantics::kAllowAny, path_to_wstring(p_rw_files[i]));
+	allow_dir_recursive(sandbox::FileSemantics::kAllowAny, rw_dir);
+	for (int i = 0; i < rw_files.size(); ++i) {
+		allow_file(sandbox::FileSemantics::kAllowAny, path_to_wstring(rw_files[i]));
 	}
-	for (int i = 0; i < p_ro_files.size(); ++i) {
-		allow_file(sandbox::FileSemantics::kAllowReadonly, path_to_wstring(p_ro_files[i]));
+	for (int i = 0; i < ro_files.size(); ++i) {
+		allow_file(sandbox::FileSemantics::kAllowReadonly, path_to_wstring(ro_files[i]));
 	}
 
 	// Baseline process mitigations applied at process creation — ASLR + DEP
@@ -263,8 +255,8 @@ Dictionary SandboxWin::spawn_target(const String &p_executable, const Vector<Str
 	// dropping to LOW. Without this, sandbox-spawned children write nowhere
 	// (they don't inherit the launcher's console handles).
 	HANDLE log_handle = INVALID_HANDLE_VALUE;
-	if (!p_stdout_log_path.is_empty()) {
-		const std::wstring log_path_wide = to_wide(p_stdout_log_path);
+	if (!stdout_log_path.is_empty()) {
+		const std::wstring log_path_wide = to_wide(stdout_log_path);
 		// Ensure parent dirs exist. SHCreateDirectoryExW would be ideal but
 		// we keep this minimal — Godot will have already mkdir'd via
 		// DirAccess from the GDScript wrapper.
@@ -326,9 +318,8 @@ Dictionary SandboxWin::spawn_target(const String &p_executable, const Vector<Str
 	result["process_handle"] = (int64_t)(uintptr_t)pi.hProcess;
 	result["thread_handle"] = (int64_t)(uintptr_t)pi.hThread;
 
-	if (!p_stdout_log_path.is_empty()) {
-		write_broker_policy_json(p_stdout_log_path, p_executable, pi.dwProcessId,
-				p_rw_dir, p_rw_files, p_ro_files);
+	if (!stdout_log_path.is_empty()) {
+		write_broker_policy_json(stdout_log_path, p_executable, pi.dwProcessId, p_policy);
 	}
 
 	return result;

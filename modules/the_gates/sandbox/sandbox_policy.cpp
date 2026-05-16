@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_win.h                                                         */
+/*  sandbox_policy.cpp                                                    */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,33 +28,43 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "sandbox_policy.h"
 
-#include "../sandbox.h"
-
-namespace sandbox {
-class BrokerServices;
+Dictionary SandboxPolicy::to_dict() const {
+	Dictionary out;
+	out["rw_dir"] = rw_dir;
+	out["rw_files"] = rw_files;
+	out["ro_files"] = ro_files;
+	out["child_stdout_log_path"] = child_stdout_log_path;
+	out["allow_network"] = allow_network;
+	out["allow_audio"] = allow_audio;
+	out["integrity_floor"] = integrity_floor;
+	return out;
 }
 
-class SandboxWin : public Sandbox {
-	GDCLASS(SandboxWin, Sandbox);
+void SandboxPolicy::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_rw_dir", "path"), &SandboxPolicy::set_rw_dir);
+	ClassDB::bind_method(D_METHOD("get_rw_dir"), &SandboxPolicy::get_rw_dir);
 
-	sandbox::BrokerServices *broker_service = nullptr;
-	// Per-process. BrokerServices is a SandboxFactory singleton — Init() twice
-	// returns SBOX_ERROR_UNEXPECTED_CALL. Static so multiple SandboxWin
-	// instances (one per gate spawn) share the same initialised broker.
-	static bool broker_initialized;
+	ClassDB::bind_method(D_METHOD("add_rw_file", "path"), &SandboxPolicy::add_rw_file);
+	ClassDB::bind_method(D_METHOD("get_rw_files"), &SandboxPolicy::get_rw_files);
+	ClassDB::bind_method(D_METHOD("set_rw_files", "files"), &SandboxPolicy::set_rw_files);
 
-public:
-	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
-			const String &p_executable, const Vector<String> &p_arguments) override;
+	ClassDB::bind_method(D_METHOD("add_ro_file", "path"), &SandboxPolicy::add_ro_file);
+	ClassDB::bind_method(D_METHOD("get_ro_files"), &SandboxPolicy::get_ro_files);
+	ClassDB::bind_method(D_METHOD("set_ro_files", "files"), &SandboxPolicy::set_ro_files);
 
-	void apply_renderer_acl(const String &p_path) override;
+	ClassDB::bind_method(D_METHOD("set_child_stdout_log_path", "path"), &SandboxPolicy::set_child_stdout_log_path);
+	ClassDB::bind_method(D_METHOD("get_child_stdout_log_path"), &SandboxPolicy::get_child_stdout_log_path);
 
-	Error lower_token() override;
+	ClassDB::bind_method(D_METHOD("set_allow_network", "allow"), &SandboxPolicy::set_allow_network);
+	ClassDB::bind_method(D_METHOD("is_network_allowed"), &SandboxPolicy::is_network_allowed);
 
-	bool is_target() const override { return broker_service == nullptr; }
+	ClassDB::bind_method(D_METHOD("set_allow_audio", "allow"), &SandboxPolicy::set_allow_audio);
+	ClassDB::bind_method(D_METHOD("is_audio_allowed"), &SandboxPolicy::is_audio_allowed);
 
-	SandboxWin();
-	~SandboxWin();
-};
+	ClassDB::bind_method(D_METHOD("set_integrity_floor", "level"), &SandboxPolicy::set_integrity_floor);
+	ClassDB::bind_method(D_METHOD("get_integrity_floor"), &SandboxPolicy::get_integrity_floor);
+
+	ClassDB::bind_method(D_METHOD("to_dict"), &SandboxPolicy::to_dict);
+}
