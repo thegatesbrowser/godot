@@ -32,10 +32,8 @@
 
 #include "core/io/file_access.h"
 #include "core/io/json.h"
+#include "core/os/os.h"
 #include "core/string/print_string.h"
-#include "core/variant/dictionary.h"
-
-extern String tg_main_pack_path;
 
 #ifdef WINDOWS_ENABLED
 #include <windows.h>
@@ -99,7 +97,7 @@ Dictionary collect_token_info() {
 		}
 	}
 
-	// Restricted SIDs count (USER_LOCKDOWN / USER_RESTRICTED leave only S-1-0-0)
+	// Restricted SIDs count
 	DWORD restricted_needed = 0;
 	GetTokenInformation(token, TokenRestrictedSids, nullptr, 0, &restricted_needed);
 	if (restricted_needed > 0) {
@@ -147,7 +145,7 @@ Dictionary collect_mitigations() {
 	if (GetProcessMitigationPolicy(GetCurrentProcess(), ProcessStrictHandleCheckPolicy, &handles, sizeof(handles))) {
 		out["strict_handle_checks"] = (bool)handles.RaiseExceptionOnInvalidHandleReference;
 	}
-	// Heap terminate
+	// Payload restriction
 	PROCESS_MITIGATION_PAYLOAD_RESTRICTION_POLICY payload = {};
 	if (GetProcessMitigationPolicy(GetCurrentProcess(), ProcessPayloadRestrictionPolicy, &payload, sizeof(payload))) {
 		out["payload_restriction"] = true;
@@ -171,10 +169,11 @@ String current_desktop_name() {
 	return String::utf16((const char16_t *)name);
 }
 
-Dictionary run_canaries() {
+Dictionary run_canaries(const String &p_pack_path) {
 	Dictionary out;
-	// File write canary: try to create a file in user's profile root,
-	// somewhere we don't expect the renderer to have access post-lockdown.
+
+	// USERPROFILE write canary: a sandboxed renderer must not be able to
+	// write here.
 	{
 		wchar_t profile[MAX_PATH] = { 0 };
 		DWORD plen = GetEnvironmentVariableW(L"USERPROFILE", profile, MAX_PATH);
@@ -186,15 +185,15 @@ Dictionary run_canaries() {
 				CloseHandle(h);
 				DeleteFileW((LPCWSTR)path.utf16().get_data());
 			} else {
-				DWORD err = GetLastError();
 				out["canary_file_write"] = "blocked";
-				out["canary_file_write_error"] = (int)err;
+				out["canary_file_write_error"] = (int)GetLastError();
 			}
 		} else {
 			out["canary_file_write"] = "skipped_no_userprofile";
 		}
 	}
-	// Registry write canary: try to open HKCU\Software for write
+
+	// HKCU registry write canary.
 	{
 		HKEY key = nullptr;
 		LONG res = RegOpenKeyExW(HKEY_CURRENT_USER, L"Software", 0, KEY_SET_VALUE, &key);
@@ -206,8 +205,9 @@ Dictionary run_canaries() {
 			out["canary_reg_write_error"] = (int)res;
 		}
 	}
-	// Positive canary: write a file directly under user_data_dir. Tests the
-	// path most gates take with FileAccess.open("user://config.cfg", WRITE).
+
+	// Positive canary: write under the renderer's own user_data_dir. Gates
+	// hit this path with FileAccess.open("user://...", WRITE).
 	{
 		Error err = OK;
 		Ref<FileAccess> f = FileAccess::open("user://sandbox-positive-canary.txt", FileAccess::WRITE, &err);
@@ -220,8 +220,8 @@ Dictionary run_canaries() {
 			out["canary_user_dir_write_error"] = (int)err;
 		}
 	}
-	// Isolation canary: try to write to a sibling gate's folder under
-	// gates_storage/. Should be blocked by the per-spawn allow-list.
+
+	// Isolation canary: a sibling gate's folder must NOT be writable.
 	{
 		const String sibling = OS::get_singleton()->get_user_data_dir()
 				.path_join("..").path_join("sandbox-isolation-canary.txt");
@@ -236,13 +236,13 @@ Dictionary run_canaries() {
 			out["canary_sibling_gate_write_error"] = (int)err;
 		}
 	}
-	// .pck access canary: open the .pck file directly by its absolute path,
-	// the same call Godot's ZIP reader makes for every load() at runtime.
+
+	// .pck read canary: the path Godot's ZIP reader hits on every load().
 	{
-		out["canary_pck_read_path"] = tg_main_pack_path;
-		if (!tg_main_pack_path.is_empty()) {
+		out["canary_pck_read_path"] = p_pack_path;
+		if (!p_pack_path.is_empty()) {
 			Error err = OK;
-			Ref<FileAccess> f = FileAccess::open(tg_main_pack_path, FileAccess::READ, &err);
+			Ref<FileAccess> f = FileAccess::open(p_pack_path, FileAccess::READ, &err);
 			if (f.is_valid()) {
 				out["canary_pck_read"] = "allowed";
 			} else {
@@ -253,6 +253,7 @@ Dictionary run_canaries() {
 			out["canary_pck_read"] = "skipped_no_pck_path";
 		}
 	}
+
 	return out;
 }
 
@@ -260,7 +261,7 @@ Dictionary run_canaries() {
 
 } // namespace
 
-void SandboxDiagnostics::dump() {
+Dictionary SandboxDiagnostics::to_dict() const {
 	Dictionary diag;
 
 #ifdef WINDOWS_ENABLED
@@ -279,18 +280,27 @@ void SandboxDiagnostics::dump() {
 		diag[*k] = token[*k];
 	}
 
-	Dictionary mit = collect_mitigations();
-	diag["mitigations"] = mit;
-
+	diag["mitigations"] = collect_mitigations();
 	diag["alt_desktop"] = current_desktop_name();
-
-	diag["canaries"] = run_canaries();
+	diag["canaries"] = run_canaries(pack_path);
 #else
 	diag["platform"] = "non-windows";
 #endif
 
-	String json = JSON::stringify(diag);
-	print_line("=== SANDBOX-DIAG-BEGIN ===");
-	print_line(json);
-	print_line("=== SANDBOX-DIAG-END ===");
+	return diag;
+}
+
+String SandboxDiagnostics::to_json_block() const {
+	const String json = JSON::stringify(to_dict());
+	return "=== SANDBOX-DIAG-BEGIN ===\n" + json + "\n=== SANDBOX-DIAG-END ===";
+}
+
+Error SandboxDiagnostics::write_verify_file(const String &p_path) const {
+	Error err = OK;
+	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE, &err);
+	if (file.is_null()) {
+		return err != OK ? err : ERR_CANT_OPEN;
+	}
+	file->store_string(JSON::stringify(to_dict(), "\t", false));
+	return OK;
 }

@@ -152,7 +152,7 @@
 #include "modules/the_gates/ipc/external_texture.h"
 #include "modules/the_gates/ipc/input_sync.h"
 #include "modules/the_gates/ipc/zmq_runtime.h"
-#include "modules/the_gates/sandbox_diagnostics.h"
+#include "modules/the_gates/sandbox/sandbox_diagnostics.h"
 #include "modules/the_gates/sandboxing.h"
 #endif
 
@@ -4771,9 +4771,10 @@ int Main::start() {
 		}
 	}
 
-	// Always dump diagnostics in renderer mode so the autotest harness can
-	// observe sandbox state (engaged or not) without parsing engine logs.
-	SandboxDiagnostics::dump();
+	{
+		SandboxDiagnostics diag(tg_main_pack_path);
+		print_line(diag.to_json_block());
+	}
 	print_line("[RENDERER-READY]");
 #endif
 
