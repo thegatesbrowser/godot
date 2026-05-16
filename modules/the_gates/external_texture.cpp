@@ -32,15 +32,15 @@
 
 #ifdef WINDOWS_ENABLED
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include "thirdparty/cppzmq/zmq.hpp"
 #include "zmq_context.h"
+#include <windows.h>
 #endif
 
 #if MACOS_ENABLED
-#include <IOSurface/IOSurface.h>
 #include "thirdparty/cppzmq/zmq.hpp"
 #include "zmq_context.h"
+#include <IOSurface/IOSurface.h>
 #endif
 
 #if LINUXBSD_ENABLED
