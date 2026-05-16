@@ -32,10 +32,6 @@
 
 #include "../sandbox.h"
 
-// Linux sandbox: the child sandboxes itself in lower_token() via seccomp
-// (libseccomp allowlist), landlock fs restrictions, and a chroot fallback
-// when landlock is unavailable. spawn_target is just fork+execve here —
-// there's no broker/target asymmetry on Linux the way Windows has it.
 class SandboxLinux : public Sandbox {
 	GDCLASS(SandboxLinux, Sandbox);
 
@@ -53,8 +49,7 @@ public:
 
 	Error lower_token() override;
 
-	// Identity-by-broker doesn't quite fit Linux (no broker process); we
-	// say the process is a target if a parent spawned us with TG_TARGET=1.
+	// True iff TG_TARGET=1 (set by our spawn_target on the child).
 	bool is_target() const override;
 
 	SandboxLinux() = default;

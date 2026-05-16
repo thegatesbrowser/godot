@@ -42,32 +42,21 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Returns the platform-appropriate Sandbox impl, or a null Ref<> on
-	// platforms/builds with no backend (a launcher built with --no-sandbox,
-	// or a platform with no implementation yet).
+	// Null Ref<> on builds with no backend (e.g. Windows without tg_sandbox).
 	static Ref<Sandbox> create();
 
-	// Broker-side (called from the launcher process).
-	// Returns Dictionary { pid, thread_id, process_handle, thread_handle }
-	// on success, empty Dictionary on failure.
+	// Returns { pid, thread_id } on success, empty Dictionary on failure.
 	virtual Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
 			const String &p_executable, const Vector<String> &p_arguments) = 0;
 	virtual void apply_renderer_acl(const String &p_path) = 0;
 
-	// Fail-closed Authenticode / codesign / detached-signature check on the
-	// renderer binary before spawn. Returns ERR_UNAUTHORIZED on any failure
-	// (invalid signature, wrong thumbprint, missing cert).
+	// Returns ERR_UNAUTHORIZED on any failure (fail-closed).
 	virtual Error verify_binary(const String &p_path) = 0;
 
-	// Liveness of the most recently spawned target. The launcher used to ask
-	// the engine via OS.is_process_running(pid); that required a fork-side
-	// hook in OS_Windows for sandbox-spawned children. The Sandbox instance
-	// holds its own handle and answers locally — no engine touchpoint.
 	virtual bool is_target_running() const = 0;
 	virtual Error kill_target() = 0;
 
-	// Target-side (called from the renderer process). Fail-closed: returns
-	// non-OK if the lockdown step fails — caller MUST abort.
+	// Fail-closed: a non-OK return MUST abort the caller.
 	virtual Error lower_token() = 0;
 	virtual bool is_target() const = 0;
 

@@ -32,9 +32,6 @@
 
 #include "../sandbox.h"
 
-// macOS sandbox: the child sandboxes itself in lower_token() via the
-// Seatbelt private SPI (sandbox_init_with_parameters + an .sb profile
-// string). spawn_target is posix_spawn — no broker.
 class SandboxMacOS : public Sandbox {
 	GDCLASS(SandboxMacOS, Sandbox);
 
