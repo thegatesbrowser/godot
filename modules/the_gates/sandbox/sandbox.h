@@ -54,6 +54,11 @@ public:
 			const String &p_executable, const Vector<String> &p_arguments) = 0;
 	virtual void apply_renderer_acl(const String &p_path) = 0;
 
+	// Fail-closed Authenticode / codesign / detached-signature check on the
+	// renderer binary before spawn. Returns ERR_UNAUTHORIZED on any failure
+	// (invalid signature, wrong thumbprint, missing cert).
+	virtual Error verify_binary(const String &p_path) = 0;
+
 	// Target-side (called from the renderer process). Fail-closed: returns
 	// non-OK if the lockdown step fails — caller MUST abort.
 	virtual Error lower_token() = 0;

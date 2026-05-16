@@ -92,6 +92,10 @@
                               With -Mode negative-fail-closed, the renderer was
                               supposed to crash on lower_token but stayed alive
                               (the fail-closed contract is broken)
+      negative_signature_renderer_started
+                              With -Mode negative-signature, the broker was
+                              supposed to refuse the spawn but the renderer
+                              process started anyway
 #>
 
 [CmdletBinding()]
@@ -104,19 +108,20 @@ param(
     [string]$RendererBin = "",
     [switch]$VerboseLogs,
     [string]$ResultsDir = "",
-    [ValidateSet("default", "negative-fail-closed")]
+    [ValidateSet("default", "negative-fail-closed", "negative-signature")]
     [string]$Mode = "default"
 )
 
-# In negative-fail-closed mode the harness sets TG_SANDBOX_FORCE_FAIL=1 in
-# the launcher (the renderer inherits it). The renderer's lower_token must
-# return non-OK and the boot block must CRASH_NOW. We expect the renderer
-# to NOT reach [RENDERER-READY] and the harness exits 0 only if the renderer
-# really aborted; any other outcome is a fail-closed regression.
+# Negative modes set process env vars the sandbox code reads at runtime to
+# fail-closed. Each mode asserts a different security cliff:
+#   negative-fail-closed -> lower_token aborts; renderer must NOT reach READY.
+#   negative-signature   -> verify_binary aborts; renderer must NEVER START.
+Remove-Item Env:\TG_SANDBOX_FORCE_FAIL -ErrorAction SilentlyContinue
+Remove-Item Env:\TG_SIGNATURE_FORCE_FAIL -ErrorAction SilentlyContinue
 if ($Mode -eq "negative-fail-closed") {
     $env:TG_SANDBOX_FORCE_FAIL = "1"
-} else {
-    Remove-Item Env:\TG_SANDBOX_FORCE_FAIL -ErrorAction SilentlyContinue
+} elseif ($Mode -eq "negative-signature") {
+    $env:TG_SIGNATURE_FORCE_FAIL = "1"
 }
 
 # --- Paths ----------------------------------------------------------------
@@ -228,6 +233,21 @@ if (-not $exited) {
 $proc.WaitForExit()
 $launcherExit = $proc.ExitCode
 if ($null -eq $launcherExit) { $launcherExit = "?" }
+
+# negative-signature: the broker must refuse to spawn. No renderer log
+# should appear with a mtime >= $launchStart. Exit 0 if and only if true.
+if ($Mode -eq "negative-signature") {
+    $started = $null
+    if (Test-Path $logsRoot) {
+        $started = Get-ChildItem $logsRoot -Recurse -Filter log.txt -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $launchStart } |
+            Select-Object -First 1
+    }
+    if ($started) {
+        Emit-Fail ("negative_signature_renderer_started log=" + $started.FullName) 30
+    }
+    Emit-Pass "negative-signature: broker refused to spawn on forced verify_binary failure as expected"
+}
 
 # --- Step 5: Locate the renderer log produced by this run ---------------
 $rendererLogFile = $null

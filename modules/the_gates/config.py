@@ -70,4 +70,5 @@ def configure(env):
             "wbemuuid.lib",
             "mincore.lib",
             "delayimp.lib",
+            "wintrust.lib",
         ])

@@ -38,6 +38,7 @@
 #include "core/string/print_string.h"
 #include "handle_scope.h"
 #include "platform/windows/os_windows.h"
+#include "signature_verify.h"
 
 #include <memory>
 #include <string>
@@ -286,6 +287,23 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 
 void SandboxWin::apply_renderer_acl(const String &p_path) {
 	tg_apply_untrusted_acl(p_path);
+}
+
+Error SandboxWin::verify_binary(const String &p_path) {
+	// Negative-test hook: harness forces signature verify to fail to confirm
+	// the launcher refuses to spawn. Never set in production.
+	wchar_t force[8] = { 0 };
+	if (::GetEnvironmentVariableW(L"TG_SIGNATURE_FORCE_FAIL", force, 8) > 0 && force[0] == L'1') {
+		ERR_FAIL_V_MSG(ERR_UNAUTHORIZED,
+				"SandboxWin::verify_binary forced to fail by TG_SIGNATURE_FORCE_FAIL=1");
+	}
+
+#ifdef TG_SIGNATURE_PIN
+	return tg_verify_renderer_binary(p_path, String(TG_SIGNATURE_PIN));
+#else
+	print_line(vformat("[VERIFY-BYPASSED] signature_check disabled at build time for %s (no tg_signature_pin)", p_path));
+	return OK;
+#endif
 }
 
 Error SandboxWin::lower_token() {
