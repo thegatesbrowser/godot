@@ -1,66 +1,57 @@
 {
   // See https://go.microsoft.com/fwlink/?LinkId=733558
   // for the documentation about the tasks.json format
+  //
+  // All tasks delegate to godot/tools/build.py — single source of truth
+  // for scons flag combinations.
   "version": "2.0.0",
   "tasks": [
       {
           "label": "build",
           "group": "build",
           "type": "shell",
-          "command": "scons",
-          "args": [
-            "dev_build=yes", "tg_renderer=no", "compiledb=yes", "use_llvm=yes", "linker=lld", "disable_exceptions=no"
-          ],
+          "command": "python",
+          "args": ["tools/build.py", "launcher"],
           "problemMatcher": "$msCompile"
       },
       {
           "label": "build renderer",
           "group": "build",
           "type": "shell",
-          "command": "scons",
-          "args": [
-            "dev_build=yes", "target=template_debug", "tg_renderer=yes", "compiledb=yes", "use_llvm=yes", "linker=lld", "disable_exceptions=no"
-          ],
+          "command": "python",
+          "args": ["tools/build.py", "renderer"],
           "problemMatcher": "$msCompile"
       },
       {
           "label": "build (template_release)",
           "group": "build",
           "type": "shell",
-          "command": "scons",
-          "args": [
-            "production=yes", "tools=no", "target=template_release", "optimize=speed", "tg_renderer=no", "disable_exceptions=no"
-          ],
+          "command": "python",
+          "args": ["tools/build.py", "launcher-release"],
           "problemMatcher": "$msCompile"
       },
       {
           "label": "build renderer (template_release)",
           "group": "build",
           "type": "shell",
-          "command": "scons",
-          "args": [
-            "production=yes", "tools=no", "target=template_release", "optimize=speed", "tg_renderer=yes", "disable_exceptions=no"
-          ],
+          "command": "python",
+          "args": ["tools/build.py", "renderer-release"],
           "problemMatcher": "$msCompile"
       },
       {
-          "label": "build (template_release, x86_64)",
+          "label": "build (template_release, mac intel)",
           "group": "build",
           "type": "shell",
-          "command": "scons",
-          "args": [
-            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_release", "optimize=speed", "tg_renderer=no", "disable_exceptions=no", "arch=x86_64"
-          ],
+          "command": "python",
+          "args": ["tools/build.py", "launcher-release", "--mac-intel"],
           "problemMatcher": "$msCompile"
       },
       {
-          "label": "build renderer (template_release, x86_64)",
+          "label": "build renderer (template_release, mac intel)",
           "group": "build",
           "type": "shell",
-          "command": "scons",
-          "args": [
-            "-j", "$(nproc)", "production=yes", "tools=no", "target=template_release", "optimize=speed", "tg_renderer=yes", "disable_exceptions=no", "arch=x86_64"
-          ],
+          "command": "python",
+          "args": ["tools/build.py", "renderer-release", "--mac-intel"],
           "problemMatcher": "$msCompile"
       }
   ]

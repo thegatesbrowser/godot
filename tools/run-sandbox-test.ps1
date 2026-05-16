@@ -24,8 +24,10 @@
     If set, rebuild launcher + renderer first. Off by default to keep
     the verify cycle fast.
 
-.PARAMETER SandboxBuild
-    If set together with -Build, builds with tg_sandbox=yes.
+.PARAMETER NoSandbox
+    If set together with -Build, builds with tg_sandbox=no (faster
+    iteration). Sandbox is on by default in scons, so omit this switch
+    for the real sandboxed build.
 
 .PARAMETER LauncherBin
     Override the launcher binary path. Defaults to the dev editor build.
@@ -49,8 +51,12 @@
     # Default: tutorial gate, 25 sec, no rebuild
 
 .EXAMPLE
-    pwsh godot/tools/run-sandbox-test.ps1 -Build -SandboxBuild
-    # Build with sandbox flag on, then verify
+    pwsh godot/tools/run-sandbox-test.ps1 -Build
+    # Rebuild (sandbox on by default), then verify
+
+.EXAMPLE
+    pwsh godot/tools/run-sandbox-test.ps1 -Build -NoSandbox
+    # Rebuild without the sandbox for faster iteration, then verify
 
 .NOTES
     [VERIFY-FAIL] tags emitted by this script:
@@ -72,7 +78,7 @@ param(
     [string]$GateUrl = "https://thegates.io/worlds/tutorial.gate",
     [int]$Timeout = 25,
     [switch]$Build,
-    [switch]$SandboxBuild,
+    [switch]$NoSandbox,
     [string]$LauncherBin = "",
     [string]$RendererBin = "",
     [switch]$VerboseLogs,
@@ -120,37 +126,17 @@ function Emit-Pass([string]$summary) {
 
 # --- Step 1: Optional build ----------------------------------------------
 if ($Build) {
-    Push-Location $GodotDir
-    try {
-        $sconsArgs = @(
-            "dev_build=yes",
-            "tg_renderer=no",
-            "compiledb=yes",
-            "use_llvm=yes",
-            "linker=lld",
-            "disable_exceptions=no"
-        )
-        if ($SandboxBuild) { $sconsArgs += "tg_sandbox=yes" }
-        Write-Host "[BUILD] launcher: scons $($sconsArgs -join ' ')"
-        scons -j8 @sconsArgs 2>&1 | Tee-Object -FilePath $BuildLog
-        if ($LASTEXITCODE -ne 0) { Emit-Fail "build_launcher" 11 }
+    $buildScript = Join-Path $ScriptDir "build.py"
+    $buildExtra  = @()
+    if ($NoSandbox) { $buildExtra += "--no-sandbox" }
 
-        $sconsArgs2 = @(
-            "dev_build=yes",
-            "tg_renderer=yes",
-            "target=template_debug",
-            "compiledb=yes",
-            "use_llvm=yes",
-            "linker=lld",
-            "disable_exceptions=no"
-        )
-        if ($SandboxBuild) { $sconsArgs2 += "tg_sandbox=yes" }
-        Write-Host "[BUILD] renderer: scons $($sconsArgs2 -join ' ')"
-        scons -j8 @sconsArgs2 2>&1 | Tee-Object -FilePath $BuildLog -Append
-        if ($LASTEXITCODE -ne 0) { Emit-Fail "build_renderer" 12 }
-    } finally {
-        Pop-Location
-    }
+    Write-Host "[BUILD] launcher via build.py"
+    & python $buildScript launcher @buildExtra 2>&1 | Tee-Object -FilePath $BuildLog
+    if ($LASTEXITCODE -ne 0) { Emit-Fail "build_launcher" 11 }
+
+    Write-Host "[BUILD] renderer via build.py"
+    & python $buildScript renderer @buildExtra 2>&1 | Tee-Object -FilePath $BuildLog -Append
+    if ($LASTEXITCODE -ne 0) { Emit-Fail "build_renderer" 12 }
 }
 
 if (-not (Test-Path $LauncherBin)) {
