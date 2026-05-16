@@ -71,6 +71,15 @@
       renderer_errors         ERROR/FATAL lines after [RENDERER-READY]
       gate_not_entered        [AUTOTEST-GATE-ENTERED] never fired
                               (gate failed to load or renderer failed to spawn)
+      per_gate_dir_empty      per-gate user_data_dir exists but renderer wrote
+                              nothing under it (regression in user:// resolution)
+      per_gate_dir_missing    launcher never created the per-gate user dir
+                              (--tg-user-data-dir plumbing broken in renderer_manager)
+      canary_user_dir_blocked sandboxed renderer can't write a file directly under
+                              user:// (UNTRUSTED ACL stamp on per-gate dir failing)
+      canary_sibling_gate_allowed
+                              renderer wrote into a sibling gate's folder
+                              (cross-gate isolation broken — allow-list too broad)
 #>
 
 [CmdletBinding()]
@@ -284,6 +293,9 @@ $diagIntegrity  = "?"
 $diagPid        = "?"
 $diagBuild      = "?"
 $diagCanaryFile = "?"
+$diagCanaryUser = "?"
+$diagCanarySibling = "?"
+$diagCanaryPck = "?"
 if ($diag.PSObject.Properties["integrity"]) { $diagIntegrity = [string]($diag.integrity) }
 if ($diag.PSObject.Properties["pid"])       { $diagPid       = [string]($diag.pid) }
 if ($diag.PSObject.Properties["build"])     { $diagBuild     = [string]($diag.build) }
@@ -291,6 +303,46 @@ if ($diag.PSObject.Properties["canaries"]) {
     if ($diag.canaries.PSObject.Properties["canary_file_write"]) {
         $diagCanaryFile = [string]($diag.canaries.canary_file_write)
     }
+    if ($diag.canaries.PSObject.Properties["canary_user_dir_write"]) {
+        $diagCanaryUser = [string]($diag.canaries.canary_user_dir_write)
+    }
+    if ($diag.canaries.PSObject.Properties["canary_sibling_gate_write"]) {
+        $diagCanarySibling = [string]($diag.canaries.canary_sibling_gate_write)
+    }
+    if ($diag.canaries.PSObject.Properties["canary_pck_read"]) {
+        $diagCanaryPck = [string]($diag.canaries.canary_pck_read)
+    }
 }
 
-Emit-Pass "integrity=$diagIntegrity renderer_pid=$diagPid canary_file=$diagCanaryFile build=$diagBuild"
+# Verify the per-gate user data dir got populated by the renderer.
+$gateFolder = ($GateUrl -split '\?')[0] -replace '^https?://','' -replace '\.gate$','' -replace ':','_'
+$perGateDir = Join-Path $env:APPDATA "Godot\app_userdata\TheGates\gates_storage\$gateFolder"
+if (Test-Path $perGateDir) {
+    $perGateFiles = (Get-ChildItem $perGateDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
+    if ($perGateFiles -lt 1) {
+        Emit-Fail "per_gate_dir_empty path=$perGateDir (renderer wrote nothing under its user://)" 21
+    }
+} else {
+    Emit-Fail "per_gate_dir_missing path=$perGateDir (launcher never created the per-gate user dir)" 22
+}
+
+# Verify a gate can write a file directly under user:// (the user://config.cfg
+# pattern). This was blocked before the UNTRUSTED ACL stamp on the per-gate dir.
+if ($diagCanaryUser -ne "allowed") {
+    Emit-Fail "canary_user_dir_blocked value=$diagCanaryUser (sandbox blocks FileAccess.WRITE at root of user://)" 23
+}
+
+# Verify a gate can NOT write to a sibling gate's folder. Confirms cross-gate
+# isolation is enforced by the per-spawn allow-list.
+if ($diagCanarySibling -ne "blocked") {
+    Emit-Fail "canary_sibling_gate_allowed value=$diagCanarySibling (cross-gate isolation broken - gates can write into each others folders)" 24
+}
+
+# Verify the gate can read resources from its .pck post-lockdown. Godot's ZIP
+# reader re-opens the .pck file every load() call, so this proves load() works
+# for gates that fetch resources at runtime.
+if ($diagCanaryPck -ne "allowed" -and $diagCanaryPck -ne "skipped_no_main_scene") {
+    Emit-Fail "canary_pck_read_blocked value=$diagCanaryPck (gate cannot load resources from .pck post-lockdown)" 25
+}
+
+Emit-Pass "integrity=$diagIntegrity renderer_pid=$diagPid canary_file=$diagCanaryFile canary_user_dir=$diagCanaryUser canary_sibling=$diagCanarySibling canary_pck=$diagCanaryPck per_gate_files=$perGateFiles build=$diagBuild"
