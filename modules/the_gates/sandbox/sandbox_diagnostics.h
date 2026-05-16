@@ -30,7 +30,28 @@
 
 #pragma once
 
+#include "core/error/error_list.h"
+#include "core/string/ustring.h"
+#include "core/variant/dictionary.h"
+
+// Target-side self-report of the sandbox state observed from inside the
+// renderer process. Per-platform fields (Windows token + mitigations,
+// Linux seccomp/landlock, macOS Seatbelt) plus a common canaries dict.
+//
+// The autonomous harness reads the SANDBOX-DIAG-BEGIN/END block emitted by
+// to_json_block() and cross-checks against broker_policy.json the broker
+// wrote at spawn time.
 class SandboxDiagnostics {
 public:
-	static void dump();
+	// pack_path: absolute path of the renderer's .pck, used for the
+	// pck-read canary. Empty means "skip the canary."
+	explicit SandboxDiagnostics(const String &p_pack_path) :
+			pack_path(p_pack_path) {}
+
+	Dictionary to_dict() const;
+	String to_json_block() const;
+	Error write_verify_file(const String &p_path) const;
+
+private:
+	String pack_path;
 };
