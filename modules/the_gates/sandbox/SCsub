@@ -11,3 +11,7 @@ env_tg.add_source_files(env.modules_sources, "*.cpp")
 
 if env["platform"] == "windows" and env.tg_sandbox:
     SConscript("windows/SCsub")
+elif env["platform"] == "linuxbsd":
+    SConscript("linux/SCsub")
+elif env["platform"] == "macos":
+    SConscript("macos/SCsub")

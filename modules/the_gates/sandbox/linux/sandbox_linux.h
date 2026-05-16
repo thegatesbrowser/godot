@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  register_types.cpp                                                    */
+/*  sandbox_linux.h                                                       */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,50 +28,35 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "register_types.h"
+#pragma once
 
-#include "core/object/class_db.h"
-#include "ipc/command.h"
-#include "ipc/command_sync.h"
-#include "ipc/external_texture.h"
-#include "ipc/input_sync.h"
-#include "ipc/zmq_runtime.h"
-#include "sandbox/sandbox.h"
-#include "sandbox/sandbox_policy.h"
+#include "../sandbox.h"
 
-#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-#include "sandbox/windows/sandbox_win.h"
-#elif defined(LINUXBSD_ENABLED)
-#include "sandbox/linux/sandbox_linux.h"
-#elif defined(MACOS_ENABLED)
-#include "sandbox/macos/sandbox_macos.h"
-#endif
+// Linux sandbox: the child sandboxes itself in lower_token() via seccomp
+// (libseccomp allowlist), landlock fs restrictions, and a chroot fallback
+// when landlock is unavailable. spawn_target is just fork+execve here —
+// there's no broker/target asymmetry on Linux the way Windows has it.
+class SandboxLinux : public Sandbox {
+	GDCLASS(SandboxLinux, Sandbox);
 
-void initialize_the_gates_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
+	int64_t target_pid = 0;
 
-	GDREGISTER_CLASS(InputSync);
-	GDREGISTER_CLASS(Command);
-	GDREGISTER_CLASS(CommandSync);
-	GDREGISTER_CLASS(TGExternalTexture);
+public:
+	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
+			const String &p_executable, const Vector<String> &p_arguments) override;
 
-	GDREGISTER_CLASS(SandboxPolicy);
-	GDREGISTER_ABSTRACT_CLASS(Sandbox);
-#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-	GDREGISTER_CLASS(SandboxWin);
-#elif defined(LINUXBSD_ENABLED)
-	GDREGISTER_CLASS(SandboxLinux);
-#elif defined(MACOS_ENABLED)
-	GDREGISTER_CLASS(SandboxMacOS);
-#endif
-}
+	void apply_renderer_acl(const String &p_path) override;
+	Error verify_binary(const String &p_path) override;
 
-void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
+	bool is_target_running() const override;
+	Error kill_target() override;
 
-	tg_zmq_shutdown();
-}
+	Error lower_token() override;
+
+	// Identity-by-broker doesn't quite fit Linux (no broker process); we
+	// say the process is a target if a parent spawned us with TG_TARGET=1.
+	bool is_target() const override;
+
+	SandboxLinux() = default;
+	~SandboxLinux() = default;
+};
