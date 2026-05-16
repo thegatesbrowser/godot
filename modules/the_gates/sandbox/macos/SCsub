@@ -1,0 +1,13 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+Import("env")
+Import("env_tg")
+
+env_macos_sandbox = env_tg.Clone()
+
+macos_sandbox_obj = []
+env_macos_sandbox.add_source_files(macos_sandbox_obj, "*.cpp")
+env_macos_sandbox.add_source_files(macos_sandbox_obj, "*.mm")
+
+env.modules_sources += macos_sandbox_obj
