@@ -96,6 +96,12 @@
                               With -Mode negative-signature, the broker was
                               supposed to refuse the spawn but the renderer
                               process started anyway
+      multi_gate_cycles_missing
+                              With -Cycles N, the launcher should re-open
+                              the gate N times for a total of N+1 entries.
+                              Fewer than expected means the multi-gate IPC
+                              path broke (regression of the AF_UNIX rebind
+                              bug — see notes/Sandboxing/Architecture.md)
 #>
 
 [CmdletBinding()]
@@ -109,7 +115,11 @@ param(
     [switch]$VerboseLogs,
     [string]$ResultsDir = "",
     [ValidateSet("default", "negative-fail-closed", "negative-signature")]
-    [string]$Mode = "default"
+    [string]$Mode = "default",
+    # Number of extra gate re-opens (cycles=2 means three gate spawns total).
+    # Used to regression-test multi-gate IPC on Windows after the rewrite.
+    [int]$Cycles = 0,
+    [double]$CycleDelay = 5.0
 )
 
 # Negative modes set process env vars the sandbox code reads at runtime to
@@ -208,6 +218,9 @@ $launcherArgs = @(
     "--gate-url", $GateUrl,
     "--autotest-timeout", $Timeout
 )
+if ($Cycles -gt 0) {
+    $launcherArgs += @("--autotest-cycles", $Cycles, "--autotest-cycle-delay", $CycleDelay)
+}
 if ($VerboseLogs) { $launcherArgs += "--verbose" }
 
 Write-Host "[RUN] $LauncherBin $($launcherArgs -join ' ')"
@@ -321,9 +334,19 @@ $diag | ConvertTo-Json -Depth 10 | Set-Content $VerifyJson
 # --- Step 8: Gate health checks -----------------------------------------
 # Did the launcher consider the gate "entered" (renderer spawn returned ok)?
 $launcher = Get-Content $LauncherLog -ErrorAction SilentlyContinue
-$gateEntered = $launcher | Select-String -Pattern "\[AUTOTEST-GATE-ENTERED\]" | Select-Object -Last 1
+$gateEnteredLines = $launcher | Select-String -Pattern "\[AUTOTEST-GATE-ENTERED\]"
+$gateEntered = $gateEnteredLines | Select-Object -Last 1
 if (-not $gateEntered) {
     Emit-Fail "gate_not_entered" 18
+}
+
+# Multi-gate cycles: the launcher should report GATE-ENTERED once per cycle.
+# cycles=N means N+1 gate spawns (initial + N re-opens). Anything less is a
+# multi-gate IPC regression on the chromium-sandboxing branch.
+$expectedEntered = $Cycles + 1
+$actualEntered = ($gateEnteredLines | Measure-Object).Count
+if ($actualEntered -lt $expectedEntered) {
+    Emit-Fail "multi_gate_cycles_missing expected=$expectedEntered got=$actualEntered" 31
 }
 
 # Did the renderer reach the external-texture import path?
