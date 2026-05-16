@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  zmq_context.h                                                         */
+/*  input_sync.cpp                                                        */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,27 +28,55 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "input_sync.h"
 
-#include "core/os/os.h"
-#include "core/string/ustring.h"
-#include "thirdparty/cppzmq/zmq.hpp"
+#include "../socket_acl_win.h"
+#include "core/input/input.h"
+#include "variant_tools.h"
+#include "zmq_runtime.h"
 
-inline zmq::context_t ctx;
+void InputSync::socket_bind(const String &p_address) {
+	const String resolved = tg_resolve_ipc_address(p_address);
+	sock.bind(resolved.utf8().get_data());
+	tg_apply_untrusted_acl(resolved);
+}
 
-extern String tg_ipc_dir_override;
+void InputSync::socket_connect(const String &p_address) {
+	sock.connect(tg_resolve_ipc_address(p_address).utf8().get_data());
+}
 
-inline String tg_resolve_ipc_address(const String &p_address) {
-	const String marker = "user://";
-	const int idx = p_address.find(marker);
-	if (idx < 0) {
-		return p_address;
+void InputSync::send_input_event(const Ref<InputEvent> &p_event) {
+	std::string msg_str = var_to_str(p_event).utf8().get_data();
+	zmq::message_t msg(msg_str);
+	auto result = sock.send(msg, zmq::send_flags::none);
+	if (!result) {
+		print_line("Failed to send input event");
 	}
-	const String prefix = p_address.substr(0, idx);
-	const String suffix = p_address.substr(idx + marker.length());
-	const String dir = tg_ipc_dir_override.is_empty()
-			? OS::get_singleton()->get_user_data_dir()
-			: tg_ipc_dir_override;
-	String resolved = prefix + dir + "/" + suffix;
-	return resolved.replace_char('\\', '/');
+}
+
+void InputSync::receive_input_events() {
+	zmq::message_t msg;
+
+	while (sock.recv(msg, zmq::recv_flags::dontwait)) {
+		std::string msg_str(static_cast<const char *>(msg.data()), msg.size());
+		Input::get_singleton()->parse_input_event((Ref<InputEvent>)str_to_var(msg_str.c_str()));
+	}
+}
+
+void InputSync::close() {
+	sock.close();
+}
+
+void InputSync::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("socket_bind", "address"), &InputSync::socket_bind, DEFVAL(INPUT_SYNC_ADDRESS));
+	ClassDB::bind_method(D_METHOD("socket_connect", "address"), &InputSync::socket_connect, DEFVAL(INPUT_SYNC_ADDRESS));
+	ClassDB::bind_method(D_METHOD("send_input_event", "event"), &InputSync::send_input_event);
+	ClassDB::bind_method(D_METHOD("close"), &InputSync::close);
+}
+
+InputSync::InputSync() :
+		sock(tg_zmq_context(), zmq::socket_type::pair) {
+}
+
+InputSync::~InputSync() {
 }

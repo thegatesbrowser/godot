@@ -82,6 +82,8 @@ env.modules_sources += module_obj
 
 Export("env_tg")
 
+SConscript("ipc/SCsub")
+
 if env["platform"] == "windows" and env.tg_sandbox:
     SConscript("sandbox/SCsub")
 

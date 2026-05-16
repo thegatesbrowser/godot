@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  register_types.cpp                                                    */
+/*  zmq_runtime.cpp                                                       */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,40 +28,35 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "register_types.h"
+#include "zmq_runtime.h"
 
-#include "core/object/class_db.h"
-#include "ipc/command.h"
-#include "ipc/command_sync.h"
-#include "ipc/external_texture.h"
-#include "ipc/input_sync.h"
-#include "ipc/zmq_runtime.h"
-#include "sandboxing.h"
+#include "core/os/os.h"
+#include "thirdparty/cppzmq/zmq.hpp"
 
-#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-#include "sandbox/sandbox_win.h"
-#endif
-
-void initialize_the_gates_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
-
-	GDREGISTER_CLASS(Sandboxing);
-	GDREGISTER_CLASS(InputSync);
-	GDREGISTER_CLASS(Command);
-	GDREGISTER_CLASS(CommandSync);
-	GDREGISTER_CLASS(TGExternalTexture);
-
-#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-	GDREGISTER_CLASS(SandboxingWin);
-#endif
+zmq::context_t &tg_zmq_context() {
+	static zmq::context_t s_ctx;
+	return s_ctx;
 }
 
-void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
+void tg_zmq_shutdown() {
+	tg_zmq_context().close();
+}
 
-	tg_zmq_shutdown();
+String tg_resolve_ipc_address(const String &p_address) {
+	const String marker = "user://";
+	const int idx = p_address.find(marker);
+	if (idx < 0) {
+		return p_address;
+	}
+	const String prefix = p_address.substr(0, idx);
+	const String suffix = p_address.substr(idx + marker.length());
+	const String dir = tg_ipc_dir_override.is_empty()
+			? OS::get_singleton()->get_user_data_dir()
+			: tg_ipc_dir_override;
+	String resolved = prefix + dir + "/" + suffix;
+#ifdef WINDOWS_ENABLED
+	return resolved.replace_char('\\', '/');
+#else
+	return resolved;
+#endif
 }

@@ -29,10 +29,12 @@
 /**************************************************************************/
 
 #include "command_sync.h"
+
+#include "../socket_acl_win.h"
 #include "core/input/input.h"
-#include "socket_acl_win.h"
 #include "variant_tools.h"
-#include "zmq_context.h"
+#include "zmq_runtime.h"
+
 #include <zmq.h>
 
 CommandSync *CommandSync::singleton = nullptr;
@@ -153,7 +155,7 @@ void CommandSync::_bind_methods() {
 }
 
 CommandSync::CommandSync(zmq::socket_type type, zmq::socket_type monitor_type) :
-		sock(ctx, type), monitor_sock(ctx, monitor_type) {
+		sock(tg_zmq_context(), type), monitor_sock(tg_zmq_context(), monitor_type) {
 	if (singleton == nullptr) {
 		singleton = this;
 	}
