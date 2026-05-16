@@ -292,6 +292,13 @@ Error SandboxWin::lower_token() {
 	ERR_FAIL_COND_V_MSG(!is_target(), ERR_UNAVAILABLE,
 			"SandboxWin: lower_token called from broker (not a sandbox target)");
 
+	// Negative-test hook: the harness can force a lockdown failure to verify
+	// the caller aborts (fail-closed). Never set in production launchers.
+	wchar_t force[8] = { 0 };
+	if (::GetEnvironmentVariableW(L"TG_SANDBOX_FORCE_FAIL", force, 8) > 0 && force[0] == L'1') {
+		ERR_FAIL_V_MSG(FAILED, "SandboxWin: lower_token forced to fail by TG_SANDBOX_FORCE_FAIL=1");
+	}
+
 	sandbox::TargetServices *target_service = sandbox::SandboxFactory::GetTargetServices();
 	ERR_FAIL_COND_V_MSG(target_service == nullptr, FAILED,
 			"SandboxWin: GetTargetServices returned null");

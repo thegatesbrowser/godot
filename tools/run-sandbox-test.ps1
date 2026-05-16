@@ -88,6 +88,10 @@
       broker_token_lockdown_regression
                               broker_policy.json shows USER_LOCKDOWN token level
                               (regression: known to break IPC, see Architecture.md)
+      negative_fail_closed_not_aborted
+                              With -Mode negative-fail-closed, the renderer was
+                              supposed to crash on lower_token but stayed alive
+                              (the fail-closed contract is broken)
 #>
 
 [CmdletBinding()]
@@ -99,8 +103,21 @@ param(
     [string]$LauncherBin = "",
     [string]$RendererBin = "",
     [switch]$VerboseLogs,
-    [string]$ResultsDir = ""
+    [string]$ResultsDir = "",
+    [ValidateSet("default", "negative-fail-closed")]
+    [string]$Mode = "default"
 )
+
+# In negative-fail-closed mode the harness sets TG_SANDBOX_FORCE_FAIL=1 in
+# the launcher (the renderer inherits it). The renderer's lower_token must
+# return non-OK and the boot block must CRASH_NOW. We expect the renderer
+# to NOT reach [RENDERER-READY] and the harness exits 0 only if the renderer
+# really aborted; any other outcome is a fail-closed regression.
+if ($Mode -eq "negative-fail-closed") {
+    $env:TG_SANDBOX_FORCE_FAIL = "1"
+} else {
+    Remove-Item Env:\TG_SANDBOX_FORCE_FAIL -ErrorAction SilentlyContinue
+}
 
 # --- Paths ----------------------------------------------------------------
 $ScriptDir = $PSScriptRoot
@@ -243,6 +260,18 @@ if (-not $rendererStartLine) {
 }
 
 $rendererReadyLine = $renderer | Select-String -Pattern "\[RENDERER-READY\]" | Select-Object -Last 1
+
+# negative-fail-closed: the renderer MUST NOT reach READY. Anything else is
+# a fail-closed regression — the renderer either bypassed the failure or the
+# CRASH_NOW didn't fire.
+if ($Mode -eq "negative-fail-closed") {
+    if ($rendererReadyLine -and $rendererReadyLine.LineNumber -gt $rendererStartLine.LineNumber) {
+        Emit-Fail "negative_fail_closed_not_aborted" 29
+    }
+    # If RENDERER-START fired but no READY, the renderer aborted as expected.
+    Emit-Pass "negative-fail-closed: renderer aborted on forced lower_token failure as expected"
+}
+
 if (-not $rendererReadyLine -or $rendererReadyLine.LineNumber -lt $rendererStartLine.LineNumber) {
     Emit-Fail "renderer_no_ready" 15
 }
