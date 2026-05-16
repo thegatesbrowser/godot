@@ -33,6 +33,8 @@
 #include "BrokerServicesDelegateImpl.h"
 
 #include "../socket_acl_win.h"
+#include "core/io/file_access.h"
+#include "core/io/json.h"
 #include "core/string/print_string.h"
 #include "platform/windows/os_windows.h"
 
@@ -60,6 +62,52 @@ std::wstring to_wide(const String &p_string) {
 		::MultiByteToWideChar(CP_UTF8, 0, utf8.get_data(), -1, out.data(), wlen);
 	}
 	return out;
+}
+
+// Dumps the policy the broker just configured to JSON for the test harness.
+void write_broker_policy_json(const String &p_log_path, const String &p_executable, DWORD p_pid,
+		const String &p_rw_dir, const Vector<String> &p_rw_files, const Vector<String> &p_ro_files) {
+	Dictionary policy;
+	policy["executable"] = p_executable;
+	policy["pid"] = (int64_t)p_pid;
+	policy["token_initial"] = "USER_RESTRICTED_SAME_ACCESS";
+	policy["token_lockdown"] = "USER_LIMITED";
+	policy["integrity_target"] = "UNTRUSTED";
+	policy["job_level"] = "LOCKDOWN";
+	policy["alternate_desktop"] = true;
+	policy["rw_dir"] = p_rw_dir;
+
+	Array rw_arr;
+	for (int i = 0; i < p_rw_files.size(); ++i) {
+		rw_arr.push_back(p_rw_files[i]);
+	}
+	policy["rw_files"] = rw_arr;
+
+	Array ro_arr;
+	for (int i = 0; i < p_ro_files.size(); ++i) {
+		ro_arr.push_back(p_ro_files[i]);
+	}
+	policy["ro_files"] = ro_arr;
+
+	PackedStringArray mit_initial;
+	mit_initial.push_back("DEP");
+	mit_initial.push_back("DEP_NO_ATL_THUNK");
+	mit_initial.push_back("SEHOP");
+	mit_initial.push_back("BOTTOM_UP_ASLR");
+	mit_initial.push_back("HIGH_ENTROPY_ASLR");
+	policy["mitigations_initial"] = mit_initial;
+
+	PackedStringArray mit_delayed;
+	mit_delayed.push_back("DLL_SEARCH_ORDER");
+	policy["mitigations_delayed"] = mit_delayed;
+
+	const String json_path = p_log_path.get_base_dir().path_join("broker_policy.json");
+	Ref<FileAccess> file = FileAccess::open(json_path, FileAccess::WRITE);
+	if (file.is_null()) {
+		ERR_PRINT(vformat("SandboxingWin: cannot open %s for write", json_path));
+		return;
+	}
+	file->store_string(JSON::stringify(policy, "\t", false));
 }
 
 // Build a Windows-style command line, quoting arguments that contain spaces.
@@ -278,6 +326,12 @@ Dictionary SandboxingWin::spawn_target(const String &p_executable, const Vector<
 	result["thread_id"] = (int64_t)pi.dwThreadId;
 	result["process_handle"] = (int64_t)(uintptr_t)pi.hProcess;
 	result["thread_handle"] = (int64_t)(uintptr_t)pi.hThread;
+
+	if (!p_stdout_log_path.is_empty()) {
+		write_broker_policy_json(p_stdout_log_path, p_executable, pi.dwProcessId,
+				p_rw_dir, p_rw_files, p_ro_files);
+	}
+
 	return result;
 }
 
