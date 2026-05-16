@@ -153,7 +153,6 @@
 #include "modules/the_gates/ipc/input_sync.h"
 #include "modules/the_gates/ipc/zmq_runtime.h"
 #include "modules/the_gates/sandbox/sandbox_diagnostics.h"
-#include "modules/the_gates/sandboxing.h"
 #endif
 
 #ifdef TG_RENDERER

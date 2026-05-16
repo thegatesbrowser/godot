@@ -38,7 +38,6 @@
 #include "ipc/zmq_runtime.h"
 #include "sandbox/sandbox.h"
 #include "sandbox/sandbox_policy.h"
-#include "sandboxing.h"
 
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 #include "sandbox/windows/sandbox_win.h"
@@ -49,7 +48,6 @@ void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 
-	GDREGISTER_CLASS(Sandboxing);
 	GDREGISTER_CLASS(InputSync);
 	GDREGISTER_CLASS(Command);
 	GDREGISTER_CLASS(CommandSync);
