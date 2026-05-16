@@ -50,6 +50,7 @@ public:
 			const String &p_executable, const Vector<String> &p_arguments) override;
 
 	void apply_renderer_acl(const String &p_path) override;
+	Error verify_binary(const String &p_path) override;
 
 	Error lower_token() override;
 

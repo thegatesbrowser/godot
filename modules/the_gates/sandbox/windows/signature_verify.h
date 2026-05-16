@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox.cpp                                                           */
+/*  signature_verify.h                                                    */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,28 +28,12 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "sandbox.h"
+#pragma once
 
-#include "sandbox_policy.h"
+#include "core/error/error_list.h"
+#include "core/string/ustring.h"
 
-#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-#include "windows/sandbox_win.h"
-#endif
-
-Ref<Sandbox> Sandbox::create() {
-#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
-	return Ref<Sandbox>(memnew(SandboxWin));
-#else
-	return Ref<Sandbox>();
-#endif
-}
-
-void Sandbox::_bind_methods() {
-	ClassDB::bind_static_method("Sandbox", D_METHOD("create"), &Sandbox::create);
-	ClassDB::bind_method(D_METHOD("spawn_target", "policy", "executable", "arguments"),
-			&Sandbox::spawn_target);
-	ClassDB::bind_method(D_METHOD("apply_renderer_acl", "path"), &Sandbox::apply_renderer_acl);
-	ClassDB::bind_method(D_METHOD("verify_binary", "path"), &Sandbox::verify_binary);
-	ClassDB::bind_method(D_METHOD("lower_token"), &Sandbox::lower_token);
-	ClassDB::bind_method(D_METHOD("is_target"), &Sandbox::is_target);
-}
+// Verifies the renderer binary's Authenticode signature chain via WinVerifyTrust,
+// extracts the signer's SHA-1 thumbprint, and compares to the compile-time
+// pin. Returns ERR_UNAUTHORIZED on any mismatch or chain failure.
+Error tg_verify_renderer_binary(const String &p_path, const String &p_expected_thumbprint);
