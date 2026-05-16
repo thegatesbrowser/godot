@@ -254,9 +254,6 @@ bool PolicyRule::AddStringMatch(RuleType rule_type,
     ++current_char;
   }
 
-  wprintf(L"Adding string match for rule_type: %d, parameter: %d, state: %d, skip_count: %d, fragment: %s\n",
-          static_cast<int>(rule_type), parameter, state, skip_count,
-          fragment.c_str());
   return GenStringOpcode(rule_type, parameter, state, true, &skip_count,
                          &fragment);
 }
