@@ -1,26 +1,35 @@
-# Future work — past the current vendoring win
+# Future Work — past the rewrite
 
-What's left to do, after the sandbox engaged at UNTRUSTED on a real gate load (2026-05-14) and the in-tree SCons build replaced the prebuilt cef_sandbox.lib link (2026-05-15). Organized roughly by priority and dependency. Each item lists what it is and why it matters.
+What remains after the Phase 0–5 rewrite (see [[Architecture]] for the
+target state and what shipped). Organized roughly by priority and
+dependency.
 
-## Tier 1 — finish the current win
+## Tier 1 — done by the rewrite
 
-Mechanical follow-ups to what already shipped. Without them the vendoring win is fragile or undocumented.
+These shipped during the rewrite and are no longer Future Work — listed
+here only for grep-traceability.
 
-- ~~**Build from vendored source under SCons.**~~ **Done 2026-05-15.** `pwsh godot/tools/run-sandbox-test.ps1` returns `[VERIFY-OK] integrity=untrusted canary_file=blocked` with the renderer built by scons directly from `godot/thirdparty/chromium-sandbox/` — no C:/code dependency, no cef_sandbox.lib link. See [[Agent Session 2026-05-15]] for the Firefox-style architecture (moz.yaml-curated chromium 137 + chromium-shim + targeted stubs).
-  - SANDBOX_EXPORTS=1 lives on the module-local CPPDEFINES in `modules/the_gates/sandbox/SCsub`; both the shim build and the consumer wrapper see the same define. The cross-exe interception path is single-source-of-truth.
-  - C++20 scoped to the sandbox source-build only via `env_sandbox["CXXFLAGS"] = …`.
-  - libcxx: we use the engine's std library (clang-cl with MSVC STL); no `use_custom_libcxx` path in our SCsub.
+- ~~**Build from vendored source under SCons.**~~ (pre-rewrite)
+- ~~**Sign-verify the renderer .exe before SpawnTarget.**~~ Phase 2:
+  `SandboxWin::verify_binary` does WinVerifyTrust + SHA-1 thumbprint pin
+  from `tg_signature_pin` SCons flag. Fail-closed. Negative-signature
+  harness mode confirms.
+- ~~**Fail-closed `lower_token`.**~~ Phase 2: `CRASH_NOW_MSG` on
+  non-OK, harness `-Mode negative-fail-closed` confirms.
+- ~~**Module restructure: rename, RAII, abstract base, policy class.**~~
+  Phase 1.1–1.8.
+- ~~**Cross-check broker/renderer policy.**~~ Phase 0:
+  `broker_policy.json` written by `SandboxWin::spawn_target`, diffed by
+  the harness against the SANDBOX-DIAG block.
+- ~~**Extract main.cpp orchestration into the module.**~~ Phase 4:
+  `tg_renderer_boot` + `tg_renderer_loop_iterate`; main.cpp's
+  TG_RENDERER footprint is now three orchestration lines plus the
+  display-server suppressions.
+- ~~**Drop `OS_Windows::track_external_process`.**~~ Phase 4: replaced
+  by `Sandbox::is_target_running` / `kill_target` holding the HANDLE
+  inside the SandboxWin instance.
 
-- **Sign-verify the renderer .exe before `SpawnTarget`.** SANDBOX_EXPORTS means the broker `LoadLibrary`s the renderer binary to read its export table. A malicious gate that swapped the renderer binary on disk before launch could feed the broker bogus exports — the broker then patches ntdll thunks based on attacker-controlled offsets. Mitigation: Authenticode signature verification on the renderer .exe before broker calls `SpawnTarget`. Small change, security-critical.
-  - **Pin the cert thumbprint**, don't just chain to a trusted root — otherwise any attacker with a valid code-signing cert from any CA can sign their malicious renderer and pass.
-  - **Fail closed.** No `--skip-signature-check` flag, no "warn and continue" path, no `if DEBUG: pass`. Every fail-open mode is a downgrade attack the attacker will use.
-  - **Same primary cert for launcher and renderer**, mirroring CEF #3935's bootstrap+client rule. Don't let the launcher accept any of our other signed binaries as a substitute.
-
-- ~~**Update existing docs to current state.**~~ **Done 2026-05-15.** Implementation Status, Index, README all updated. The Overview doc and Agent Instructions still describe the pre-2026-05-14 baseline (integrity=medium aspirational) but are kept as historical context — superseded sections marked at the top.
-
-- **Harness flakiness fix.** `run-sandbox-test.ps1` occasionally returns `launcher_no_exit` on repeated runs because `HTTPClientPool` doesn't cancel pending analytics requests on `SceneTree.quit`. Pattern documented in the 2026-05-14 session note. Two parts: (a) `Stop-Process -Name "godot.*sandbox*"` between runs in the script (cheap, immediate); (b) fix the launcher-side `HTTPClientPool` bug separately (proper fix, deeper).
-
-- ~~**Commit the current uncommitted state in logical chunks.**~~ **Done 2026-05-15.** Split into commits: chromium vendor, chromium-shim vendor, in-tree build wiring, broker init caching fix, docs.
+## Tier 2 — productionization
 
 ## Tier 2 — productionization
 
