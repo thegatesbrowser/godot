@@ -266,6 +266,22 @@ if [[ "$GATE_ENTERED_COUNT" -lt "$EXPECTED_ENTERED" ]]; then
     emit_fail "multi_gate_cycles_missing expected=$EXPECTED_ENTERED got=$GATE_ENTERED_COUNT" 31
 fi
 
+# Main-thread responsiveness: process_frame must keep firing during a gate
+# switch. Before verify_binary was moved to a worker thread, SHA-256 hashing
+# blocked the main loop for 6s+ on a debug build and the launcher froze on
+# the old gate's last frame. A max tick gap above $MAX_TICK_GAP_MS means a
+# blocking call slipped onto the main thread again.
+MAX_TICK_GAP_MS=500
+FROZEN_LINE="$(awk -F'max_tick_gap=' '
+    /\[AUTOTEST-GATE-ENTERED\].*max_tick_gap=/ {
+        ms = $2 + 0
+        if (ms > '"$MAX_TICK_GAP_MS"') { print $0; exit }
+    }
+' "$LAUNCHER_LOG")"
+if [[ -n "$FROZEN_LINE" ]]; then
+    emit_fail "main_thread_frozen max_ms=$MAX_TICK_GAP_MS line=${FROZEN_LINE:0:140}" 32
+fi
+
 # External-texture import path reached.
 EXT_LINE="$(grep -n -- 'TGExternalTexture' "$RENDERER_LOG_COPY" | tail -n 1 | cut -d: -f1)"
 if [[ -z "$EXT_LINE" || "$EXT_LINE" -lt "$START_LINE" ]]; then
