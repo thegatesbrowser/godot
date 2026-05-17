@@ -71,7 +71,9 @@ Each of these is real engineering. They take what's already a strong sandbox and
 
 - **macOS wiring.** `thirdparty/chromium-sandbox/sandbox/mac/` is vendored (19 files) but no `SandboxingMac` class exists, no broker, no integration into the renderer's startup. macOS uses Apple's Seatbelt / TrustedBSD via SBPL profile strings — completely different model from Windows.
 
-- **Linux deeper seccomp.** The existing `Sandboxing` class is a thin seccomp-bpf filter. Production-grade Linux sandboxes layer on user namespaces, landlock (5.13+), and chroot. Worth doing once macOS parity is in.
+- ~~**Linux deeper seccomp.**~~ Shipped: `SandboxLinux` runs chromium's bpf_dsl seccomp filter on top of landlock + a `capset` capability drop. The vendored subset mirrors Firefox's `moz.yaml` list; the policy + loader live in `modules/the_gates/sandbox/linux/`. User-namespace + chroot are still future work (see Tier 3 brokered-IPC).
+
+- **Linux network brokering / user namespace.** The Linux backend still allows AF_INET sockets to be created; landlock + the canary report `network=allowed` for now. The chromium-sandbox approach is to (a) enter a fresh user namespace before lockdown so the renderer has its own loopback-only network, or (b) route network through a launcher-side broker. Either restores the `network=blocked` canary outcome that the Windows backend already has.
 
 ## Tier 5 — research and hygiene
 

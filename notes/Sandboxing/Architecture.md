@@ -105,13 +105,12 @@ modules/the_gates/
 │   │   ├── signature_verify.cpp     Authenticode via WinVerifyTrust + thumbprint pin
 │   │   └── linker_stubs.cpp         shim for chromium PolicyDiagnostic + DumpWithoutCrashing
 │   │
-│   ├── linux/                       ── seccomp + landlock + user namespaces (LINUXBSD_ENABLED)
-│   │   ├── SCsub
-│   │   ├── sandbox_linux.cpp/.h     SandboxLinux : Sandbox
-│   │   ├── seccomp_filter.cpp/.h    libseccomp allowlist (current "sandboxing.cpp" content + audit)
-│   │   ├── landlock.cpp/.h          Landlock ABI v3+ filesystem restrictions
-│   │   ├── user_namespace.cpp/.h    unshare(CLONE_NEWUSER|...) + uid/gid mapping
-│   │   └── signature_verify.cpp     detached SHA256 signature + embedded pubkey
+│   ├── linux/                       ── seccomp + landlock + capability drop (LINUXBSD_ENABLED)
+│   │   ├── SCsub                    builds the chromium-sandbox/sandbox/linux subset Firefox vendors
+│   │   ├── sandbox_linux.cpp/.h     SandboxLinux : Sandbox; broker fork + execve, env handoff
+│   │   ├── seccomp_policy.cpp/.h    TheGatesRendererPolicy : bpf_dsl::Policy (DSL allowlist)
+│   │   ├── lockdown.cpp/.h          PR_SET_NO_NEW_PRIVS → landlock → capset → seccomp filter
+│   │   └── signature_verify.cpp     SHA-256 via CryptoCore + optional tg_signature_pin compare
 │   │
 │   └── macos/                       ── Seatbelt / Sandbox.framework (MACOS_ENABLED)
 │       ├── SCsub
@@ -144,21 +143,21 @@ RefCounted (Godot)
     │   │           returns the right platform impl at runtime
     │   │
     │   │   ── broker-side API (caller: launcher):
-    │   │       Error verify_binary(const String &p_path)
-    │   │       Error apply_renderer_acl(const String &p_path)
-    │   │       Error spawn_target(const String &p_executable,
-    │   │                          const Vector<String> &p_arguments,
-    │   │                          const Ref<SandboxPolicy> &p_policy,
-    │   │                          Dictionary &r_result)
-    │   │       bool  is_target_running() const
-    │   │       Error kill_target()
+    │   │       Error      verify_binary(const String &p_path)
+    │   │       void       apply_renderer_acl(const String &p_path)
+    │   │       Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
+    │   │                               const String &p_executable,
+    │   │                               const Vector<String> &p_arguments)
+    │   │           returns { "pid": int64 } on success, {} on failure
+    │   │       bool       is_target_running() const
+    │   │       Error      kill_target()
     │   │
     │   │   ── target-side API (caller: renderer Main::start()):
     │   │       Error lower_token()             — fail-closed
     │   │       bool  is_target() const
     │   │
-    │   │   ── shared:
-    │   │       Ref<SandboxDiagnostics> diagnose() const
+    │   │   ── diagnostics live separately (free class, not on Sandbox):
+    │   │       SandboxDiagnostics::to_dict() / to_json_block() / write_verify_file()
     │   │
     │   ├── SandboxWin    (TG_SANDBOX + WINDOWS_ENABLED)
     │   ├── SandboxLinux  (LINUXBSD_ENABLED)
@@ -212,15 +211,16 @@ sandbox = Sandbox.new()
    │       policy.ro_files = [renderer_pck, ...]
    │       policy.child_stdout_log_path = log_path
    │
-   ├─ sandbox.spawn_target(renderer_exe, args, policy, result) ─► returns Error
+   ├─ result = sandbox.spawn_target(policy, renderer_exe, args) ─► Dictionary
    │       Windows: builds chromium TargetPolicy, BrokerServices::SpawnTarget,
    │                SANDBOX_EXPORTS interception, stdout HANDLE inheritance.
    │       macOS:   posix_spawn + sandbox_init in child via wrapper or
    │                sandbox_init_with_parameters with .sb profile.
-   │       Linux:   clone(CLONE_NEWUSER|CLONE_NEWNS|...) + seccomp_load
-   │                + landlock_restrict_self in child before execve.
-   │       result["pid"], result["target_handle"]  (HANDLE on Win, pid_t elsewhere)
-   │       ── on FAIL: log [VERIFY-FAIL spawn_failed code=N], return.
+   │       Linux:   fork + execve; child's lower_token does
+   │                PR_SET_NO_NEW_PRIVS → landlock_restrict_self →
+   │                capset() → seccomp(SECCOMP_SET_MODE_FILTER, TSYNC).
+   │       result["pid"] (int64). Native handle/pidfd kept inside the Sandbox.
+   │       ── on FAIL: returns {} and logs [VERIFY-FAIL spawn_failed code=N].
    │
    ├─ (zmq AF_UNIX sockets in per_gate_dir)             Renderer process boots:
    │  ◄── CommandSync handshake ──────────────────────► Main::setup() / setup2()
@@ -422,7 +422,7 @@ policy.set_rw_dir(per_gate_dir)
 policy.add_ro_file(renderer_pck)
 policy.set_child_stdout_log_path(log_path)
 var result: Dictionary = {}
-err = sandbox.spawn_target(renderer_exe, args, policy, result)
+var result: Dictionary = sandbox.spawn_target(policy, renderer_exe, args)
 ```
 
 `ClassDB.class_exists("Sandbox")` returns true on every build of the fork. The factory returning a null `Ref<>` is how a non-sandbox build (e.g., a `--no-sandbox` developer build) signals "no backend" to GDScript — it does not produce a noisy class-not-registered error.

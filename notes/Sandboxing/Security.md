@@ -21,7 +21,30 @@ under a `USER_LIMITED` token, with:
 - Fail-closed lockdown — if the sandbox cannot engage, the renderer
   aborts rather than continuing unprotected.
 
-macOS and Linux sandboxing is in development.
+On Linux, the renderer process runs with:
+
+- An empty POSIX capability set (`capset()` with zeroed effective +
+  permitted + inheritable masks), so even a compromise back into root-
+  ish code has no superpowers left.
+- A landlock filesystem ruleset (ABI v3 where available) — read/write
+  on the per-gate folder and `/dev/dri`, read-only on the gate's `.pck`
+  plus the system roots needed for shared libs / fonts / GPU
+  enumeration, `EACCES` everywhere else.
+- A seccomp-bpf filter installed via `prctl(PR_SET_NO_NEW_PRIVS)` then
+  `seccomp(SECCOMP_SET_MODE_FILTER, TSYNC)` — about 200 syscalls
+  allowed (read/write/mmap, threading, sockets, ioctl), everything
+  else returns `EPERM`. `ptrace`, `mount`, `kexec_load`, `bpf`,
+  `init_module`, `pivot_root`, `setns`, etc. are rejected.
+- SHA-256 verification of the renderer binary before spawn against
+  `tg_signature_pin` (compile-time constant from the SCons flag).
+- Same fail-closed contract — `lower_token` returning non-OK aborts
+  the renderer.
+
+Same harness modes verify the broker / target flow on both platforms;
+see [[Linux Backend]] for the Linux details and [[Architecture]] for
+the cross-platform shape.
+
+macOS sandboxing is in development.
 
 ## How to think about it as a user
 
@@ -36,11 +59,18 @@ unknown gate.
 
 ## Verifying the sandbox is engaged
 
-The launcher's autotest harness (`pwsh godot/tools/run-sandbox-test.ps1`)
-exercises the full broker / target flow and emits
-`[VERIFY-OK] integrity=untrusted ... broker_xcheck=ok` when the sandbox
-is correctly engaged. Both the broker-side configuration and the
-renderer's self-reported state are cross-checked.
+The launcher's autotest harness exercises the full broker / target
+flow and emits `[VERIFY-OK] integrity=untrusted ... broker_xcheck=ok`
+when the sandbox is correctly engaged. Both the broker-side
+configuration and the renderer's self-reported state are cross-checked.
+
+- Windows: `pwsh godot/tools/run-sandbox-test.ps1`
+- Linux: `bash godot/tools/run-sandbox-test.sh`
+
+Both harnesses support `--mode negative-fail-closed` (forces
+`lower_token` to fail; renderer must abort) and `--mode
+negative-signature` (forces `verify_binary` to fail; broker must
+refuse to spawn).
 
 ## Reporting security issues
 
@@ -52,3 +82,5 @@ report.
 ## Related
 
 - [[Architecture]] — sandbox subsystem internals.
+- [[Linux Backend]] — Linux-specific walkthrough of the four locks
+  (`PR_SET_NO_NEW_PRIVS` → landlock → `capset` → seccomp).
