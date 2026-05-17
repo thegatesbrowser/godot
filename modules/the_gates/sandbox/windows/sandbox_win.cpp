@@ -172,8 +172,12 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	auto allow_dir_recursive = [&](sandbox::FileSemantics sem, const String &p_dir) {
 		const std::wstring root = path_to_wstring(p_dir);
 		static const wchar_t *globs[] = {
-			L"\\*", L"\\*\\*", L"\\*\\*\\*",
-			L"\\*\\*\\*\\*", L"\\*\\*\\*\\*\\*", L"\\*\\*\\*\\*\\*\\*",
+			L"\\*",
+			L"\\*\\*",
+			L"\\*\\*\\*",
+			L"\\*\\*\\*\\*",
+			L"\\*\\*\\*\\*\\*",
+			L"\\*\\*\\*\\*\\*\\*",
 		};
 		for (const wchar_t *suffix : globs) {
 			allow_file(sem, root + suffix);
@@ -272,7 +276,7 @@ void SandboxWin::apply_renderer_acl(const String &p_path) {
 	tg_apply_untrusted_acl(p_path);
 }
 
-Error SandboxWin::verify_binary(const String &p_path) {
+Error SandboxWin::_verify_binary_impl(const String &p_path) {
 	// Negative-test hook: harness forces signature verify to fail to confirm
 	// the launcher refuses to spawn. Never set in production.
 	wchar_t force[8] = { 0 };

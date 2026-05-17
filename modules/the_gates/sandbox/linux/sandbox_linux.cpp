@@ -204,7 +204,7 @@ void SandboxLinux::apply_renderer_acl(const String &p_path) {
 	(void)p_path;
 }
 
-Error SandboxLinux::verify_binary(const String &p_path) {
+Error SandboxLinux::_verify_binary_impl(const String &p_path) {
 #ifdef LINUXBSD_ENABLED
 	const char *force = ::getenv("TG_SIGNATURE_FORCE_FAIL");
 	if (force != nullptr && force[0] == '1') {

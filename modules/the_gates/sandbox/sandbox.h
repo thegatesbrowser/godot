@@ -31,6 +31,8 @@
 #pragma once
 
 #include "core/object/ref_counted.h"
+#include "core/os/thread.h"
+#include "core/variant/callable.h"
 #include "core/variant/dictionary.h"
 
 class SandboxPolicy;
@@ -38,8 +40,19 @@ class SandboxPolicy;
 class Sandbox : public RefCounted {
 	GDCLASS(Sandbox, RefCounted);
 
+	struct VerifyJob;
+	VerifyJob *current_job = nullptr;
+	Thread verify_thread;
+
+	static void _verify_thread_func(void *p_userdata);
+	void _verify_done();
+
 protected:
 	static void _bind_methods();
+
+	// Per-platform synchronous verify. Called from a worker thread by
+	// verify_binary(); see _verify_thread_func. Returns OK / ERR_UNAUTHORIZED.
+	virtual Error _verify_binary_impl(const String &p_path) = 0;
 
 public:
 	// Null Ref<> on builds with no backend (e.g. Windows without tg_sandbox).
@@ -50,8 +63,11 @@ public:
 			const String &p_executable, const Vector<String> &p_arguments) = 0;
 	virtual void apply_renderer_acl(const String &p_path) = 0;
 
-	// Returns ERR_UNAUTHORIZED on any failure (fail-closed).
-	virtual Error verify_binary(const String &p_path) = 0;
+	// Non-blocking. Kicks the hashing / signature check onto a worker thread
+	// and returns a Signal the caller can `await`; the signal fires once with
+	// the verify Error. Returns an empty Signal if another verify is already
+	// in flight on this broker.
+	Signal verify_binary(const String &p_path);
 
 	virtual bool is_target_running() const = 0;
 	virtual Error kill_target() = 0;
@@ -61,5 +77,5 @@ public:
 	virtual bool is_target() const = 0;
 
 	Sandbox() = default;
-	virtual ~Sandbox() = default;
+	virtual ~Sandbox();
 };

@@ -38,12 +38,14 @@ class SandboxLinux : public Sandbox {
 	int64_t target_pid = 0;
 	int target_pidfd = -1;
 
+protected:
+	Error _verify_binary_impl(const String &p_path) override;
+
 public:
 	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
 			const String &p_executable, const Vector<String> &p_arguments) override;
 
 	void apply_renderer_acl(const String &p_path) override;
-	Error verify_binary(const String &p_path) override;
 
 	bool is_target_running() const override;
 	Error kill_target() override;
