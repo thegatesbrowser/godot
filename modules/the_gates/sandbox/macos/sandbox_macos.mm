@@ -98,7 +98,7 @@ void SandboxMacOS::apply_renderer_acl(const String &p_path) {
 	(void)p_path;
 }
 
-Error SandboxMacOS::verify_binary(const String &p_path) {
+Error SandboxMacOS::_verify_binary_impl(const String &p_path) {
 	// TODO Phase 3: SecStaticCodeCheckValidity against tg_signature_pin.
 	(void)p_path;
 	print_line("[VERIFY-BYPASSED] SandboxMacOS: codesign verify not yet implemented");
