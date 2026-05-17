@@ -7,6 +7,11 @@
 
 #include <stdint.h>
 #include <sys/ioctl.h>
+// glibc declares SYS_SECCOMP via an enum inside <bits/siginfo-consts.h> with
+// a trailing `#define SYS_SECCOMP SYS_SECCOMP`; pull it in before the
+// `#ifndef SYS_SECCOMP #define SYS_SECCOMP 1` fallback below to avoid the
+// enum expanding to `1 = 1`.
+#include <signal.h>
 
 #include "build/build_config.h"
 
