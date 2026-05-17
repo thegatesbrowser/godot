@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_linux.h                                                       */
+/*  signature_verify.h                                                    */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,30 +30,11 @@
 
 #pragma once
 
-#include "../sandbox.h"
+#ifdef LINUXBSD_ENABLED
 
-class SandboxLinux : public Sandbox {
-	GDCLASS(SandboxLinux, Sandbox);
+#include "core/error/error_list.h"
+#include "core/string/ustring.h"
 
-	int64_t target_pid = 0;
-	int target_pidfd = -1;
+Error tg_verify_renderer_binary(const String &p_path, const String &p_pin_hex);
 
-public:
-	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
-			const String &p_executable, const Vector<String> &p_arguments) override;
-
-	void apply_renderer_acl(const String &p_path) override;
-	Error verify_binary(const String &p_path) override;
-
-	bool is_target_running() const override;
-	Error kill_target() override;
-
-	Error lower_token() override;
-
-	// Compile-time: TG_RENDERER is defined on the renderer binary, not on
-	// the launcher. Per-binary invariant, matches SandboxWin's runtime nullptr check.
-	bool is_target() const override;
-
-	SandboxLinux() = default;
-	~SandboxLinux();
-};
+#endif // LINUXBSD_ENABLED

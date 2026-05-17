@@ -31,89 +31,70 @@
 #include "sandbox_linux.h"
 
 #include "../sandbox_policy.h"
+
+#include "core/io/file_access.h"
+#include "core/io/json.h"
 #include "core/string/print_string.h"
 
 #ifdef LINUXBSD_ENABLED
 
+#include "lockdown.h"
+#include "signature_verify.h"
+
 #include <errno.h>
 #include <fcntl.h>
-#include <seccomp.h>
+#include <poll.h>
 #include <signal.h>
-#include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-// TODO Phase 3: wire landlock rules from SandboxPolicy.
 
 extern char **environ;
 
 namespace {
 
-Error apply_seccomp_filter() {
-	scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_TRAP);
-	if (ctx == nullptr) {
-		ERR_FAIL_V_MSG(FAILED, "SandboxLinux: seccomp_init failed");
+void write_broker_policy_json(const String &p_log_path, const String &p_executable, pid_t p_pid,
+		const Ref<SandboxPolicy> &p_policy) {
+	Dictionary policy = p_policy->to_dict();
+	policy["executable"] = p_executable;
+	policy["pid"] = (int64_t)p_pid;
+	policy["integrity_target"] = "untrusted";
+	policy["userns_used"] = false;
+	policy["landlock_requested"] = !p_policy->get_rw_dir().is_empty();
+	policy["seccomp_policy"] = "TheGatesRendererPolicy";
+
+	const String json_path = p_log_path.get_base_dir().path_join("broker_policy.json");
+	Ref<FileAccess> file = FileAccess::open(json_path, FileAccess::WRITE);
+	if (file.is_null()) {
+		ERR_PRINT(vformat("SandboxLinux: cannot open %s for write", json_path));
+		return;
 	}
+	file->store_string(JSON::stringify(policy, "\t", false));
+}
 
-	static const int allowed[] = {
-		SCMP_SYS(read), SCMP_SYS(write), SCMP_SYS(close), SCMP_SYS(fstat),
-		SCMP_SYS(lseek), SCMP_SYS(mmap), SCMP_SYS(mprotect), SCMP_SYS(munmap),
-		SCMP_SYS(brk), SCMP_SYS(rt_sigaction), SCMP_SYS(rt_sigprocmask),
-		SCMP_SYS(rt_sigreturn), SCMP_SYS(ioctl), SCMP_SYS(pread64),
-		SCMP_SYS(pwrite64), SCMP_SYS(readv), SCMP_SYS(writev),
-		SCMP_SYS(access), SCMP_SYS(pipe), SCMP_SYS(select), SCMP_SYS(sched_yield),
-		SCMP_SYS(mremap), SCMP_SYS(msync), SCMP_SYS(mincore), SCMP_SYS(madvise),
-		SCMP_SYS(dup), SCMP_SYS(dup2), SCMP_SYS(pause), SCMP_SYS(nanosleep),
-		SCMP_SYS(getitimer), SCMP_SYS(alarm), SCMP_SYS(setitimer),
-		SCMP_SYS(getpid), SCMP_SYS(sendfile), SCMP_SYS(socket), SCMP_SYS(connect),
-		SCMP_SYS(accept), SCMP_SYS(sendto), SCMP_SYS(recvfrom), SCMP_SYS(sendmsg),
-		SCMP_SYS(recvmsg), SCMP_SYS(shutdown), SCMP_SYS(bind), SCMP_SYS(listen),
-		SCMP_SYS(getsockname), SCMP_SYS(getpeername), SCMP_SYS(socketpair),
-		SCMP_SYS(setsockopt), SCMP_SYS(getsockopt), SCMP_SYS(clone),
-		SCMP_SYS(fork), SCMP_SYS(vfork), SCMP_SYS(execve), SCMP_SYS(exit),
-		SCMP_SYS(wait4), SCMP_SYS(kill), SCMP_SYS(uname), SCMP_SYS(fcntl),
-		SCMP_SYS(flock), SCMP_SYS(fsync), SCMP_SYS(fdatasync), SCMP_SYS(truncate),
-		SCMP_SYS(ftruncate), SCMP_SYS(getdents), SCMP_SYS(getcwd), SCMP_SYS(chdir),
-		SCMP_SYS(rename), SCMP_SYS(mkdir), SCMP_SYS(rmdir), SCMP_SYS(creat),
-		SCMP_SYS(link), SCMP_SYS(unlink), SCMP_SYS(symlink), SCMP_SYS(readlink),
-		SCMP_SYS(chmod), SCMP_SYS(fchmod), SCMP_SYS(chown), SCMP_SYS(fchown),
-		SCMP_SYS(umask), SCMP_SYS(gettimeofday), SCMP_SYS(getrlimit),
-		SCMP_SYS(getrusage), SCMP_SYS(sysinfo), SCMP_SYS(times), SCMP_SYS(getuid),
-		SCMP_SYS(getgid), SCMP_SYS(geteuid), SCMP_SYS(getegid), SCMP_SYS(setpgid),
-		SCMP_SYS(getppid), SCMP_SYS(getpgrp), SCMP_SYS(setsid), SCMP_SYS(getgroups),
-		SCMP_SYS(setfsuid), SCMP_SYS(setfsgid), SCMP_SYS(getsid),
-		SCMP_SYS(arch_prctl), SCMP_SYS(futex), SCMP_SYS(set_tid_address),
-		SCMP_SYS(set_robust_list), SCMP_SYS(get_robust_list), SCMP_SYS(exit_group),
-		SCMP_SYS(openat), SCMP_SYS(mkdirat), SCMP_SYS(fstatat64), SCMP_SYS(newfstatat),
-		SCMP_SYS(unlinkat), SCMP_SYS(renameat), SCMP_SYS(linkat), SCMP_SYS(symlinkat),
-		SCMP_SYS(readlinkat), SCMP_SYS(fchmodat), SCMP_SYS(faccessat),
-		SCMP_SYS(pselect6), SCMP_SYS(ppoll), SCMP_SYS(epoll_pwait),
-		SCMP_SYS(prlimit64), SCMP_SYS(getrandom), SCMP_SYS(memfd_create),
-		SCMP_SYS(membarrier), SCMP_SYS(statx), SCMP_SYS(clock_gettime),
-		SCMP_SYS(clock_nanosleep), SCMP_SYS(epoll_create), SCMP_SYS(epoll_create1),
-		SCMP_SYS(epoll_ctl), SCMP_SYS(epoll_wait), SCMP_SYS(eventfd2),
-		SCMP_SYS(timerfd_create), SCMP_SYS(timerfd_settime), SCMP_SYS(timerfd_gettime),
-		SCMP_SYS(prctl), SCMP_SYS(setpriority), SCMP_SYS(getpriority),
-		SCMP_SYS(sched_getaffinity), SCMP_SYS(sched_setaffinity),
-		SCMP_SYS(sched_getparam), SCMP_SYS(sched_setparam),
-	};
-
-	for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); ++i) {
-		if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, allowed[i], 0) != 0) {
-			seccomp_release(ctx);
-			ERR_FAIL_V_MSG(FAILED, vformat("SandboxLinux: seccomp_rule_add failed for syscall %d", allowed[i]));
+void child_exec_after_log_dup(const char *log_path, char *const argv[], char *const envp[]) {
+	if (log_path != nullptr) {
+		const int log_fd = ::open(log_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+		if (log_fd < 0) {
+			static const char msg[] = "tg_spawn: open(log_path) failed\n";
+			const ssize_t w = ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+			(void)w;
+			::_exit(127);
+		}
+		if (::dup2(log_fd, STDOUT_FILENO) < 0 || ::dup2(log_fd, STDERR_FILENO) < 0) {
+			::_exit(127);
+		}
+		if (log_fd != STDOUT_FILENO && log_fd != STDERR_FILENO) {
+			::close(log_fd);
 		}
 	}
-
-	if (seccomp_load(ctx) != 0) {
-		seccomp_release(ctx);
-		ERR_FAIL_V_MSG(FAILED, "SandboxLinux: seccomp_load failed");
-	}
-
-	seccomp_release(ctx);
-	return OK;
+	::execve(argv[0], argv, envp);
+	static const char msg[] = "tg_spawn: execve failed\n";
+	const ssize_t w = ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+	(void)w;
+	::_exit(127);
 }
 
 } // namespace
@@ -126,31 +107,81 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 #ifdef LINUXBSD_ENABLED
 	ERR_FAIL_COND_V_MSG(p_policy.is_null(), result,
 			"SandboxLinux::spawn_target requires a non-null SandboxPolicy");
+	ERR_FAIL_COND_V_MSG(is_target(), result,
+			"SandboxLinux::spawn_target called from a sandbox target process");
 
-	CharString exe_cs = p_executable.utf8();
+	const CharString exe_cs = p_executable.utf8();
 	Vector<CharString> arg_storage;
 	arg_storage.push_back(exe_cs);
 	for (int i = 0; i < p_arguments.size(); ++i) {
 		arg_storage.push_back(p_arguments[i].utf8());
 	}
-
 	Vector<char *> argv;
 	for (int i = 0; i < arg_storage.size(); ++i) {
 		argv.push_back(const_cast<char *>(arg_storage[i].get_data()));
 	}
 	argv.push_back(nullptr);
 
-	setenv("TG_TARGET", "1", 1);
-
-	pid_t pid = 0;
-	if (posix_spawn(&pid, exe_cs.get_data(), nullptr, nullptr, argv.ptrw(), environ) != 0) {
-		unsetenv("TG_TARGET");
-		ERR_FAIL_V_MSG(result, vformat("SandboxLinux::spawn_target: posix_spawn failed errno=%d", errno));
+	// Policy crosses execve as TG_SANDBOX_* env vars; renderer's lower_token
+	// reads them back. Keep names + protocol in sync with notes/Sandboxing/Linux Backend.md.
+	Vector<CharString> env_owned;
+	if (!p_policy->get_rw_dir().is_empty()) {
+		env_owned.push_back(("TG_SANDBOX_RW_DIR=" + p_policy->get_rw_dir()).utf8());
 	}
-	unsetenv("TG_TARGET");
+	const PackedStringArray rw_files = p_policy->get_rw_files();
+	if (rw_files.size() > 0) {
+		env_owned.push_back(("TG_SANDBOX_RW_FILES=" + String("|").join(rw_files)).utf8());
+	}
+	const PackedStringArray ro_files = p_policy->get_ro_files();
+	if (ro_files.size() > 0) {
+		env_owned.push_back(("TG_SANDBOX_RO_FILES=" + String("|").join(ro_files)).utf8());
+	}
+
+	int env_count = 0;
+	for (char **e = environ; *e != nullptr; ++e) {
+		env_count++;
+	}
+	Vector<char *> envp;
+	envp.resize(env_count + env_owned.size() + 1);
+	for (int i = 0; i < env_count; ++i) {
+		envp.write[i] = environ[i];
+	}
+	for (int i = 0; i < env_owned.size(); ++i) {
+		envp.write[env_count + i] = const_cast<char *>(env_owned[i].get_data());
+	}
+	envp.write[env_count + env_owned.size()] = nullptr;
+
+	ERR_FAIL_COND_V_MSG(target_pid != 0 && is_target_running(), result,
+			vformat("SandboxLinux::spawn_target: previous target pid=%d still running; call kill_target() first",
+					(int)target_pid));
+	if (target_pidfd >= 0) {
+		::close(target_pidfd);
+		target_pidfd = -1;
+	}
+	target_pid = 0;
+
+	const CharString log_cs = p_policy->get_child_stdout_log_path().utf8();
+	const char *log_path = log_cs.length() > 0 ? log_cs.get_data() : nullptr;
+
+	const pid_t pid = ::fork();
+	if (pid < 0) {
+		ERR_FAIL_V_MSG(result, vformat("SandboxLinux::spawn_target: fork failed errno=%d", (int)errno));
+	}
+	if (pid == 0) {
+		child_exec_after_log_dup(log_path, argv.ptrw(), envp.ptrw());
+	}
 
 	target_pid = (int64_t)pid;
+	target_pidfd = (int)::syscall(__NR_pidfd_open, pid, 0);
+	if (target_pidfd < 0) {
+		print_line(vformat(
+				"SandboxLinux::spawn_target: pidfd_open failed errno=%d (falling back to pid)", (int)errno));
+	}
 	result["pid"] = target_pid;
+
+	if (log_path != nullptr) {
+		write_broker_policy_json(p_policy->get_child_stdout_log_path(), p_executable, pid, p_policy);
+	}
 #else
 	(void)p_policy;
 	(void)p_executable;
@@ -159,16 +190,37 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	return result;
 }
 
+SandboxLinux::~SandboxLinux() {
+#ifdef LINUXBSD_ENABLED
+	if (target_pidfd >= 0) {
+		::close(target_pidfd);
+		target_pidfd = -1;
+	}
+#endif
+}
+
 void SandboxLinux::apply_renderer_acl(const String &p_path) {
-	// No-op: AF_UNIX socket perms inherit umask + parent dir on POSIX.
+	// Same-uid + landlock handle isolation on Linux; no pre-spawn DACL stamp.
 	(void)p_path;
 }
 
 Error SandboxLinux::verify_binary(const String &p_path) {
-	// TODO Phase 3: SHA-256 against tg_signature_pin.
+#ifdef LINUXBSD_ENABLED
+	const char *force = ::getenv("TG_SIGNATURE_FORCE_FAIL");
+	if (force != nullptr && force[0] == '1') {
+		ERR_FAIL_V_MSG(ERR_UNAUTHORIZED,
+				"SandboxLinux::verify_binary forced to fail by TG_SIGNATURE_FORCE_FAIL=1");
+	}
+
+#ifdef TG_SIGNATURE_PIN
+	return tg_verify_renderer_binary(p_path, String(TG_SIGNATURE_PIN));
+#else
+	return tg_verify_renderer_binary(p_path, String());
+#endif
+#else
 	(void)p_path;
-	print_line("[VERIFY-BYPASSED] SandboxLinux: signature_verify not yet implemented");
 	return OK;
+#endif
 }
 
 bool SandboxLinux::is_target_running() const {
@@ -176,8 +228,18 @@ bool SandboxLinux::is_target_running() const {
 	if (target_pid == 0) {
 		return false;
 	}
-	// TODO Phase 3: pid reuse — kill(pid, 0) lies after the child dies
-	// and the kernel rebinds the pid. Replace with pidfd_open or waitpid.
+	// pidfd avoids PID-reuse races (poll readable once the process exits);
+	// kill(0) is the < 5.3 fallback.
+	if (target_pidfd >= 0) {
+		struct pollfd pfd = { target_pidfd, POLLIN, 0 };
+		const int rc = ::poll(&pfd, 1, 0);
+		if (rc > 0 && (pfd.revents & (POLLIN | POLLHUP)) != 0) {
+			return false;
+		}
+		if (rc == 0) {
+			return true;
+		}
+	}
 	return ::kill((pid_t)target_pid, 0) == 0;
 #else
 	return false;
@@ -190,14 +252,16 @@ Error SandboxLinux::kill_target() {
 		return ERR_DOES_NOT_EXIST;
 	}
 	const pid_t pid = (pid_t)target_pid;
-	if (::kill(pid, SIGTERM) != 0) {
-		ERR_FAIL_V_MSG(FAILED, vformat("SandboxLinux::kill_target: kill failed errno=%d", errno));
+	if (::kill(pid, SIGTERM) != 0 && errno != ESRCH) {
+		ERR_FAIL_V_MSG(FAILED, vformat("SandboxLinux::kill_target: kill failed errno=%d", (int)errno));
 	}
-	// Non-blocking reap; clears target_pid so future probes return false.
-	// If the child hasn't exited yet, init reaps the zombie on launcher exit.
 	int status = 0;
 	::waitpid(pid, &status, WNOHANG);
 	target_pid = 0;
+	if (target_pidfd >= 0) {
+		::close(target_pidfd);
+		target_pidfd = -1;
+	}
 	return OK;
 #else
 	return ERR_UNAVAILABLE;
@@ -206,17 +270,49 @@ Error SandboxLinux::kill_target() {
 
 Error SandboxLinux::lower_token() {
 #ifdef LINUXBSD_ENABLED
-	// TODO Phase 3: landlock + user-namespace before seccomp_load.
-	return apply_seccomp_filter();
+	ERR_FAIL_COND_V_MSG(!is_target(), ERR_UNAVAILABLE,
+			"SandboxLinux: lower_token called from broker (not a sandbox target)");
+
+	const char *force = ::getenv("TG_SANDBOX_FORCE_FAIL");
+	if (force != nullptr && force[0] == '1') {
+		ERR_FAIL_V_MSG(FAILED,
+				"SandboxLinux: lower_token forced to fail by TG_SANDBOX_FORCE_FAIL=1");
+	}
+
+	const char *rw_dir = ::getenv("TG_SANDBOX_RW_DIR");
+	const String rw = (rw_dir != nullptr) ? String::utf8(rw_dir) : String();
+
+	const char *ro = ::getenv("TG_SANDBOX_RO_FILES");
+	Vector<String> ro_files;
+	if (ro != nullptr) {
+		const PackedStringArray split = String::utf8(ro).split("|", false);
+		for (int i = 0; i < split.size(); ++i) {
+			ro_files.push_back(split[i]);
+		}
+	}
+
+	const char *rw_extra = ::getenv("TG_SANDBOX_RW_FILES");
+	Vector<String> rw_files;
+	if (rw_extra != nullptr) {
+		const PackedStringArray split = String::utf8(rw_extra).split("|", false);
+		for (int i = 0; i < split.size(); ++i) {
+			rw_files.push_back(split[i]);
+		}
+	}
+
+	const Error err = tg_apply_lockdown(rw, rw_files, ro_files);
+	if (err == OK) {
+		print_line("SandboxLinux: lockdown engaged (landlock + caps + seccomp)");
+	}
+	return err;
 #else
 	return ERR_UNAVAILABLE;
 #endif
 }
 
 bool SandboxLinux::is_target() const {
-#ifdef LINUXBSD_ENABLED
-	const char *flag = ::getenv("TG_TARGET");
-	return flag != nullptr && flag[0] == '1';
+#ifdef TG_RENDERER
+	return true;
 #else
 	return false;
 #endif

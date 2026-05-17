@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_linux.h                                                       */
+/*  signature_verify.cpp                                                  */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,32 +28,58 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#ifdef LINUXBSD_ENABLED
 
-#include "../sandbox.h"
+#include "signature_verify.h"
 
-class SandboxLinux : public Sandbox {
-	GDCLASS(SandboxLinux, Sandbox);
+#include "core/crypto/crypto_core.h"
+#include "core/io/file_access.h"
+#include "core/string/print_string.h"
 
-	int64_t target_pid = 0;
-	int target_pidfd = -1;
+Error tg_verify_renderer_binary(const String &p_path, const String &p_pin_hex) {
+	Error err = OK;
+	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ, &err);
+	if (file.is_null()) {
+		ERR_FAIL_V_MSG(ERR_UNAUTHORIZED, vformat("SandboxLinux::verify_binary: cannot open %s err=%d", p_path, (int)err));
+	}
 
-public:
-	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
-			const String &p_executable, const Vector<String> &p_arguments) override;
+	CryptoCore::SHA256Context ctx;
+	ctx.start();
 
-	void apply_renderer_acl(const String &p_path) override;
-	Error verify_binary(const String &p_path) override;
+	constexpr int CHUNK = 64 * 1024;
+	Vector<uint8_t> buffer;
+	buffer.resize(CHUNK);
+	while (!file->eof_reached()) {
+		const int64_t n = file->get_buffer(buffer.ptrw(), CHUNK);
+		if (n > 0) {
+			ctx.update(buffer.ptr(), (size_t)n);
+		}
+		if (n < CHUNK) {
+			break;
+		}
+	}
 
-	bool is_target_running() const override;
-	Error kill_target() override;
+	uint8_t digest[32] = { 0 };
+	ctx.finish(digest);
 
-	Error lower_token() override;
+	String hex;
+	for (int i = 0; i < 32; ++i) {
+		hex += String::num_int64(digest[i] >> 4, 16, false);
+		hex += String::num_int64(digest[i] & 0x0F, 16, false);
+	}
 
-	// Compile-time: TG_RENDERER is defined on the renderer binary, not on
-	// the launcher. Per-binary invariant, matches SandboxWin's runtime nullptr check.
-	bool is_target() const override;
+	if (p_pin_hex.is_empty()) {
+		print_line(vformat("[VERIFY-BYPASSED] SandboxLinux: no tg_signature_pin set at build time; observed=%s", hex));
+		return OK;
+	}
 
-	SandboxLinux() = default;
-	~SandboxLinux();
-};
+	// Tolerate copy-paste from sha256sum (whitespace) or openssl-style colons.
+	const String expected = p_pin_hex.strip_edges().replace(":", "").replace(" ", "").to_lower();
+	if (hex != expected) {
+		ERR_FAIL_V_MSG(ERR_UNAUTHORIZED, vformat("SandboxLinux::verify_binary: signature mismatch expected=%s got=%s", expected, hex));
+	}
+	print_line(vformat("SandboxLinux: signature pin matched (%s)", hex));
+	return OK;
+}
+
+#endif // LINUXBSD_ENABLED

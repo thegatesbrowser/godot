@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_linux.h                                                       */
+/*  seccomp_policy.h                                                      */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,30 +30,21 @@
 
 #pragma once
 
-#include "../sandbox.h"
+#ifdef LINUXBSD_ENABLED
 
-class SandboxLinux : public Sandbox {
-	GDCLASS(SandboxLinux, Sandbox);
+#include "sandbox/linux/bpf_dsl/bpf_dsl_forward.h"
+#include "sandbox/linux/bpf_dsl/policy.h"
 
-	int64_t target_pid = 0;
-	int target_pidfd = -1;
-
+// Renderer seccomp filter. Anything not in the EvaluateSyscall switch
+// returns EPERM. Mirrors Firefox's SandboxFilter shape — no SandboxBPF /
+// BaselinePolicy. See notes/Sandboxing/Linux Backend.md for the rationale.
+class TheGatesRendererPolicy : public sandbox::bpf_dsl::Policy {
 public:
-	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
-			const String &p_executable, const Vector<String> &p_arguments) override;
+	TheGatesRendererPolicy();
+	~TheGatesRendererPolicy() override;
 
-	void apply_renderer_acl(const String &p_path) override;
-	Error verify_binary(const String &p_path) override;
-
-	bool is_target_running() const override;
-	Error kill_target() override;
-
-	Error lower_token() override;
-
-	// Compile-time: TG_RENDERER is defined on the renderer binary, not on
-	// the launcher. Per-binary invariant, matches SandboxWin's runtime nullptr check.
-	bool is_target() const override;
-
-	SandboxLinux() = default;
-	~SandboxLinux();
+	sandbox::bpf_dsl::ResultExpr EvaluateSyscall(int sysno) const override;
+	sandbox::bpf_dsl::ResultExpr InvalidSyscall() const override;
 };
+
+#endif // LINUXBSD_ENABLED
