@@ -2,19 +2,37 @@
 
 The renderer is sandboxed so a hostile gate cannot read user files, the
 registry, the network, or other gates' IPC channels. Chromium's
-multi-process sandbox is the model; Windows is implemented, macOS and
-Linux are tracked as upcoming work.
+multi-process sandbox is the model; Windows and Linux are implemented,
+macOS is tracked as upcoming work.
 
-`pwsh godot/tools/run-sandbox-test.ps1` exercises the full broker /
-target flow on Windows and is the canonical "does the sandbox still
-work" signal. Three modes:
+Two harness entry points share the same three modes:
+
+- `pwsh godot/tools/run-sandbox-test.ps1` (Windows)
+- `bash godot/tools/run-sandbox-test.sh` (Linux)
+
+Modes:
 
 - default — happy path, expects `[VERIFY-OK] integrity=untrusted ...
   broker_xcheck=ok`.
-- `-Mode negative-fail-closed` — forces `lower_token` to fail, asserts
-  the renderer aborts (no `[RENDERER-READY]`).
-- `-Mode negative-signature` — forces `verify_binary` to fail, asserts
-  the broker refuses to spawn (no renderer log).
+- `--mode negative-fail-closed` (`-Mode` on Windows) — forces
+  `lower_token` to fail, asserts the renderer aborts (no
+  `[RENDERER-READY]`).
+- `--mode negative-signature` (`-Mode` on Windows) — forces
+  `verify_binary` to fail, asserts the broker refuses to spawn (no
+  renderer log).
+
+On Linux the sandbox layers chromium's bpf_dsl seccomp filter on top of
+landlock (ABI 3 when available) and a `capset()` capability drop, all
+applied from `Sandbox::lower_token`. The vendored chromium subset under
+`thirdparty/chromium-sandbox/sandbox/linux/` mirrors what Firefox's
+`security/sandbox/chromium/moz.yaml` takes — `bpf_dsl/`, the three
+seccomp-bpf engine files, `services/syscall_wrappers.cc`, and the
+`system_headers/` UAPI shims — no `SandboxBPF` wrapper, no
+`BaselinePolicy`. The renderer policy in
+`modules/the_gates/sandbox/linux/seccomp_policy.cpp` is written directly
+against the DSL, then compiled and installed via
+`prctl(PR_SET_SECCOMP)` / `seccomp(SECCOMP_SET_MODE_FILTER, TSYNC)` —
+the same shape as Firefox's `security/sandbox/linux/Sandbox.cpp`.
 
 ## Read in order
 
@@ -23,13 +41,17 @@ work" signal. Three modes:
    phase plan. **Start here.**
 2. [[Security]] — user-facing security overview: what the sandbox
    provides, how to think about gate trust, how to report issues.
-3. [[Future Work]] — Tier 1–5 backlog beyond the rewrite (network
+3. [[Linux Backend]] — plain-language walkthrough of the Linux
+   implementation: the four locks (`PR_SET_NO_NEW_PRIVS` → landlock →
+   `capset` → seccomp), file layout, and how it compares to the
+   Windows backend, Firefox, and Chromium itself.
+4. [[Future Work]] — Tier 1–5 backlog beyond the rewrite (network
    brokering, win32k disable, audio brokering, AppContainer revisit,
    etc.).
-4. [[Reference Material]] — bug numbers, file paths, key quotes from
+5. [[Reference Material]] — bug numbers, file paths, key quotes from
    Chromium / Firefox / Project Zero sources. Use to verify a claim or
    pick up a research thread.
-5. [[GDExtension Loading]] — load-order constraints around `lower_token`
+6. [[GDExtension Loading]] — load-order constraints around `lower_token`
    (GDExtensions must be `LoadLibrary`'d pre-lockdown).
 
 ## Archived
