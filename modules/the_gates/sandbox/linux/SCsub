@@ -215,4 +215,14 @@ env_thirdparty.add_source_files(thirdparty_obj, thirdparty_sources)
 env.modules_sources += module_obj
 env.modules_sources += thirdparty_obj
 
+# BoringSSL SHA-NI assembly. Runtime CPUID gate lives in sha256_file.cpp;
+# pre-Ice-Lake Intel / pre-Zen AMD fall back to Godot's mbedtls SHA-256.
+env_shaext = env_tg.Clone()
+env_shaext.disable_warnings()
+
+shaext_obj = []
+env_shaext.add_source_files(shaext_obj, ["#thirdparty/sha256_shaext/sha256_ni-x86_64.S"])
+env.modules_sources += shaext_obj
+env.Depends(module_obj, shaext_obj)
+
 env.Depends(module_obj, thirdparty_obj)
