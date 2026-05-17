@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  signature_verify.cpp                                                  */
+/*  sha256_file.h                                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,49 +28,15 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifdef LINUXBSD_ENABLED
+#pragma once
 
-#include "signature_verify.h"
+#include "core/error/error_list.h"
+#include "core/string/ustring.h"
 
-#include "sha256_file.h"
+#include <stdint.h>
 
-#include "core/string/print_string.h"
-
-namespace {
-
-String to_hex(const uint8_t p_digest[32]) {
-	String hex;
-	for (int i = 0; i < 32; ++i) {
-		hex += String::num_int64(p_digest[i] >> 4, 16, false);
-		hex += String::num_int64(p_digest[i] & 0x0F, 16, false);
-	}
-	return hex;
-}
-
-} // namespace
-
-Error tg_verify_renderer_binary(const String &p_path, const String &p_pin_hex) {
-	uint8_t digest[32] = { 0 };
-	const Error err = tg_sha256_file(p_path, digest);
-	if (err != OK) {
-		return err;
-	}
-
-	const String observed = to_hex(digest);
-
-	if (p_pin_hex.is_empty()) {
-		print_line(vformat("[VERIFY-BYPASSED] SandboxLinux: no tg_signature_pin set at build time; observed=%s", observed));
-		return OK;
-	}
-
-	// Tolerate copy-paste from sha256sum (whitespace) or openssl-style colons.
-	const String expected = p_pin_hex.strip_edges().replace(":", "").replace(" ", "").to_lower();
-	if (observed != expected) {
-		ERR_FAIL_V_MSG(ERR_UNAUTHORIZED,
-				vformat("SandboxLinux::verify_binary: signature mismatch expected=%s got=%s", expected, observed));
-	}
-	print_line(vformat("SandboxLinux: signature pin matched (%s)", observed));
-	return OK;
-}
-
-#endif // LINUXBSD_ENABLED
+// Hashes the file at p_path into r_digest. Uses the SHA-NI (Intel SHA
+// Extensions) asm path when the CPU advertises support, otherwise falls back
+// to Godot's mbedtls SHA-256 over Godot's FileAccess. Fail-closed on any
+// I/O error.
+Error tg_sha256_file(const String &p_path, uint8_t r_digest[32]);
