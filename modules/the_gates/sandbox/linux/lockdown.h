@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_linux.h                                                       */
+/*  lockdown.h                                                            */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,30 +30,16 @@
 
 #pragma once
 
-#include "../sandbox.h"
+#ifdef LINUXBSD_ENABLED
 
-class SandboxLinux : public Sandbox {
-	GDCLASS(SandboxLinux, Sandbox);
+#include "core/error/error_list.h"
+#include "core/string/ustring.h"
+#include "core/templates/vector.h"
 
-	int64_t target_pid = 0;
-	int target_pidfd = -1;
+// Order: PR_SET_NO_NEW_PRIVS → landlock → capset → seccomp. Fail-closed at
+// each step. Called from Sandbox::lower_token once IPC + Vulkan are up.
+Error tg_apply_lockdown(const String &p_rw_dir,
+		const Vector<String> &p_rw_files,
+		const Vector<String> &p_ro_files);
 
-public:
-	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
-			const String &p_executable, const Vector<String> &p_arguments) override;
-
-	void apply_renderer_acl(const String &p_path) override;
-	Error verify_binary(const String &p_path) override;
-
-	bool is_target_running() const override;
-	Error kill_target() override;
-
-	Error lower_token() override;
-
-	// Compile-time: TG_RENDERER is defined on the renderer binary, not on
-	// the launcher. Per-binary invariant, matches SandboxWin's runtime nullptr check.
-	bool is_target() const override;
-
-	SandboxLinux() = default;
-	~SandboxLinux();
-};
+#endif // LINUXBSD_ENABLED
