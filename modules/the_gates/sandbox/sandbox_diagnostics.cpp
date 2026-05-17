@@ -45,6 +45,18 @@
 #include <winternl.h>
 #endif
 
+#ifdef LINUXBSD_ENABLED
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/landlock.h>
+#include <linux/seccomp.h>
+#include <netinet/in.h>
+#include <sys/prctl.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 namespace {
 
 #ifdef WINDOWS_ENABLED
@@ -223,8 +235,7 @@ Dictionary run_canaries(const String &p_pack_path) {
 
 	// Isolation canary: a sibling gate's folder must NOT be writable.
 	{
-		const String sibling = OS::get_singleton()->get_user_data_dir()
-				.path_join("..").path_join("sandbox-isolation-canary.txt");
+		const String sibling = OS::get_singleton()->get_user_data_dir().path_join("..").path_join("sandbox-isolation-canary.txt");
 		Error err = OK;
 		Ref<FileAccess> f = FileAccess::open(sibling, FileAccess::WRITE, &err);
 		if (f.is_valid()) {
@@ -259,6 +270,207 @@ Dictionary run_canaries(const String &p_pack_path) {
 
 #endif // WINDOWS_ENABLED
 
+#ifdef LINUXBSD_ENABLED
+
+int read_landlock_abi() {
+	const long r = ::syscall(__NR_landlock_create_ruleset,
+			(void *)nullptr, (size_t)0,
+			(uint32_t)LANDLOCK_CREATE_RULESET_VERSION);
+	if (r < 0) {
+		return 0;
+	}
+	return (int)r;
+}
+
+String read_first_line(const char *p_path) {
+	const int fd = ::open(p_path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0) {
+		return String();
+	}
+	char buf[256] = { 0 };
+	const ssize_t n = ::read(fd, buf, sizeof(buf) - 1);
+	::close(fd);
+	if (n <= 0) {
+		return String();
+	}
+	String s = String::utf8(buf, (int)n);
+	const int nl = s.find("\n");
+	if (nl >= 0) {
+		s = s.substr(0, nl);
+	}
+	return s.strip_edges();
+}
+
+// The default `0 0 4294967295` mapping is what every process inherits from
+// the initial user namespace; anything narrower is a real namespace bounded
+// by our broker. See user_namespaces(7).
+bool detect_userns_active() {
+	const String line = read_first_line("/proc/self/uid_map");
+	if (line.is_empty()) {
+		return false;
+	}
+	const PackedStringArray parts = line.split(" ", false);
+	if (parts.size() < 3) {
+		return false;
+	}
+	if (parts[0] == "0" && parts[1] == "0" && parts[2] == "4294967295") {
+		return false;
+	}
+	return true;
+}
+
+// CapEff from /proc/self/status is the effective capability mask; zero means
+// we hold no privileged capabilities. Returns UINT64_MAX on parse failure so
+// the diagnostic shows "unknown" rather than a false-zero.
+uint64_t read_cap_eff() {
+	const int fd = ::open("/proc/self/status", O_RDONLY | O_CLOEXEC);
+	if (fd < 0) {
+		return UINT64_MAX;
+	}
+	char buf[4096] = { 0 };
+	const ssize_t n = ::read(fd, buf, sizeof(buf) - 1);
+	::close(fd);
+	if (n <= 0) {
+		return UINT64_MAX;
+	}
+	String contents = String::utf8(buf, (int)n);
+	const int idx = contents.find("CapEff:\t");
+	if (idx < 0) {
+		return UINT64_MAX;
+	}
+	String hex = contents.substr(idx + 8);
+	const int nl = hex.find("\n");
+	if (nl >= 0) {
+		hex = hex.substr(0, nl);
+	}
+	return (uint64_t)hex.hex_to_int();
+}
+
+String seccomp_mode_label(int p_mode) {
+	switch (p_mode) {
+		case SECCOMP_MODE_DISABLED:
+			return "disabled";
+		case SECCOMP_MODE_STRICT:
+			return "strict";
+		case SECCOMP_MODE_FILTER:
+			return "filter";
+		default:
+			return "unknown";
+	}
+}
+
+Dictionary run_canaries_linux(const String &p_pack_path) {
+	Dictionary out;
+
+	// Filesystem write to a path outside the policy allow-list. /etc/ is
+	// world-readable but writes require root; the landlock + caps drops
+	// should make this fail with EACCES even if we briefly held write rights.
+	{
+		const String path = "/etc/thegates-sandbox-canary";
+		const int fd = ::open(path.utf8().get_data(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+		if (fd >= 0) {
+			out["canary_etc_write"] = "allowed";
+			::close(fd);
+			::unlink(path.utf8().get_data());
+		} else {
+			out["canary_etc_write"] = "blocked";
+			out["canary_etc_write_error"] = (int)errno;
+		}
+	}
+
+	// Home-dir write canary: the sandbox should keep us out of $HOME.
+	{
+		const char *home = ::getenv("HOME");
+		if (home != nullptr && home[0] != '\0') {
+			const String path = String::utf8(home) + "/.thegates-sandbox-canary";
+			const int fd = ::open(path.utf8().get_data(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+			if (fd >= 0) {
+				out["canary_file_write"] = "allowed";
+				::close(fd);
+				::unlink(path.utf8().get_data());
+			} else {
+				out["canary_file_write"] = "blocked";
+				out["canary_file_write_error"] = (int)errno;
+			}
+		} else {
+			out["canary_file_write"] = "skipped_no_home";
+		}
+	}
+
+	// Positive canary: writing under the renderer's user_data_dir must succeed
+	// once the per-gate landlock rule is in place.
+	{
+		Error err = OK;
+		Ref<FileAccess> f = FileAccess::open("user://sandbox-positive-canary.txt", FileAccess::WRITE, &err);
+		if (f.is_valid()) {
+			f->store_string(vformat("pid=%d", (int)::getpid()));
+			f->close();
+			out["canary_user_dir_write"] = "allowed";
+		} else {
+			out["canary_user_dir_write"] = "blocked";
+			out["canary_user_dir_write_error"] = (int)err;
+		}
+	}
+
+	// Isolation canary: a sibling gate's folder must not be writable.
+	{
+		const String sibling = OS::get_singleton()->get_user_data_dir().path_join("..").path_join("sandbox-isolation-canary.txt");
+		Error err = OK;
+		Ref<FileAccess> f = FileAccess::open(sibling, FileAccess::WRITE, &err);
+		if (f.is_valid()) {
+			f->store_string(vformat("pid=%d", (int)::getpid()));
+			f->close();
+			out["canary_sibling_gate_write"] = "allowed";
+		} else {
+			out["canary_sibling_gate_write"] = "blocked";
+			out["canary_sibling_gate_write_error"] = (int)err;
+		}
+	}
+
+	// Network canary: a non-loopback TCP connect must be blocked.
+	{
+		const int sock = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+		if (sock < 0) {
+			out["canary_network"] = "blocked";
+			out["canary_network_error"] = (int)errno;
+		} else {
+			sockaddr_in addr = {};
+			addr.sin_family = AF_INET;
+			addr.sin_port = htons(80);
+			addr.sin_addr.s_addr = htonl(0x08080808u); // 8.8.8.8
+			const int rc = ::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+			if (rc == 0 || (rc < 0 && errno == EINPROGRESS)) {
+				out["canary_network"] = "allowed";
+			} else {
+				out["canary_network"] = "blocked";
+				out["canary_network_error"] = (int)errno;
+			}
+			::close(sock);
+		}
+	}
+
+	// .pck read canary: load() re-opens the pack on every resource fetch.
+	{
+		out["canary_pck_read_path"] = p_pack_path;
+		if (!p_pack_path.is_empty()) {
+			Error err = OK;
+			Ref<FileAccess> f = FileAccess::open(p_pack_path, FileAccess::READ, &err);
+			if (f.is_valid()) {
+				out["canary_pck_read"] = "allowed";
+			} else {
+				out["canary_pck_read"] = "blocked";
+				out["canary_pck_read_error"] = (int)err;
+			}
+		} else {
+			out["canary_pck_read"] = "skipped_no_pck_path";
+		}
+	}
+
+	return out;
+}
+
+#endif // LINUXBSD_ENABLED
+
 } // namespace
 
 Dictionary SandboxDiagnostics::to_dict() const {
@@ -283,6 +495,39 @@ Dictionary SandboxDiagnostics::to_dict() const {
 	diag["mitigations"] = collect_mitigations();
 	diag["alt_desktop"] = current_desktop_name();
 	diag["canaries"] = run_canaries(pack_path);
+#elif defined(LINUXBSD_ENABLED)
+	diag["platform"] = "linux";
+	diag["pid"] = (int)::getpid();
+	diag["build"] = String(
+#ifdef TG_SANDBOX
+			"tg_sandbox=yes"
+#else
+			"tg_sandbox=no"
+#endif
+	);
+
+	const int seccomp_mode = ::prctl(PR_GET_SECCOMP);
+	diag["seccomp_mode"] = seccomp_mode;
+	diag["seccomp"] = seccomp_mode_label(seccomp_mode);
+	diag["no_new_privs"] = ::prctl(PR_GET_NO_NEW_PRIVS) == 1;
+	diag["landlock_abi"] = read_landlock_abi();
+	diag["userns_active"] = detect_userns_active();
+
+	const uint64_t cap_eff = read_cap_eff();
+	if (cap_eff == UINT64_MAX) {
+		diag["cap_eff_hex"] = "unknown";
+		diag["cap_eff_zero"] = false;
+	} else {
+		diag["cap_eff_hex"] = String::num_uint64(cap_eff, 16).pad_zeros(16);
+		diag["cap_eff_zero"] = cap_eff == 0;
+	}
+
+	// Token-equivalent on Linux: untrusted when capabilities are empty and a
+	// seccomp filter is installed (which itself implies PR_SET_NO_NEW_PRIVS
+	// since the kernel rejects PR_SET_SECCOMP without it).
+	diag["integrity"] = (cap_eff == 0 && seccomp_mode == SECCOMP_MODE_FILTER) ? "untrusted" : "low";
+
+	diag["canaries"] = run_canaries_linux(pack_path);
 #else
 	diag["platform"] = "non-windows";
 #endif
