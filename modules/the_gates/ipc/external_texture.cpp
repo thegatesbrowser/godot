@@ -84,6 +84,10 @@ bool TGExternalTexture::send_filehandle(const String &p_path) {
 	uint32_t surfaceID = IOSurfaceGetID(filehandle);
 
 	zmq::socket_t sock(tg_zmq_context(), zmq::socket_type::pair);
+	// One-shot send: explicit LINGER=-1 so close() waits for the I/O thread
+	// to deliver before destroying the queue. Renderer is guaranteed alive —
+	// we just received its send_filehandle request via CommandSync.
+	sock.set(zmq::sockopt::linger, -1);
 	sock.connect(tg_resolve_ipc_address(p_path).utf8().get_data());
 
 	zmq::message_t msg(sizeof(uint32_t));

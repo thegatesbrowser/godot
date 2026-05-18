@@ -156,6 +156,10 @@ void CommandSync::_bind_methods() {
 
 CommandSync::CommandSync(zmq::socket_type type, zmq::socket_type monitor_type) :
 		sock(tg_zmq_context(), type), monitor_sock(tg_zmq_context(), monitor_type) {
+
+	sock.set(zmq::sockopt::linger, 0);
+	monitor_sock.set(zmq::sockopt::linger, 0);
+
 	if (singleton == nullptr) {
 		singleton = this;
 	}

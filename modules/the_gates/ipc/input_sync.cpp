@@ -76,6 +76,8 @@ void InputSync::_bind_methods() {
 
 InputSync::InputSync() :
 		sock(tg_zmq_context(), zmq::socket_type::pair) {
+
+	sock.set(zmq::sockopt::linger, 0);
 }
 
 InputSync::~InputSync() {
