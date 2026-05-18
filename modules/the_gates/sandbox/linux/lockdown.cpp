@@ -290,6 +290,37 @@ Error apply_seccomp() {
 	ERR_FAIL_V_MSG(FAILED, vformat("SandboxLinux: seccomp filter install failed errno=%d", (int)errno));
 }
 
+// Spectre v2 / v4 hardware barriers. Best-effort: older kernels return EINVAL,
+// older CPUs return ENXIO — neither is fatal. Once set with PR_SPEC_DISABLE the
+// flip is permanent on this thread group, so this runs once at lockdown.
+#ifndef PR_SET_SPECULATION_CTRL
+#define PR_SET_SPECULATION_CTRL 53
+#endif
+#ifndef PR_SPEC_STORE_BYPASS
+#define PR_SPEC_STORE_BYPASS 0
+#endif
+#ifndef PR_SPEC_INDIRECT_BRANCH
+#define PR_SPEC_INDIRECT_BRANCH 1
+#endif
+#ifndef PR_SPEC_DISABLE
+#define PR_SPEC_DISABLE (1UL << 2)
+#endif
+
+void apply_speculation_ctrl() {
+	if (::prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_INDIRECT_BRANCH, PR_SPEC_DISABLE, 0, 0) != 0) {
+		const int e = errno;
+		if (e != EINVAL && e != ENXIO && e != ENODEV) {
+			fputs_log(vformat("SandboxLinux: PR_SPEC_INDIRECT_BRANCH disable failed errno=%d", e));
+		}
+	}
+	if (::prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, PR_SPEC_DISABLE, 0, 0) != 0) {
+		const int e = errno;
+		if (e != EINVAL && e != ENXIO && e != ENODEV) {
+			fputs_log(vformat("SandboxLinux: PR_SPEC_STORE_BYPASS disable failed errno=%d", e));
+		}
+	}
+}
+
 } // namespace
 
 Error tg_apply_lockdown(const String &p_rw_dir,
@@ -298,6 +329,8 @@ Error tg_apply_lockdown(const String &p_rw_dir,
 	if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
 		ERR_FAIL_V_MSG(FAILED, vformat("SandboxLinux: PR_SET_NO_NEW_PRIVS failed errno=%d", (int)errno));
 	}
+
+	apply_speculation_ctrl();
 
 	const Error landlock_err = apply_landlock(p_rw_dir, p_rw_files, p_ro_files);
 	if (landlock_err != OK) {
