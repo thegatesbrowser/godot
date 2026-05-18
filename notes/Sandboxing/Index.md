@@ -55,8 +55,10 @@ the same shape as Firefox's `security/sandbox/linux/Sandbox.cpp`.
 6. [[Reference Material]] — bug numbers, file paths, key quotes from
    Chromium / Firefox / Project Zero sources. Use to verify a claim or
    pick up a research thread.
-7. [[GDExtension Loading]] — load-order constraints around `lower_token`
-   (GDExtensions must be `LoadLibrary`'d pre-lockdown).
+7. [[GDExtension Loading]] — how gate-shipped native extensions interact
+   with the post-lockdown sandbox.
+8. [[Bootup Performance]] — where bootup time goes, historical timeline,
+   and known optimization levers.
 
 ## Archived
 
