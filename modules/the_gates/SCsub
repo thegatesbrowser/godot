@@ -112,6 +112,8 @@ elif env["platform"] == "macos":
     env_zmq.Append(
         CPPDEFINES=[
             "ZMQ_HAVE_OSX",
+            ("ZMQ_CACHELINE_SIZE", 64),
+            "ZMQ_HAVE_STRLCPY",
             "ZMQ_IOTHREAD_POLLER_USE_KQUEUE",
             "ZMQ_POLL_BASED_ON_POLL",
             "ZMQ_USE_CV_IMPL_PTHREADS",

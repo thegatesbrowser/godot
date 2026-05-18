@@ -57,6 +57,16 @@
 #include <unistd.h>
 #endif
 
+#ifdef MACOS_ENABLED
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+extern "C" int sandbox_check(pid_t pid, const char *operation, int type, ...);
+#endif
+
 namespace {
 
 #ifdef WINDOWS_ENABLED
@@ -471,6 +481,123 @@ Dictionary run_canaries_linux(const String &p_pack_path) {
 
 #endif // LINUXBSD_ENABLED
 
+#ifdef MACOS_ENABLED
+
+Dictionary run_canaries_macos(const String &p_pack_path) {
+	Dictionary out;
+
+	// /etc/ write should be blocked by both POSIX perms and the sandbox.
+	{
+		const String path = "/etc/thegates-sandbox-canary";
+		const int fd = ::open(path.utf8().get_data(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+		if (fd >= 0) {
+			out["canary_etc_write"] = "allowed";
+			::close(fd);
+			::unlink(path.utf8().get_data());
+		} else {
+			out["canary_etc_write"] = "blocked";
+			out["canary_etc_write_error"] = (int)errno;
+		}
+	}
+
+	// $HOME write should be blocked by the Seatbelt profile.
+	{
+		const char *home = ::getenv("HOME");
+		if (home != nullptr && home[0] != '\0') {
+			const String path = String::utf8(home) + "/.thegates-sandbox-canary";
+			const int fd = ::open(path.utf8().get_data(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+			if (fd >= 0) {
+				out["canary_file_write"] = "allowed";
+				::close(fd);
+				::unlink(path.utf8().get_data());
+			} else {
+				out["canary_file_write"] = "blocked";
+				out["canary_file_write_error"] = (int)errno;
+			}
+		} else {
+			out["canary_file_write"] = "skipped_no_home";
+		}
+	}
+
+	// Positive canary: writing under user:// (the per-gate dir) must succeed.
+	{
+		Error err = OK;
+		Ref<FileAccess> f = FileAccess::open("user://sandbox-positive-canary.txt", FileAccess::WRITE, &err);
+		if (f.is_valid()) {
+			f->store_string(vformat("pid=%d", (int)::getpid()));
+			f->close();
+			out["canary_user_dir_write"] = "allowed";
+		} else {
+			out["canary_user_dir_write"] = "blocked";
+			out["canary_user_dir_write_error"] = (int)err;
+		}
+	}
+
+	// Isolation canary: a sibling gate's folder must not be writable.
+	{
+		const String sibling = OS::get_singleton()->get_user_data_dir().path_join("..").path_join("sandbox-isolation-canary.txt");
+		Error err = OK;
+		Ref<FileAccess> f = FileAccess::open(sibling, FileAccess::WRITE, &err);
+		if (f.is_valid()) {
+			f->store_string(vformat("pid=%d", (int)::getpid()));
+			f->close();
+			out["canary_sibling_gate_write"] = "allowed";
+		} else {
+			out["canary_sibling_gate_write"] = "blocked";
+			out["canary_sibling_gate_write_error"] = (int)err;
+		}
+	}
+
+	// Network canary: a non-loopback TCP connect — blocked when seccomp denies
+	// socket creation, allowed otherwise. Non-blocking so the canary doesn't
+	// stall on real network latency to 8.8.8.8.
+	{
+		const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+		if (sock < 0) {
+			out["canary_network"] = "blocked";
+			out["canary_network_error"] = (int)errno;
+		} else {
+			int flags = ::fcntl(sock, F_GETFL, 0);
+			if (flags >= 0) {
+				::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+			}
+			sockaddr_in addr = {};
+			addr.sin_family = AF_INET;
+			addr.sin_port = htons(80);
+			addr.sin_addr.s_addr = htonl(0x08080808u); // 8.8.8.8
+			const int rc = ::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+			if (rc == 0 || (rc < 0 && errno == EINPROGRESS)) {
+				out["canary_network"] = "allowed";
+			} else {
+				out["canary_network"] = "blocked";
+				out["canary_network_error"] = (int)errno;
+			}
+			::close(sock);
+		}
+	}
+
+	// .pck read canary: load() re-opens the pack on every resource fetch.
+	{
+		out["canary_pck_read_path"] = p_pack_path;
+		if (!p_pack_path.is_empty()) {
+			Error err = OK;
+			Ref<FileAccess> f = FileAccess::open(p_pack_path, FileAccess::READ, &err);
+			if (f.is_valid()) {
+				out["canary_pck_read"] = "allowed";
+			} else {
+				out["canary_pck_read"] = "blocked";
+				out["canary_pck_read_error"] = (int)err;
+			}
+		} else {
+			out["canary_pck_read"] = "skipped_no_pck_path";
+		}
+	}
+
+	return out;
+}
+
+#endif // MACOS_ENABLED
+
 } // namespace
 
 Dictionary SandboxDiagnostics::to_dict() const {
@@ -528,8 +655,24 @@ Dictionary SandboxDiagnostics::to_dict() const {
 	diag["integrity"] = (cap_eff == 0 && seccomp_mode == SECCOMP_MODE_FILTER) ? "untrusted" : "low";
 
 	diag["canaries"] = run_canaries_linux(pack_path);
+#elif defined(MACOS_ENABLED)
+	diag["platform"] = "macos";
+	diag["pid"] = (int)::getpid();
+	diag["build"] = String(
+#ifdef TG_SANDBOX
+			"tg_sandbox=yes"
 #else
-	diag["platform"] = "non-windows";
+			"tg_sandbox=no"
+#endif
+	);
+
+	const bool sandbox_active = ::sandbox_check(::getpid(), nullptr, 0) == 1;
+	diag["sandbox_active"] = sandbox_active;
+	diag["integrity"] = sandbox_active ? "untrusted" : "unsandboxed";
+
+	diag["canaries"] = run_canaries_macos(pack_path);
+#else
+	diag["platform"] = "unknown";
 #endif
 
 	return diag;

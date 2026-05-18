@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_macos.h                                                       */
+/*  signature_verify.h                                                    */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,29 +30,13 @@
 
 #pragma once
 
-#include "../sandbox.h"
+#ifdef MACOS_ENABLED
 
-class SandboxMacOS : public Sandbox {
-	GDCLASS(SandboxMacOS, Sandbox);
+#include "core/error/error_list.h"
+#include "core/string/ustring.h"
 
-	int64_t target_pid = 0;
-	int target_kq = -1;
+// Returns OK if SHA-256(p_path) matches p_pin_hex; returns ERR_UNAUTHORIZED
+// on mismatch. Empty pin returns OK with a [VERIFY-BYPASSED] log.
+Error tg_verify_renderer_binary(const String &p_path, const String &p_pin_hex);
 
-protected:
-	Error _verify_binary_impl(const String &p_path) override;
-
-public:
-	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
-			const String &p_executable, const Vector<String> &p_arguments) override;
-
-	void apply_renderer_acl(const String &p_path) override;
-
-	bool is_target_running() const override;
-	Error kill_target() override;
-
-	Error lower_token() override;
-	bool is_target() const override;
-
-	SandboxMacOS() = default;
-	~SandboxMacOS() override;
-};
+#endif // MACOS_ENABLED

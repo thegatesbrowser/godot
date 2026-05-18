@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  sandbox_macos.h                                                       */
+/*  signature_verify.mm                                                   */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,31 +28,76 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#ifdef MACOS_ENABLED
 
-#include "../sandbox.h"
+#include "signature_verify.h"
 
-class SandboxMacOS : public Sandbox {
-	GDCLASS(SandboxMacOS, Sandbox);
+#include "core/string/print_string.h"
 
-	int64_t target_pid = 0;
-	int target_kq = -1;
+#include <CommonCrypto/CommonDigest.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
-protected:
-	Error _verify_binary_impl(const String &p_path) override;
+namespace {
 
-public:
-	Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
-			const String &p_executable, const Vector<String> &p_arguments) override;
+String to_hex(const uint8_t p_digest[CC_SHA256_DIGEST_LENGTH]) {
+	String hex;
+	for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; ++i) {
+		hex += String::num_int64(p_digest[i] >> 4, 16, false);
+		hex += String::num_int64(p_digest[i] & 0x0F, 16, false);
+	}
+	return hex;
+}
 
-	void apply_renderer_acl(const String &p_path) override;
+Error sha256_file(const String &p_path, uint8_t r_digest[CC_SHA256_DIGEST_LENGTH]) {
+	const CharString utf8_path = p_path.utf8();
+	const int fd = ::open(utf8_path.get_data(), O_RDONLY | O_CLOEXEC);
+	if (fd < 0) {
+		return ERR_FILE_CANT_OPEN;
+	}
+	struct stat st = {};
+	if (::fstat(fd, &st) != 0 || st.st_size <= 0) {
+		::close(fd);
+		return ERR_FILE_CANT_READ;
+	}
 
-	bool is_target_running() const override;
-	Error kill_target() override;
+	void *map = ::mmap(nullptr, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	::close(fd);
+	if (map == MAP_FAILED) {
+		return ERR_FILE_CANT_READ;
+	}
+	CC_SHA256(map, (CC_LONG)st.st_size, r_digest);
+	::munmap(map, (size_t)st.st_size);
+	return OK;
+}
 
-	Error lower_token() override;
-	bool is_target() const override;
+} // namespace
 
-	SandboxMacOS() = default;
-	~SandboxMacOS() override;
-};
+Error tg_verify_renderer_binary(const String &p_path, const String &p_pin_hex) {
+	uint8_t digest[CC_SHA256_DIGEST_LENGTH] = { 0 };
+	const Error err = sha256_file(p_path, digest);
+	if (err != OK) {
+		return err;
+	}
+
+	const String observed = to_hex(digest);
+
+	if (p_pin_hex.is_empty()) {
+		print_line(vformat("[VERIFY-BYPASSED] SandboxMacOS: no tg_signature_pin set at build time; observed=%s", observed));
+		return OK;
+	}
+
+	const String expected = p_pin_hex.strip_edges().replace(":", "").replace(" ", "").to_lower();
+	if (observed != expected) {
+		ERR_FAIL_V_MSG(ERR_UNAUTHORIZED,
+				vformat("SandboxMacOS::verify_binary: signature mismatch expected=%s got=%s", expected, observed));
+	}
+	print_line(vformat("SandboxMacOS: signature pin matched (%s)", observed));
+	return OK;
+}
+
+#endif // MACOS_ENABLED

@@ -45,13 +45,17 @@ the same shape as Firefox's `security/sandbox/linux/Sandbox.cpp`.
    implementation: the four locks (`PR_SET_NO_NEW_PRIVS` → landlock →
    `capset` → seccomp), file layout, and how it compares to the
    Windows backend, Firefox, and Chromium itself.
-4. [[Future Work]] — Tier 1–5 backlog beyond the rewrite (network
+4. [[macOS Backend]] — plain-language walkthrough of the macOS
+   implementation: the one kernel call (`sandbox_init_with_parameters`),
+   how Firefox's `Sandbox.mm` is vendored, and where the renderer-specific
+   addend hooks in.
+5. [[Future Work]] — Tier 1–5 backlog beyond the rewrite (network
    brokering, win32k disable, audio brokering, AppContainer revisit,
    etc.).
-5. [[Reference Material]] — bug numbers, file paths, key quotes from
+6. [[Reference Material]] — bug numbers, file paths, key quotes from
    Chromium / Firefox / Project Zero sources. Use to verify a claim or
    pick up a research thread.
-6. [[GDExtension Loading]] — load-order constraints around `lower_token`
+7. [[GDExtension Loading]] — load-order constraints around `lower_token`
    (GDExtensions must be `LoadLibrary`'d pre-lockdown).
 
 ## Archived

@@ -4,10 +4,40 @@ from misc.utility.scons_hints import *
 Import("env")
 Import("env_tg")
 
-env_macos_sandbox = env_tg.Clone()
+env_macos = env_tg.Clone()
+env_macos.Prepend(
+    CPPPATH=[
+        "#thirdparty/chromium-sandbox/firefox-shim",
+        "#thirdparty/chromium-sandbox/firefox-shim/mac",
+    ]
+)
 
 macos_sandbox_obj = []
-env_macos_sandbox.add_source_files(macos_sandbox_obj, "*.cpp")
-env_macos_sandbox.add_source_files(macos_sandbox_obj, "*.mm")
-
+env_macos.add_source_files(macos_sandbox_obj, "*.cpp")
+env_macos.add_source_files(macos_sandbox_obj, "*.mm")
 env.modules_sources += macos_sandbox_obj
+
+# Vendored Firefox sandbox sources (security/sandbox/mac/, MPL-2.0). Built
+# directly under SCons. See thirdparty/chromium-sandbox/firefox-shim/mac/.
+vendor_dir = "#thirdparty/chromium-sandbox/firefox-shim/"
+firefox_sources = [
+    vendor_dir + "mac/Sandbox.mm",
+]
+
+env_firefox = env_tg.Clone()
+env_firefox.Prepend(
+    CPPPATH=[
+        vendor_dir,
+        vendor_dir + "mac",
+    ]
+)
+env_firefox.disable_warnings()
+
+firefox_obj = []
+env_firefox.add_source_files(firefox_obj, firefox_sources)
+env.modules_sources += firefox_obj
+
+# Apple frameworks the vendored code reaches into.
+env.Append(LINKFLAGS=["-framework", "CoreFoundation"])
+
+env.Depends(macos_sandbox_obj, firefox_obj)

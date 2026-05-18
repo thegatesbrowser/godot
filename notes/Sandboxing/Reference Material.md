@@ -326,7 +326,12 @@ These are things I noticed during research but didn't fully resolve. A future en
 
 6. **Does the renderer's Vulkan loader still need registry access pre-lockdown, or has it cached enough at instance creation time?** If we can defer Vulkan instance creation to before LowerToken (which we already do), the SUBSYS_REGISTRY revert may be unnecessary, and the Chromium fork can retire entirely. Worth a focused test: render with `AllowRegistryAccess` removed and see what breaks.
 
-7. **macOS sandbox path for TheGates.** Linux has seccomp (`Sandboxing` class). Windows has the in-progress effort. macOS is empty. Apple's `sandboxd` / SBPL is the equivalent. Out of scope for the Windows work but worth tracking.
+7. ~~**macOS sandbox path for TheGates.**~~ Shipped on
+   `chromium-sandboxing` branch. `SandboxMacOS` calls Firefox's
+   `mozilla::StartMacSandbox` (vendored from `security/sandbox/mac/`
+   into `thirdparty/chromium-sandbox/firefox-shim/mac/`, stripped to
+   the Content branch). Profile is `SandboxPolicyContent.h` verbatim
+   plus a renderer-specific addend. See [[macOS Backend]].
 
 8. **What's Chromium's `RemoteSandboxBroker`?** Mentioned in Mozilla docs in passing — Firefox uses it for some processes to avoid Chromium IPC layer header conflicts. May be relevant if we hit the same problem.
 
