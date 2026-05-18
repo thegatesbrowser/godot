@@ -37,6 +37,10 @@ On Linux, the renderer process runs with:
   `init_module`, `pivot_root`, `setns`, etc. are rejected.
 - SHA-256 verification of the renderer binary before spawn against
   `tg_signature_pin` (compile-time constant from the SCons flag).
+  Hashing runs on a worker thread; the launcher's main loop keeps
+  rendering while the check happens. The verify gate is still
+  fail-closed — the `Signal` returned by `verify_binary` fires with
+  `ERR_UNAUTHORIZED` on mismatch and the broker refuses to spawn.
 - Same fail-closed contract — `lower_token` returning non-OK aborts
   the renderer.
 

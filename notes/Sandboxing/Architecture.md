@@ -143,7 +143,11 @@ RefCounted (Godot)
     │   │           returns the right platform impl at runtime
     │   │
     │   │   ── broker-side API (caller: launcher):
-    │   │       Error      verify_binary(const String &p_path)
+    │   │       Signal     verify_binary(const String &p_path)
+    │   │           non-blocking. Spawns a worker thread that runs the
+    │   │           platform's _verify_binary_impl, then deferred-emits
+    │   │           verify_finished(err: int). Caller does
+    │   │           `var err: int = await broker.verify_binary(path)`.
     │   │       void       apply_renderer_acl(const String &p_path)
     │   │       Dictionary spawn_target(const Ref<SandboxPolicy> &p_policy,
     │   │                               const String &p_executable,
@@ -194,10 +198,13 @@ Launcher                                              Renderer
 ────────                                              ────────
 sandbox = Sandbox.new()
    │
-   ├─ sandbox.verify_binary(renderer_path) ────► returns Error
+   ├─ err = await sandbox.verify_binary(renderer_path) ────► Signal that emits Error
+   │       Worker thread runs _verify_binary_impl off the main loop; the
+   │       launcher keeps spinning frames during the (potentially-slow) hash.
    │       Windows: WinVerifyTrust + thumbprint pin (compile-time const)
    │       macOS:   SecStaticCodeCheckValidity against embedded cert
-   │       Linux:   sha256 + detached signature against embedded pubkey
+   │       Linux:   SHA-256 vs tg_signature_pin; runtime CPUID picks the
+   │                vendored BoringSSL SHA-NI asm or the mbedtls fallback.
    │       ── on FAIL: refuse to spawn, log [VERIFY-FAIL signature_invalid], return.
    │
    ├─ sandbox.apply_renderer_acl(per_gate_dir) ──► returns Error
@@ -250,7 +257,7 @@ sandbox = Sandbox.new()
    │                                                         poll_monitor() → CRASH_NOW on peer gone
 ```
 
-The three **fail-closed** gates — `verify_binary`, `apply_renderer_acl`, `lower_token` — are non-negotiable. Each returns `Error` and the chain aborts on any non-`OK`. There is no "warn and continue" path, in any build configuration, including dev builds. Optional bypass for development is via build flag only (`tg_signature_verify=no`), and the binary itself logs `[VERIFY-BYPASSED signature_check disabled at build time]` so it is impossible to miss.
+The three **fail-closed** gates — `verify_binary`, `apply_renderer_acl`, `lower_token` — are non-negotiable. The chain aborts on any non-`OK`. `apply_renderer_acl` and `lower_token` return `Error` directly; `verify_binary` returns a `Signal` whose payload is the `Error` (caller does `var err: int = await broker.verify_binary(...)`) so the threading doesn't loosen the gate. There is no "warn and continue" path, in any build configuration, including dev builds. Optional bypass for development is via build flag only (`tg_signature_verify=no`), and the binary itself logs `[VERIFY-BYPASSED signature_check disabled at build time]` so it is impossible to miss.
 
 ## IPC topology
 
@@ -413,7 +420,7 @@ var sandbox: Sandbox = Sandbox.create()
 if sandbox == null:
     push_error("No sandbox backend available on this platform/build.")
     return
-var err: int = sandbox.verify_binary(renderer_path)
+var err: int = await sandbox.verify_binary(renderer_path)
 if err != OK: return
 err = sandbox.apply_renderer_acl(per_gate_dir)
 if err != OK: return
