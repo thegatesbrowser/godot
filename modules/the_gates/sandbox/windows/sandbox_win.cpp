@@ -192,7 +192,13 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 		allow_file(sandbox::FileSemantics::kAllowAny, path_to_wstring(rw_files[i]));
 	}
 	for (int i = 0; i < ro_files.size(); ++i) {
-		allow_file(sandbox::FileSemantics::kAllowReadonly, path_to_wstring(ro_files[i]));
+		const String &ro_path = ro_files[i];
+		const DWORD attrs = ::GetFileAttributesW((const wchar_t *)ro_path.utf16().get_data());
+		if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+			allow_dir_recursive(sandbox::FileSemantics::kAllowReadonly, ro_path);
+		} else {
+			allow_file(sandbox::FileSemantics::kAllowReadonly, path_to_wstring(ro_path));
+		}
 	}
 
 	r = config->SetProcessMitigations(
@@ -200,7 +206,8 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 			sandbox::MITIGATION_DEP_NO_ATL_THUNK |
 			sandbox::MITIGATION_SEHOP |
 			sandbox::MITIGATION_BOTTOM_UP_ASLR |
-			sandbox::MITIGATION_HIGH_ENTROPY_ASLR);
+			sandbox::MITIGATION_HIGH_ENTROPY_ASLR |
+			sandbox::MITIGATION_RESTRICT_INDIRECT_BRANCH_PREDICTION);
 	if (r != sandbox::SBOX_ALL_OK) {
 		ERR_PRINT(vformat("SandboxWin: SetProcessMitigations returned %d", (int)r));
 	}
