@@ -22,6 +22,10 @@
 
 // On Android, `pthread_mutexattr_setprotocol()` is only defined in bionic
 // starting with API level 28. Make it a weak import, so that we can compile.
+// _Nonnull is a clang-only nullability annotation; GCC ignores it.
+#if !defined(__clang__)
+#define _Nonnull
+#endif
 extern "C" {
 int __attribute__((weak)) pthread_mutexattr_setprotocol(
     pthread_mutexattr_t* _Nonnull __attr,

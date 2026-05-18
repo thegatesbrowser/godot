@@ -94,6 +94,7 @@ asm(// We need to be able to tell the kernel exactly where we made a
 #elif defined(__x86_64__)
     ".text\n"
     ".align 16, 0x90\n"
+    ".global SyscallAsm\n"
     ".type SyscallAsm, @function\n"
     "SyscallAsm:.cfi_startproc\n"
     // Check if "%rdi" is negative. If so, do not attempt to make a
