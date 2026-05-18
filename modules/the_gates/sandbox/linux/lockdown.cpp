@@ -49,6 +49,7 @@
 #include <linux/landlock.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
@@ -207,7 +208,8 @@ Error apply_landlock(const String &p_rw_dir, const Vector<String> &p_rw_files,
 	}
 
 	// Read-side roots the SandboxPolicy doesn't enumerate: shared libs, fonts,
-	// nsswitch + /etc/vulkan ICD JSON, /proc + /sys for driver enumeration.
+	// nsswitch + /etc/vulkan ICD JSON, /proc + /sys for driver enumeration,
+	// /etc/alsa + /proc/asound for ALSA fallback.
 	static const char *kSystemReadRoots[] = {
 		"/usr/lib",
 		"/usr/lib64",
@@ -225,12 +227,16 @@ Error apply_landlock(const String &p_rw_dir, const Vector<String> &p_rw_files,
 		"/etc/resolv.conf",
 		"/etc/vulkan",
 		"/etc/glvnd",
+		"/etc/alsa",
+		"/etc/pulse",
 		"/proc/self",
 		"/proc/cpuinfo",
 		"/proc/meminfo",
 		"/proc/sys/kernel",
+		"/proc/asound",
 		"/sys/devices",
 		"/sys/class/drm",
+		"/sys/class/sound",
 		"/sys/dev/char",
 	};
 	for (const char *p : kSystemReadRoots) {
@@ -238,11 +244,25 @@ Error apply_landlock(const String &p_rw_dir, const Vector<String> &p_rw_files,
 	}
 
 	add_path_rule(ruleset_fd, "/dev/dri", rw_rights);
+	add_path_rule(ruleset_fd, "/dev/snd", rw_rights);
+	add_path_rule(ruleset_fd, "/dev/shm", rw_rights);
 	add_path_rule(ruleset_fd, "/tmp", rw_rights);
 	add_path_rule(ruleset_fd, "/dev/null", rw_rights);
 	add_path_rule(ruleset_fd, "/dev/zero", ro_rights);
 	add_path_rule(ruleset_fd, "/dev/urandom", ro_rights);
 	add_path_rule(ruleset_fd, "/dev/random", ro_rights);
+
+	// PulseAudio's socket lives at $XDG_RUNTIME_DIR/pulse/, typically
+	// /run/user/$UID/pulse/. Allow the runtime-dir tree so the renderer
+	// can open the socket and read the auth cookie.
+	{
+		const char *xdg = ::getenv("XDG_RUNTIME_DIR");
+		if (xdg != nullptr && xdg[0] != '\0') {
+			add_path_rule(ruleset_fd, String::utf8(xdg), rw_rights);
+		} else {
+			add_path_rule(ruleset_fd, vformat("/run/user/%d", (int)::getuid()), rw_rights);
+		}
+	}
 
 	if (landlock_restrict_self(ruleset_fd, 0) != 0) {
 		const int saved_errno = errno;
