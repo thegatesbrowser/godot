@@ -69,7 +69,14 @@ Each of these is real engineering. They take what's already a strong sandbox and
 
 ## Tier 4 — cross-platform
 
-- **macOS wiring.** `thirdparty/chromium-sandbox/sandbox/mac/` is vendored (19 files) but no `SandboxingMac` class exists, no broker, no integration into the renderer's startup. macOS uses Apple's Seatbelt / TrustedBSD via SBPL profile strings — completely different model from Windows.
+- ~~**macOS wiring.**~~ Shipped: `SandboxMacOS` calls
+  `mozilla::StartMacSandbox` from a vendored Firefox `Sandbox.mm`
+  (stripped to `MacSandboxType_Content`), which calls
+  `sandbox_init_with_parameters` from libsystem. SBPL is Firefox's
+  `SandboxPolicyContent.h` plus a renderer-specific addend that grants
+  read+write to the per-gate dir. SHA-256 binary verification via
+  CommonCrypto. Harness covers default + negative-fail-closed +
+  negative-signature + multi-gate-cycles. See [[macOS Backend]].
 
 - ~~**Linux deeper seccomp.**~~ Shipped: `SandboxLinux` runs chromium's bpf_dsl seccomp filter on top of landlock + a `capset` capability drop. The vendored subset mirrors Firefox's `moz.yaml` list; the policy + loader live in `modules/the_gates/sandbox/linux/`. User-namespace + chroot are still future work (see Tier 3 brokered-IPC).
 
