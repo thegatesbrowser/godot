@@ -55,12 +55,15 @@ This is the **target state** the `chromium-sandboxing` branch is being rewritten
        ┌─────────────────────────────────────────────────────────────────┐
        │                       Renderer process                          │
        │                                                                 │
-       │  Main::setup()    GDExtensions load, Vulkan instance, .pck open │
-       │  Main::start()    → tg_renderer_boot()                          │
+       │  Main::setup()    → tg_renderer_lockdown(pack_path)             │
+       │                       Sandbox::lower_token()  ◄─── fail-closed  │
+       │                       SandboxDiagnostics dump                   │
+       │                     GDExtensions load   ◄── post-lockdown       │
+       │                     Vulkan instance, .pck open                  │
+       │  Main::start()    autoload + main-scene _init at target-IL      │
+       │                   → tg_renderer_boot(display_server)            │
        │                       binds IPC channels                        │
        │                       imports shared Vulkan texture             │
-       │                       Sandbox::lower_token()  ◄─── fail-closed  │
-       │                       SandboxDiagnostics::dump() (verify.json)  │
        │  Main::iteration() → tg_renderer_loop_iterate()                 │
        │                       per-frame: send commands, recv input,     │
        │                       copy texture, watch IPC peer.             │
@@ -119,9 +122,9 @@ modules/the_gates/
 │       └── signature_verify.mm      SecCodeCheckValidity / SecStaticCode API
 │
 ├── renderer/                        ── module-side homes for what used to be main.cpp #ifdef blocks
-│   ├── SCsub
-│   ├── renderer_boot.cpp/.h         tg_renderer_boot(): IPC bring-up + lower_token + diagnostics
-│   └── renderer_loop.cpp/.h         tg_renderer_loop_iterate(): per-frame sync, ext-texture, monitor
+│   └── renderer_lifecycle.cpp/.h    tg_renderer_lockdown(): lower_token + diagnostics, runs early in Main::setup
+│                                    tg_renderer_boot():     IPC bring-up + shared texture, end of Main::start
+│                                    tg_renderer_loop_iterate(): per-frame sync, ext-texture, monitor
 │
 └── tools/
     └── verify_sandbox/              ── independent cross-check binary
@@ -230,25 +233,29 @@ sandbox = Sandbox.new()
    │       ── on FAIL: returns {} and logs [VERIFY-FAIL spawn_failed code=N].
    │
    ├─ (zmq AF_UNIX sockets in per_gate_dir)             Renderer process boots:
-   │  ◄── CommandSync handshake ──────────────────────► Main::setup() / setup2()
-   │  ◄── ExternalTexture handle dup ─────────────────►   GDExtensions loaded
-   │  ◄── InputSync handshake ────────────────────────►   vkCreateInstance (caches ICDs)
+   │  ◄── CommandSync handshake ──────────────────────► Main::setup()
+   │  ◄── ExternalTexture handle dup ─────────────────►   tg_renderer_lockdown(pack_path):
+   │  ◄── InputSync handshake ────────────────────────►     sandbox.lower_token()
+   │                                                          │ FAIL-CLOSED: CRASH_NOW on Error
+   │                                                          └─ on OK:
+   │                                                             diag = SandboxDiagnostics(pack_path)
+   │                                                             print_line(diag.to_json_block())
+   │                                                             print_line("[RENDERER-LOCKED]")
+   │                                                       GDExtensions loaded     (target-IL)
+   │                                                       initialize_extensions(CORE/SERVERS)
+   │                                                       Vulkan instance + ICDs  (target-IL)
    │                                                       open .pck
    │                                                     Main::start()
-   │                                                       tg_renderer_boot():
-   │                                                         CommandSync::socket_bind()
+   │                                                       autoload + main-scene _init  (target-IL)
+   │                                                       initialize_extensions(SCENE)
+   │                                                       GDExtensionManager::startup()
+   │                                                       tg_renderer_boot(display_server):
+   │                                                         CommandSync construct + bind_commands
+   │                                                         CommandSync::socket_connect()
    │                                                         TGExternalTexture::recv_filehandle()
    │                                                         TGExternalTexture::import()
-   │                                                         InputSync::socket_bind()
-   │                                                         sandbox.lower_token()
-   │                                                            │ FAIL-CLOSED:
-   │                                                            │ on Error, CRASH_NOW
-   │                                                            │ ("sandbox lockdown failed").
-   │                                                            └─ on OK:
-   │                                                               diag = sandbox.diagnose()
-   │                                                               diag.write_verify_file(...)
-   │                                                               print_line(diag.to_json_block())
-   │                                                               print_line("[RENDERER-READY]")
+   │                                                         InputSync::socket_connect()
+   │                                                         print_line("[RENDERER-READY]")
    │
    │  per-frame loop:                                    Main::iteration()
    │    send_command / send_input                          tg_renderer_loop_iterate():
@@ -330,10 +337,10 @@ After the rewrite, here is the **complete list** of upstream-engine files touche
 
 ```
 main/main.cpp
-    +1 line  #include "modules/the_gates/renderer/renderer_boot.h"      (#ifdef TG_RENDERER)
-    +1 line  #include "modules/the_gates/renderer/renderer_loop.h"      (#ifdef TG_RENDERER)
-    +1 line  tg_renderer_boot();                  in Main::start()      (#ifdef TG_RENDERER)
-    +1 line  tg_renderer_loop_iterate();          in Main::iteration()  (#ifdef TG_RENDERER)
+    +1 line  #include "modules/the_gates/renderer/renderer_lifecycle.h" (#ifdef TG_RENDERER)
+    +1 line  tg_renderer_lockdown(tg_main_pack_path);  in Main::setup()      (#ifdef TG_RENDERER)
+    +1 line  tg_renderer_boot(display_server);         in Main::start()      (#ifdef TG_RENDERER)
+    +1 line  tg_renderer_loop_iterate();               in Main::iteration()  (#ifdef TG_RENDERER)
 
 SConstruct
     tg_renderer + tg_sandbox flag definitions     (existing, unchanged)

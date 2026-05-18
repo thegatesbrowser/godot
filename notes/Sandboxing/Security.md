@@ -6,6 +6,12 @@ tags: [sandbox, security]
 
 ## What the renderer sandbox provides
 
+Lockdown engages at the top of `Main::setup`, **before any gate-supplied
+code runs** (GDExtension `DllMain` / `.init_array`, autoload `_init`,
+main-scene `_init`, `_ready`). Native and scripted gate code have the
+same threat boundary: both run inside the sandbox from the first
+instruction.
+
 On Windows, the renderer process runs at `INTEGRITY_LEVEL_UNTRUSTED`
 under a `USER_LIMITED` token, with:
 
@@ -15,7 +21,9 @@ under a `USER_LIMITED` token, with:
 - No registry write access.
 - No child-process creation, no access to the user's real desktop, no
   global window-message hooks.
-- DEP and ASLR enforced.
+- DEP, ASLR (bottom-up + high-entropy), and SEHOP enforced. STIBP
+  (`MITIGATION_RESTRICT_INDIRECT_BRANCH_PREDICTION`) blocks cross-hyperthread
+  branch-target injection (Spectre v2).
 - The renderer binary is signature-verified before spawn (Authenticode
   + pinned thumbprint); a swapped binary fails to launch.
 - Fail-closed lockdown — if the sandbox cannot engage, the renderer
@@ -43,6 +51,10 @@ On Linux, the renderer process runs with:
   `ERR_UNAUTHORIZED` on mismatch and the broker refuses to spawn.
 - Same fail-closed contract — `lower_token` returning non-OK aborts
   the renderer.
+- `PR_SET_SPECULATION_CTRL` with `PR_SPEC_DISABLE` for
+  `PR_SPEC_INDIRECT_BRANCH` (Spectre v2) and `PR_SPEC_STORE_BYPASS`
+  (Spectre v4). Best-effort: older kernels / CPUs return EINVAL / ENXIO
+  and the renderer continues without that hardening layer.
 
 Same harness modes verify the broker / target flow on both platforms;
 see [[Linux Backend]] for the Linux details and [[Architecture]] for

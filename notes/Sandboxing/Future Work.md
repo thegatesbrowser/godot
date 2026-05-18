@@ -28,6 +28,23 @@ here only for grep-traceability.
 - ~~**Drop `OS_Windows::track_external_process`.**~~ Phase 4: replaced
   by `Sandbox::is_target_running` / `kill_target` holding the HANDLE
   inside the SandboxWin instance.
+- ~~**Engage lockdown before gate-supplied code runs.**~~ `tg_renderer_lockdown`
+  now runs at the top of `Main::setup`, before `register_core_extensions`.
+  `Sandbox::lower_token` + `SandboxDiagnostics` dump happen first; GDExtension
+  load, Vulkan init, autoload `_init`, and main-scene `_init` all run at
+  target-IL. `bind_commands` moved to `tg_renderer_boot` (end of
+  `Main::start`) because DisplayServer's constructor sets
+  `Input::set_mouse_mode_func` and would otherwise clobber the IPC hook.
+- ~~**Spectre v2 / v4 mitigations.**~~ Windows:
+  `MITIGATION_RESTRICT_INDIRECT_BRANCH_PREDICTION` (STIBP) in the renderer's
+  process mitigations bitmask. Linux: `prctl(PR_SET_SPECULATION_CTRL, …,
+  PR_SPEC_DISABLE)` for `PR_SPEC_INDIRECT_BRANCH` and `PR_SPEC_STORE_BYPASS`,
+  best-effort. macOS handles speculation system-wide; no per-process knob.
+- ~~**Dir-aware ro on Windows.**~~ `SandboxWin::spawn_target` now detects
+  directory entries in `policy.ro_files` (via `GetFileAttributesW`) and
+  routes them through `allow_dir_recursive` instead of per-file
+  `AllowFileAccess`. Lets the launcher pass the gate's GDExtension libs
+  directory as one policy line.
 
 ## Tier 2 — productionization
 
