@@ -32,26 +32,41 @@ godot/modules/the_gates/
 │
 ├── sandbox/             ── cross-platform sandbox subsystem
 │   ├── SCsub
-│   ├── sandbox.{cpp,h}                Sandbox base + factory create()
+│   ├── sandbox.{cpp,h}                Sandbox base + factory create();
+│   │                                  owns the worker thread + Signal
+│   │                                  for async verify_binary
 │   ├── sandbox_policy.{cpp,h}         SandboxPolicy (RefCounted)
 │   ├── sandbox_diagnostics.{cpp,h}    target-side state reporter
 │   ├── socket_acl.{cpp,h}             tg_apply_untrusted_acl (Win) / no-op
 │   │
-│   └── windows/         ── chromium broker/target (TG_SANDBOX + WIN)
-│       ├── SCsub                      vendored chromium-sandbox build
-│       ├── sandbox_win.{cpp,h}        SandboxWin : Sandbox
-│       ├── broker_delegate.{cpp,h}    BrokerDelegate (chromium hook)
-│       ├── handle_scope.h             RAII HANDLE wrapper
-│       ├── signature_verify.{cpp,h}   WinVerifyTrust + thumbprint pin
-│       └── linker_stubs.cpp           shim for chromium symbols we don't use
+│   ├── windows/         ── chromium broker/target (TG_SANDBOX + WIN)
+│   │   ├── SCsub                      vendored chromium-sandbox build
+│   │   ├── sandbox_win.{cpp,h}        SandboxWin : Sandbox
+│   │   ├── broker_delegate.{cpp,h}    BrokerDelegate (chromium hook)
+│   │   ├── handle_scope.h             RAII HANDLE wrapper
+│   │   ├── signature_verify.{cpp,h}   WinVerifyTrust + thumbprint pin
+│   │   └── linker_stubs.cpp           shim for chromium symbols we don't use
+│   │
+│   ├── linux/           ── seccomp + landlock + caps + SHA-256
+│   │   ├── SCsub
+│   │   ├── sandbox_linux.{cpp,h}      SandboxLinux : Sandbox
+│   │   ├── seccomp_policy.{cpp,h}     TheGatesRendererPolicy : bpf_dsl::Policy
+│   │   ├── lockdown.{cpp,h}           the four kernel locks
+│   │   ├── sha256_file.{cpp,h}        tg_sha256_file: mmap + CPUID,
+│   │   │                              SHA-NI asm or mbedtls fallback
+│   │   └── signature_verify.{cpp,h}   pin compare + hex on the digest
+│   │
+│   └── macos/           ── stub today; Seatbelt + Sec* APIs upcoming
+│       └── sandbox_macos.{h,mm}       SandboxMacOS : Sandbox
 │
 └── renderer/            ── renderer-process lifecycle (TG_RENDERER)
     ├── SCsub
     └── renderer_lifecycle.{cpp,h}     tg_renderer_boot + tg_renderer_loop_iterate
 ```
 
-`sandbox/linux/` and `sandbox/macos/` are placeholders for upcoming
-Phase 3 work; see [[Sandboxing/Architecture]] § Phase plan.
+`sandbox/linux/` is the production backend (see [[Sandboxing/Linux Backend]]).
+`sandbox/macos/` is still a stub — `_verify_binary_impl` and `lower_token`
+are placeholders; tracked in [[Sandboxing/Future Work]].
 
 ## Classes registered with GDScript
 
@@ -97,10 +112,12 @@ var broker: Sandbox = Sandbox.create()   # null if no backend on this platform
 ### Sandbox
 
 - **`Sandbox`** (abstract base): broker-side `spawn_target`,
-  `apply_renderer_acl`, `verify_binary`, `is_target_running`,
-  `kill_target`; target-side `lower_token`, `is_target`. Factory
-  `Sandbox::create()` returns the platform impl (or null Ref<> on
-  builds without a backend).
+  `apply_renderer_acl`, `verify_binary` (non-blocking, returns a
+  `Signal` — caller `await`s; the base class owns the worker `Thread`
+  and dispatches to the platform's `_verify_binary_impl`),
+  `is_target_running`, `kill_target`; target-side `lower_token`,
+  `is_target`. Factory `Sandbox::create()` returns the platform impl
+  (or null Ref<> on builds without a backend). Emits `verify_finished(err: int)`.
 - **`SandboxPolicy`** (RefCounted): cross-platform policy description
   (rw_dir, rw_files, ro_files, child_stdout_log_path, allow_network,
   allow_audio, integrity_floor). Each `Sandbox` impl translates this

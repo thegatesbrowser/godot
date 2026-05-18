@@ -12,8 +12,10 @@ Firefox, and Chromium itself.
 
 The launcher is the trusted "broker." When a gate opens, the launcher
 SHA-256s the renderer binary, forks/execs it, and hands the child the
-per-gate folder path through env vars. The child runs as a regular
-Linux process until it reaches one function (`Sandbox::lower_token`)
+per-gate folder path through env vars. The hashing runs on a worker
+thread so the launcher's main loop keeps spinning (gate switches no
+longer freeze on the old gate's last frame). The child runs as a
+regular Linux process until it reaches one function (`Sandbox::lower_token`)
 which is the point of no return. Past that line the child is locked
 down forever and starts drawing.
 
@@ -25,8 +27,13 @@ Three primitives do the locking — see [[#The locks]] below.
 LAUNCHER (broker)                                RENDERER (target)
 ────────────────                                 ─────────────────
 Sandbox::verify_binary           ──┐
-  SHA-256 vs tg_signature_pin      │  refuses spawn on mismatch
-  or TG_SIGNATURE_FORCE_FAIL=1     │  (signature_verify.cpp)
+  returns Signal; work runs on    │  refuses spawn on mismatch
+  worker thread (sandbox.cpp)     │  (signature_verify.cpp +
+  await emits verify_finished     │   sha256_file.cpp)
+  SHA-256 vs tg_signature_pin     │
+  CPUID picks SHA-NI asm or       │
+  mbedtls fallback                │
+  or TG_SIGNATURE_FORCE_FAIL=1    │
                                    ▼
 Sandbox::spawn_target            ──► fork + execve
   fork()                              │
@@ -155,10 +162,21 @@ kernels that don't support `TSYNC` we fall back to
 ```
 godot/modules/the_gates/sandbox/linux/
 ├── SCsub                  builds the vendored chromium subset + our files
-├── sandbox_linux.{h,cpp}  SandboxLinux : Sandbox; fork+execve, env handoff
+├── sandbox_linux.{h,cpp}  SandboxLinux : Sandbox; fork+execve, env handoff;
+│                          overrides _verify_binary_impl (sync hash, called
+│                          on the worker thread by the base class)
 ├── seccomp_policy.{h,cpp} TheGatesRendererPolicy : bpf_dsl::Policy
 ├── lockdown.{h,cpp}       the four locks above
-└── signature_verify.{h,cpp}  SHA-256 vs tg_signature_pin
+├── sha256_file.{h,cpp}    tg_sha256_file(path, digest) — mmap + CPUID
+│                          dispatch; SHA-NI asm or mbedtls fallback
+└── signature_verify.{h,cpp}  pin compare + hex on the digest from
+                              sha256_file
+
+godot/thirdparty/sha256_shaext/
+├── LICENSE                   BoringSSL OpenSSL/SSLeay (MIT-compatible)
+└── sha256_ni-x86_64.S        sha256_block_data_order_hw extracted from
+                              BoringSSL gen/bcm/sha256-x86_64-linux.S;
+                              other variants (nohw / ssse3 / avx) dropped
 
 godot/thirdparty/chromium-sandbox/
 ├── sandbox/linux/         vendored chromium subset (Firefox-shaped)
