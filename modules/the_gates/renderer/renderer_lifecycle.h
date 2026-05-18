@@ -34,7 +34,8 @@
 
 class DisplayServer;
 
-// Returns false to abort engine startup.
-bool tg_renderer_boot(DisplayServer *p_display_server, const String &p_pack_path);
+void tg_renderer_lockdown(const String &p_pack_path);
+
+bool tg_renderer_boot(DisplayServer *p_display_server);
 
 void tg_renderer_loop_iterate(uint64_t p_ticks_elapsed);

@@ -55,9 +55,25 @@ uint64_t heartbeat = 0;
 
 } // namespace
 
-bool tg_renderer_boot(DisplayServer *p_display_server, const String &p_pack_path) {
+void tg_renderer_lockdown(const String &p_pack_path) {
 	print_line("[RENDERER-START]");
 
+	Ref<Sandbox> sandbox = Sandbox::create();
+	if (sandbox.is_valid() && sandbox->is_target()) {
+		if (sandbox->lower_token() != OK) {
+			CRASH_NOW_MSG("Sandbox::lower_token failed; renderer aborting (sandbox lockdown is required).");
+		}
+	}
+
+	{
+		SandboxDiagnostics diag(p_pack_path);
+		print_line(diag.to_json_block());
+	}
+
+	print_line("[RENDERER-LOCKED]");
+}
+
+bool tg_renderer_boot(DisplayServer *p_display_server) {
 	command_sync = memnew(CommandSync);
 	command_sync->bind_commands();
 	command_sync->socket_connect();
@@ -97,19 +113,6 @@ bool tg_renderer_boot(DisplayServer *p_display_server, const String &p_pack_path
 	input_sync = memnew(InputSync);
 	input_sync->socket_connect();
 
-	{
-		Ref<Sandbox> sandbox = Sandbox::create();
-		if (sandbox.is_valid() && sandbox->is_target()) {
-			if (sandbox->lower_token() != OK) {
-				CRASH_NOW_MSG("Sandbox::lower_token failed; renderer aborting (sandbox lockdown is required).");
-			}
-		}
-	}
-
-	{
-		SandboxDiagnostics diag(p_pack_path);
-		print_line(diag.to_json_block());
-	}
 	print_line("[RENDERER-READY]");
 	return true;
 }

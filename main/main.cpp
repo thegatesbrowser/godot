@@ -2128,6 +2128,11 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 
 	register_early_core_singletons();
 	initialize_modules(MODULE_INITIALIZATION_LEVEL_CORE);
+
+#ifdef TG_RENDERER
+	tg_renderer_lockdown(tg_main_pack_path);
+#endif
+
 	register_core_extensions(gdext_libs_dir); // core extensions must be registered after globals setup and before display
 
 	ResourceUID::get_singleton()->load_from_cache(true); // load UUIDs from cache.
@@ -4696,7 +4701,7 @@ int Main::start() {
 	OS::get_singleton()->benchmark_dump();
 
 #ifdef TG_RENDERER
-	if (!tg_renderer_boot(display_server, tg_main_pack_path)) {
+	if (!tg_renderer_boot(display_server)) {
 		return false;
 	}
 #endif
