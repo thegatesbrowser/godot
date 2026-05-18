@@ -13,8 +13,8 @@ tags: [fork, engine]
    thumbprint pin → `TG_SIGNATURE_PIN`).
 2. **A new module**: `modules/the_gates/` — see [[Custom Godot Module]].
 3. **`#ifdef TG_RENDERER` blocks** in `main/main.cpp` and the per-OS display servers.
-   After the Phase 4 cleanup, `main.cpp` is down to ~3 lines of orchestration calls
-   (`tg_renderer_boot`, `tg_renderer_loop_iterate`) plus the includes that back them.
+   `main.cpp` is down to ~4 lines of orchestration calls (`tg_renderer_lockdown`,
+   `tg_renderer_boot`, `tg_renderer_loop_iterate`) plus the include that backs them.
 4. **New methods on `RenderingDevice`**: `external_texture_create`, `external_texture_import`,
    `screen_copy`. Implemented per-driver (currently Vulkan + Metal). See [[External Texture Sharing]].
 5. Misc upstream contributions merged in (see commit log).
@@ -36,15 +36,21 @@ After Phase 4, `main.cpp` is down to a handful of lines:
 
 ```
 include of modules/the_gates/renderer/renderer_lifecycle.h    (#ifdef TG_RENDERER)
-tg_renderer_boot(display_server, tg_main_pack_path) in setup  (#ifdef TG_RENDERER)
-tg_renderer_loop_iterate(ticks_elapsed) in iteration          (#ifdef TG_RENDERER)
-rendering_driver = "vulkan" hardcode                          (#ifdef TG_RENDERER)
-embed_subwindows force, window_flag_borderless force          (#ifdef TG_RENDERER)
+tg_renderer_lockdown(tg_main_pack_path)  in setup, pre-extensions  (#ifdef TG_RENDERER)
+tg_renderer_boot(display_server)         in start, end of           (#ifdef TG_RENDERER)
+tg_renderer_loop_iterate(ticks_elapsed)  in iteration               (#ifdef TG_RENDERER)
+rendering_driver = "vulkan" hardcode                                (#ifdef TG_RENDERER)
+embed_subwindows force, window_flag_borderless force                (#ifdef TG_RENDERER)
 ```
+
+The `tg_renderer_lockdown` call sits at the top of `Main::setup`, before
+`register_core_extensions`. Sandbox engages before any gate-supplied code runs.
+`tg_renderer_boot` stays at the end of `Main::start` because the shared Vulkan
+texture import needs the rendering device up first.
 
 All IPC + sandbox + diagnostics orchestration lives module-side now (see
 [[Sandboxing/Architecture]] and [[Custom Godot Module]]); the file-scope
-statics that used to anchor it (`ext_texture`, `command_sync`,
+static variables that used to anchor it (`ext_texture`, `command_sync`,
 `input_sync`, `first_frame_sent`, `heartbeat`) are gone from main.cpp.
 
 There are two TG_RENDERER-adjacent changes *outside* any `#ifdef`: two

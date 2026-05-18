@@ -61,7 +61,7 @@ godot/modules/the_gates/
 │
 └── renderer/            ── renderer-process lifecycle (TG_RENDERER)
     ├── SCsub
-    └── renderer_lifecycle.{cpp,h}     tg_renderer_boot + tg_renderer_loop_iterate
+    └── renderer_lifecycle.{cpp,h}     tg_renderer_lockdown + tg_renderer_boot + tg_renderer_loop_iterate
 ```
 
 `sandbox/linux/` is the production backend (see [[Sandboxing/Linux Backend]]).
@@ -135,10 +135,15 @@ var broker: Sandbox = Sandbox.create()   # null if no backend on this platform
 
 ### Renderer lifecycle
 
-- **`tg_renderer_boot`** (free function in `renderer/renderer_lifecycle.cpp`):
-  brings up CommandSync + InputSync + TGExternalTexture, calls
-  `Sandbox::lower_token` (fail-closed), prints the diagnostics block.
-  Called once from `Main::start()` inside `#ifdef TG_RENDERER`.
+- **`tg_renderer_lockdown`** (free function in `renderer/renderer_lifecycle.cpp`):
+  calls `Sandbox::lower_token` (fail-closed via `CRASH_NOW`), then dumps
+  `SandboxDiagnostics`. Called early in `Main::setup()` — before
+  `register_core_extensions` — so GDExtension load, Vulkan init, autoload
+  `_init`, and main-scene `_init` all run at target-IL.
+- **`tg_renderer_boot`** (same file): brings up CommandSync + InputSync +
+  TGExternalTexture and the engine-side hooks (`bind_commands` installs
+  `Input::set_mouse_mode_func` + `SceneTree::send_command_func`). Called at
+  end of `Main::start()` after the display server is constructed.
 - **`tg_renderer_loop_iterate`** (same file): per-frame first-frame
   signal, heartbeat, `copy_from_screen`, `receive_input_events`,
   `CRASH_NOW` on CommandSync peer disconnect. Called from
