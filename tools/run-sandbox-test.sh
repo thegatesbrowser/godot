@@ -79,11 +79,25 @@ REPO_DIR="$(cd "$GODOT_DIR/.." && pwd)"
 APP_DIR="$REPO_DIR/app"
 BIN_DIR="$GODOT_DIR/bin"
 
+case "$(uname -s)" in
+    Darwin) PLATFORM="macos" ;;
+    Linux)  PLATFORM="linux" ;;
+    *)      PLATFORM="linux" ;;
+esac
+
 if [[ -z "$LAUNCHER_BIN" ]]; then
-    LAUNCHER_BIN="$BIN_DIR/godot.linuxbsd.editor.dev.x86_64.llvm"
+    if [[ "$PLATFORM" == "macos" ]]; then
+        LAUNCHER_BIN="$BIN_DIR/godot.macos.editor.dev.$(uname -m)"
+    else
+        LAUNCHER_BIN="$BIN_DIR/godot.linuxbsd.editor.dev.x86_64.llvm"
+    fi
 fi
 if [[ -z "$RENDERER_BIN" ]]; then
-    RENDERER_BIN="$BIN_DIR/godot.linuxbsd.template_debug.dev.renderer.x86_64.llvm"
+    if [[ "$PLATFORM" == "macos" ]]; then
+        RENDERER_BIN="$BIN_DIR/godot.macos.template_debug.dev.renderer.$(uname -m)"
+    else
+        RENDERER_BIN="$BIN_DIR/godot.linuxbsd.template_debug.dev.renderer.x86_64.llvm"
+    fi
 fi
 if [[ -z "$RESULTS_DIR" ]]; then
     RESULTS_DIR="${TMPDIR:-/tmp}/thegates-autotest"
@@ -137,11 +151,20 @@ fi
 [[ -x "$RENDERER_BIN" ]] || emit_fail "renderer_bin_missing path=$RENDERER_BIN" 10
 
 # Kill stale runners.
-pkill -f 'godot.linuxbsd.template_debug.dev.renderer' >/dev/null 2>&1 || true
-pkill -f 'godot.linuxbsd.editor.dev' >/dev/null 2>&1 || true
+if [[ "$PLATFORM" == "macos" ]]; then
+    pkill -f 'godot.macos.template_debug.dev.renderer' >/dev/null 2>&1 || true
+    pkill -f 'godot.macos.editor.dev' >/dev/null 2>&1 || true
+else
+    pkill -f 'godot.linuxbsd.template_debug.dev.renderer' >/dev/null 2>&1 || true
+    pkill -f 'godot.linuxbsd.editor.dev' >/dev/null 2>&1 || true
+fi
 sleep 0.2
 
-USER_DATA_ROOT="${HOME}/.local/share/godot/app_userdata/TheGates"
+if [[ "$PLATFORM" == "macos" ]]; then
+    USER_DATA_ROOT="${HOME}/Library/Application Support/godot/app_userdata/TheGates"
+else
+    USER_DATA_ROOT="${HOME}/.local/share/godot/app_userdata/TheGates"
+fi
 LOGS_ROOT="$USER_DATA_ROOT/logs"
 mkdir -p "$LOGS_ROOT"
 LAUNCH_START_EPOCH=$(date +%s)
@@ -201,16 +224,37 @@ if [[ "$MODE" == "negative-signature" ]]; then
 fi
 
 # Locate this run's renderer log (newest log.txt with mtime >= launch start).
+# macOS find lacks -printf; fall back to stat-based sort.
+newest_log_by_mtime() {
+    local pattern="$1" since="${2:-}"
+    if [[ "$PLATFORM" == "macos" ]]; then
+        if [[ -n "$since" ]]; then
+            find "$LOGS_ROOT" -name log.txt -type f -newermt "@$since" 2>/dev/null \
+                | xargs -I{} stat -f '%m {}' {} 2>/dev/null \
+                | sort -rn | head -n 1 | cut -d' ' -f2-
+        else
+            find "$LOGS_ROOT" -name log.txt -type f 2>/dev/null \
+                | xargs -I{} stat -f '%m {}' {} 2>/dev/null \
+                | sort -rn | head -n 1 | cut -d' ' -f2-
+        fi
+    else
+        if [[ -n "$since" ]]; then
+            find "$LOGS_ROOT" -name log.txt -type f -newermt "@$since" \
+                -printf '%T@ %p\n' 2>/dev/null \
+                | sort -rn | head -n 1 | cut -d' ' -f2-
+        else
+            find "$LOGS_ROOT" -name log.txt -type f \
+                -printf '%T@ %p\n' 2>/dev/null \
+                | sort -rn | head -n 1 | cut -d' ' -f2-
+        fi
+    fi
+}
 RENDERER_LOG_FILE=""
 if [[ -d "$LOGS_ROOT" ]]; then
-    RENDERER_LOG_FILE="$(find "$LOGS_ROOT" -name log.txt -type f -newermt "@$LAUNCH_START_EPOCH" \
-        -printf '%T@ %p\n' 2>/dev/null \
-        | sort -rn | head -n 1 | cut -d' ' -f2-)"
+    RENDERER_LOG_FILE="$(newest_log_by_mtime log.txt "$LAUNCH_START_EPOCH")"
 fi
 if [[ -z "$RENDERER_LOG_FILE" ]]; then
-    RENDERER_LOG_FILE="$(find "$LOGS_ROOT" -name log.txt -type f \
-        -printf '%T@ %p\n' 2>/dev/null \
-        | sort -rn | head -n 1 | cut -d' ' -f2-)"
+    RENDERER_LOG_FILE="$(newest_log_by_mtime log.txt "")"
 fi
 if [[ -z "$RENDERER_LOG_FILE" || ! -f "$RENDERER_LOG_FILE" ]]; then
     emit_fail "renderer_never_started no_log_file" 14
@@ -264,6 +308,32 @@ fi
 EXPECTED_ENTERED=$((CYCLES + 1))
 if [[ "$GATE_ENTERED_COUNT" -lt "$EXPECTED_ENTERED" ]]; then
     emit_fail "multi_gate_cycles_missing expected=$EXPECTED_ENTERED got=$GATE_ENTERED_COUNT" 31
+fi
+
+# Renderer-drew-a-frame check. gate_entered fires when the renderer process is
+# *spawned*; first_frame fires when its IPC reports >2 frames drawn (renderer
+# actually rendered). A spawn without a first_frame is a hang or render-time
+# crash: the symptom users see as "gate didn't load" / "gate crashed popup".
+FIRST_FRAME_COUNT="$(grep -c -- '\[AUTOTEST-FIRST-FRAME\]' "$LAUNCHER_LOG" || true)"
+FIRST_FRAME_COUNT="${FIRST_FRAME_COUNT:-0}"
+if [[ "$FIRST_FRAME_COUNT" -lt "$EXPECTED_ENTERED" ]]; then
+    emit_fail "gate_no_first_frame expected=$EXPECTED_ENTERED entered=$GATE_ENTERED_COUNT first_frame=$FIRST_FRAME_COUNT" 33
+fi
+
+# Crash / hang signals from process_checker.
+NOT_RESPONDING_COUNT="$(grep -c -- '\[AUTOTEST-NOT-RESPONDING\]' "$LAUNCHER_LOG" || true)"
+NOT_RESPONDING_COUNT="${NOT_RESPONDING_COUNT:-0}"
+if [[ "$NOT_RESPONDING_COUNT" -gt 0 ]]; then
+    NR_LINE="$(grep -- '\[AUTOTEST-NOT-RESPONDING\]' "$LAUNCHER_LOG" | head -n 1)"
+    emit_fail "gate_not_responding count=$NOT_RESPONDING_COUNT first=${NR_LINE:0:140}" 34
+fi
+
+# Gate-loader failure (manifest / .pck / libs / renderer missing).
+GATE_ERROR_COUNT="$(grep -c -- '\[AUTOTEST-GATE-ERROR\]' "$LAUNCHER_LOG" || true)"
+GATE_ERROR_COUNT="${GATE_ERROR_COUNT:-0}"
+if [[ "$GATE_ERROR_COUNT" -gt 0 ]]; then
+    GE_LINE="$(grep -- '\[AUTOTEST-GATE-ERROR\]' "$LAUNCHER_LOG" | head -n 1)"
+    emit_fail "gate_error count=$GATE_ERROR_COUNT first=${GE_LINE:0:140}" 35
 fi
 
 # Main-thread responsiveness: process_frame must keep firing during a gate
@@ -356,4 +426,4 @@ if [[ -f "$BROKER_POLICY_PATH" ]]; then
     BROKER_XCHECK="ok"
 fi
 
-emit_pass "integrity=$DIAG_INTEGRITY renderer_pid=$DIAG_PID canary_file=$DIAG_CANARY_FILE canary_user_dir=$DIAG_CANARY_USER canary_sibling=$DIAG_CANARY_SIBLING canary_pck=$DIAG_CANARY_PCK per_gate_files=${PER_GATE_FILES:-?} broker_xcheck=$BROKER_XCHECK build=$DIAG_BUILD launcher_exit=$LAUNCHER_EXIT"
+emit_pass "integrity=$DIAG_INTEGRITY renderer_pid=$DIAG_PID gates_entered=$GATE_ENTERED_COUNT first_frames=$FIRST_FRAME_COUNT canary_file=$DIAG_CANARY_FILE canary_user_dir=$DIAG_CANARY_USER canary_sibling=$DIAG_CANARY_SIBLING canary_pck=$DIAG_CANARY_PCK per_gate_files=${PER_GATE_FILES:-?} broker_xcheck=$BROKER_XCHECK build=$DIAG_BUILD launcher_exit=$LAUNCHER_EXIT"
