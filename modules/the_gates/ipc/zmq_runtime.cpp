@@ -33,21 +33,9 @@
 #include "core/os/os.h"
 #include "thirdparty/cppzmq/zmq.hpp"
 
-// Disable BLOCKY so zmq_ctx_term doesn't wait LINGER on sockets whose peer
-// (the renderer) was SIGKILL'd — the launcher otherwise hangs forever during
-// shutdown when a gate is killed mid-stream (multi-gate teardown path).
-namespace {
-struct TGContext {
-	zmq::context_t ctx;
-	TGContext() {
-		ctx.set(zmq::ctxopt::blocky, 0);
-	}
-};
-} // namespace
-
 zmq::context_t &tg_zmq_context() {
-	static TGContext s_ctx;
-	return s_ctx.ctx;
+	static zmq::context_t s_ctx;
+	return s_ctx;
 }
 
 void tg_zmq_shutdown() {
