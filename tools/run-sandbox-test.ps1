@@ -102,6 +102,14 @@
                               Fewer than expected means the multi-gate IPC
                               path broke (regression of the AF_UNIX rebind
                               bug — see notes/Sandboxing/Architecture.md)
+      gate_no_first_frame     Renderer process spawned (gate_entered) but its
+                              IPC never reported first_frame — gate hung
+                              before drawing or crashed mid-boot.
+      gate_not_responding     process_checker fired not_responding — either a
+                              crash on bootup (3s after spawn) or a heartbeat
+                              timeout (renderer alive but idle).
+      gate_error              gate_loader fired gate_error — manifest /
+                              .pck / libs / renderer-binary missing.
 #>
 
 [CmdletBinding()]
@@ -349,6 +357,32 @@ if ($actualEntered -lt $expectedEntered) {
     Emit-Fail "multi_gate_cycles_missing expected=$expectedEntered got=$actualEntered" 31
 }
 
+# Renderer-drew-a-frame check. gate_entered fires when the renderer process is
+# spawned; first_frame fires when its IPC reports >2 frames drawn. A spawn
+# without a first_frame is a hang or render-time crash — the symptom users see
+# as "gate didn't load" / "gate crashed popup".
+$firstFrameLines = $launcher | Select-String -Pattern "\[AUTOTEST-FIRST-FRAME\]"
+$firstFrameCount = ($firstFrameLines | Measure-Object).Count
+if ($firstFrameCount -lt $expectedEntered) {
+    Emit-Fail "gate_no_first_frame expected=$expectedEntered entered=$actualEntered first_frame=$firstFrameCount" 33
+}
+
+# Crash / hang signals from process_checker.
+$notRespondingLines = $launcher | Select-String -Pattern "\[AUTOTEST-NOT-RESPONDING\]"
+$notRespondingCount = ($notRespondingLines | Measure-Object).Count
+if ($notRespondingCount -gt 0) {
+    $nrFirst = ($notRespondingLines | Select-Object -First 1).Line
+    Emit-Fail "gate_not_responding count=$notRespondingCount first=$($nrFirst.Substring(0, [Math]::Min(140, $nrFirst.Length)))" 34
+}
+
+# Gate-loader failure (manifest / .pck / libs / renderer missing).
+$gateErrorLines = $launcher | Select-String -Pattern "\[AUTOTEST-GATE-ERROR\]"
+$gateErrorCount = ($gateErrorLines | Measure-Object).Count
+if ($gateErrorCount -gt 0) {
+    $geFirst = ($gateErrorLines | Select-Object -First 1).Line
+    Emit-Fail "gate_error count=$gateErrorCount first=$($geFirst.Substring(0, [Math]::Min(140, $geFirst.Length)))" 35
+}
+
 # Did the renderer reach the external-texture import path?
 $rendererExt = $renderer | Select-String -Pattern "TGExternalTexture:" | Select-Object -Last 1
 if (-not $rendererExt -or $rendererExt.LineNumber -lt $rendererStartLine.LineNumber) {
@@ -456,4 +490,4 @@ if (Test-Path $brokerPolicyPath) {
     $brokerCrossCheck = "ok"
 }
 
-Emit-Pass "integrity=$diagIntegrity renderer_pid=$diagPid canary_file=$diagCanaryFile canary_user_dir=$diagCanaryUser canary_sibling=$diagCanarySibling canary_pck=$diagCanaryPck per_gate_files=$perGateFiles broker_xcheck=$brokerCrossCheck build=$diagBuild"
+Emit-Pass "integrity=$diagIntegrity renderer_pid=$diagPid gates_entered=$actualEntered first_frames=$firstFrameCount canary_file=$diagCanaryFile canary_user_dir=$diagCanaryUser canary_sibling=$diagCanarySibling canary_pck=$diagCanaryPck per_gate_files=$perGateFiles broker_xcheck=$brokerCrossCheck build=$diagBuild"
