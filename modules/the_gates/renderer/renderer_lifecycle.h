@@ -34,14 +34,12 @@
 
 class DisplayServer;
 
-void tg_renderer_lockdown(const String &p_pack_path);
+bool tg_renderer_engage(DisplayServer *p_display_server, const String &p_pack_path);
 
-bool tg_renderer_boot(DisplayServer *p_display_server);
+void tg_renderer_boot();
 
 void tg_renderer_loop_iterate(uint64_t p_ticks_elapsed);
 
-// Phase timing for startup investigation. Use the TG_RENDERER_PHASE macro at
-// call sites so they don't need their own #ifdef TG_RENDERER guard.
 void tg_renderer_phase(const char *p_label);
 
 #ifdef TG_RENDERER

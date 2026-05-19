@@ -2126,13 +2126,9 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 
 	register_early_core_singletons();
 	initialize_modules(MODULE_INITIALIZATION_LEVEL_CORE);
-
-#ifdef TG_RENDERER
-	tg_renderer_lockdown(tg_main_pack_path);
-#endif
-
+#ifndef TG_RENDERER
 	register_core_extensions(gdext_libs_dir); // core extensions must be registered after globals setup and before display
-	TG_RENDERER_PHASE("register_core_extensions_done");
+#endif
 
 	ResourceUID::get_singleton()->load_from_cache(true); // load UUIDs from cache.
 
@@ -3159,11 +3155,13 @@ Error Main::setup2(bool p_show_boot_logo) {
 		OS::get_singleton()->benchmark_begin_measure("Servers", "Modules and Extensions");
 
 		initialize_modules(MODULE_INITIALIZATION_LEVEL_SERVERS);
+#ifndef TG_RENDERER
 		GDExtensionManager::get_singleton()->initialize_extensions(GDExtension::INITIALIZATION_LEVEL_SERVERS);
+#endif
 
 		OS::get_singleton()->benchmark_end_measure("Servers", "Modules and Extensions");
 	}
-	TG_RENDERER_PHASE("servers_modules_extensions_done");
+	TG_RENDERER_PHASE("servers_modules_done");
 
 	/* Initialize Input */
 
@@ -3289,7 +3287,9 @@ Error Main::setup2(bool p_show_boot_logo) {
 				memdelete(display_server);
 			}
 
+#ifndef TG_RENDERER
 			GDExtensionManager::get_singleton()->deinitialize_extensions(GDExtension::INITIALIZATION_LEVEL_SERVERS);
+#endif
 			uninitialize_modules(MODULE_INITIALIZATION_LEVEL_SERVERS);
 			unregister_server_types();
 
@@ -3678,6 +3678,14 @@ Error Main::setup2(bool p_show_boot_logo) {
 #ifndef NAVIGATION_2D_DISABLED
 	NavigationServer2DManager::initialize_server();
 #endif // NAVIGATION_2D_DISABLED
+
+#ifdef TG_RENDERER
+	if (!tg_renderer_engage(display_server, tg_main_pack_path)) {
+		return ERR_CANT_CREATE;
+	}
+	register_core_extensions(gdext_libs_dir);
+	GDExtensionManager::get_singleton()->initialize_extensions(GDExtension::INITIALIZATION_LEVEL_SERVERS);
+#endif
 
 	register_scene_types();
 	register_driver_types();
@@ -4707,9 +4715,7 @@ int Main::start() {
 
 	TG_RENDERER_PHASE("main_start_before_boot");
 #ifdef TG_RENDERER
-	if (!tg_renderer_boot(display_server)) {
-		return false;
-	}
+	tg_renderer_boot();
 #endif
 	TG_RENDERER_PHASE("renderer_boot_done");
 
