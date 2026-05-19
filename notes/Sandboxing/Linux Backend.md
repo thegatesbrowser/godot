@@ -40,10 +40,12 @@ Sandbox::spawn_target            ──► fork + execve
   child dup2(log_fd → stdout/err)     │
   child execve(renderer, args, env)   │
   parent pidfd_open()                 ▼
-                                    Main::setup() / setup2()
-                                      GDExtensions, Vulkan, .pck
-                                    Main::start()
-                                      tg_renderer_boot():
+                                    Main::setup()
+                                      initialize_modules(CORE)
+                                    Main::setup2()
+                                      Vulkan instance, RenderingServer,
+                                      audio, translation
+                                      tg_renderer_engage():
                                         CommandSync bind
                                         TGExternalTexture import
                                         InputSync bind
@@ -53,7 +55,12 @@ Sandbox::spawn_target            ──► fork + execve
                                           capset()
                                           seccomp(MODE_FILTER, TSYNC)
                                         SandboxDiagnostics::dump
-                                        [RENDERER-READY]
+                                      register_core_extensions   (target-IL)
+                                      TextServer enum, ThemeDB,
+                                      Navigation, scene types
+                                    Main::start()
+                                      autoload / main-scene _init
+                                      tg_renderer_boot() → [RENDERER-READY]
                                     Main::iteration()
                                       tg_renderer_loop_iterate()
 ```
@@ -292,5 +299,5 @@ Tracked in [[Future Work]]:
   CVEs.
 - [[Future Work]] — the gaps above plus the rest of the Tier 3+
   backlog.
-- [`tools/run-sandbox-test.sh`](../../tools/run-sandbox-test.sh) — the
-  harness that exercises all of the above end-to-end.
+- [`tools/run-sandbox-test.py`](../../tools/run-sandbox-test.py) — the
+  cross-platform harness that exercises all of the above end-to-end.

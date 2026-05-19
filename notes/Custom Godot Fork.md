@@ -13,8 +13,12 @@ tags: [fork, engine]
    thumbprint pin → `TG_SIGNATURE_PIN`).
 2. **A new module**: `modules/the_gates/` — see [[Custom Godot Module]].
 3. **`#ifdef TG_RENDERER` blocks** in `main/main.cpp` and the per-OS display servers.
-   `main.cpp` is down to ~4 lines of orchestration calls (`tg_renderer_lockdown`,
-   `tg_renderer_boot`, `tg_renderer_loop_iterate`) plus the include that backs them.
+   `main.cpp` is down to a small number of orchestration calls
+   (`tg_renderer_engage`, `tg_renderer_boot`, `tg_renderer_loop_iterate`,
+   plus `TG_RENDERER_PHASE` instrumentation markers) plus the include that
+   backs them, and a `#ifdef TG_RENDERER` block that defers the engine's
+   `register_core_extensions` + `initialize_extensions(SERVERS)` until
+   after `tg_renderer_engage`.
 4. **New methods on `RenderingDevice`**: `external_texture_create`, `external_texture_import`,
    `screen_copy`. Implemented per-driver (currently Vulkan + Metal). See [[External Texture Sharing]].
 5. Misc upstream contributions merged in (see commit log).
@@ -32,23 +36,45 @@ godot/SConstruct
 
 ### `main/main.cpp` TG_RENDERER blocks
 
-After Phase 4, `main.cpp` is down to a handful of lines:
+`main.cpp` is down to:
 
 ```
-include of modules/the_gates/renderer/renderer_lifecycle.h    (#ifdef TG_RENDERER)
-tg_renderer_lockdown(tg_main_pack_path)  in setup, pre-extensions  (#ifdef TG_RENDERER)
-tg_renderer_boot(display_server)         in start, end of           (#ifdef TG_RENDERER)
-tg_renderer_loop_iterate(ticks_elapsed)  in iteration               (#ifdef TG_RENDERER)
-rendering_driver = "vulkan" hardcode                                (#ifdef TG_RENDERER)
-embed_subwindows force, window_flag_borderless force                (#ifdef TG_RENDERER)
+include of modules/the_gates/renderer/renderer_lifecycle.h
+
+setup():
+  (no renderer block; launcher's register_core_extensions runs here,
+   #ifndef TG_RENDERER. Renderer defers extension load to setup2 below.)
+
+setup2():
+  tg_renderer_engage(display_server, tg_main_pack_path)               (#ifdef TG_RENDERER)
+    + register_core_extensions(gdext_libs_dir)                        (renderer-only block)
+    + initialize_extensions(SERVERS)
+  ...
+  TG_RENDERER_PHASE markers at servers_modules_done, display_server_create_*,
+  audio_init_*, etc.
+
+start():
+  tg_renderer_boot()                                                  (#ifdef TG_RENDERER)
+  TG_RENDERER_PHASE markers at main_start_entry, main_start_before_boot,
+  renderer_boot_done.
+
+iteration():
+  tg_renderer_loop_iterate(ticks_elapsed)                             (#ifdef TG_RENDERER)
+
+(plus pre-existing renderer-only blocks: rendering_driver = "vulkan" hardcode,
+ embed_subwindows force, window_flag_borderless force.)
 ```
 
-The `tg_renderer_lockdown` call sits at the top of `Main::setup`, before
-`register_core_extensions`. Sandbox engages before any gate-supplied code runs.
-`tg_renderer_boot` stays at the end of `Main::start` because the shared Vulkan
-texture import needs the rendering device up first.
+`tg_renderer_engage` runs in `Main::setup2` right before TextServer
+enumeration. It does the IPC handshake with the launcher, the
+external-texture import, and `Sandbox::lower_token` as one atomic block
+under the unrestricted token. Immediately after it returns, the deferred
+`register_core_extensions` + `initialize_extensions(SERVERS)` calls fire
+— so gate-shipped GDExtensions' `DllMain` / `.init_array` /
+`__mod_init_func` execute at target IL. `tg_renderer_boot` at the end of
+`Main::start` just prints the `[RENDERER-READY]` marker.
 
-All IPC + sandbox + diagnostics orchestration lives module-side now (see
+All IPC + sandbox + diagnostics orchestration lives module-side (see
 [[Sandboxing/Architecture]] and [[Custom Godot Module]]); the file-scope
 static variables that used to anchor it (`ext_texture`, `command_sync`,
 `input_sync`, `first_frame_sent`, `heartbeat`) are gone from main.cpp.

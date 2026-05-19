@@ -19,7 +19,7 @@ Where time goes from `gate_load` (download complete) to `first_frame` received b
 
 **Quick total**:
 ```bash
-bash godot/tools/run-sandbox-test.sh \
+python godot/tools/run-sandbox-test.py \
     --launcher-bin godot/bin/godot.linuxbsd.template_release.x86_64
 grep "Bootup time" /tmp/thegates-autotest/launcher.log
 ```
@@ -28,7 +28,7 @@ The launcher computes `Time.get_ticks_msec() - gate_load_tick` in `analytics_sen
 
 Without `--launcher-bin` the harness uses the dev launcher, which resolves the renderer via `linux_debug` (the editor.dev binary) — not the release symlink — and ends up ~2× slower. The release launcher resolves through `bin/renderer/Renderer-godot_v4.5.x86_64`; point that symlink at the freshest release-renderer build.
 
-**Per-phase inside the renderer**: `tg_renderer_phase(label)` in `modules/the_gates/renderer/renderer_lifecycle.cpp` prints `[PHASE] <label> t=Nms delta=Mms` at every lifecycle boundary (`lockdown_done`, `display_server_create_start/done`, `audio_init_start/done`, `main_start_entry`, `main_start_before_boot`, `renderer_boot_done`). Each delta is the gap from the previous marker; the biggest delta is the slow phase. Three `[ITER]` lines between `[RENDERER-READY]` and the `first_frame` IPC send cover the deferred `_ready` cascade + first three drawn frames.
+**Per-phase inside the renderer**: `tg_renderer_phase(label)` in `modules/the_gates/renderer/renderer_lifecycle.cpp` prints `[PHASE] <label> t=Nms delta=Mms` at every lifecycle boundary. The marker sequence is `servers_modules_done`, `display_server_create_start/done`, `audio_init_start/done`, then engage runs (prints `[RENDERER-START]`, `[LOCKDOWN-ATTEMPT]`, the SANDBOX-DIAG block, `[RENDERER-LOCKED]`, `lockdown_done`), then `main_start_entry`, `main_start_before_boot`, `renderer_boot_done`. Each delta is the gap from the previous marker; the biggest delta is the slow phase. Three `[ITER]` lines between `[RENDERER-READY]` and the `first_frame` IPC send cover the deferred `_ready` cascade + first three drawn frames.
 
 **Isolating sandbox cost from engine cost**:
 ```bash
@@ -36,7 +36,7 @@ python godot/tools/build.py renderer-release --no-sandbox
 python godot/tools/build.py launcher-release --no-sandbox
 ```
 
-With `TG_SANDBOX` undefined the `Sandbox::create()` factory returns null on every platform, the launcher falls back to `OS.execute_with_pipe`, and the renderer's `tg_renderer_lockdown` skips `lower_token` entirely. Canaries report `allowed` (no sandbox = no isolation, so the autotest correctly fails with `canary_sibling_gate_allowed` exit code 24 — that's the runner asserting sandbox is on, not a real regression).
+With `TG_SANDBOX` undefined the `Sandbox::create()` factory returns null on every platform, the launcher falls back to `OS.execute_with_pipe`, and the renderer's `tg_renderer_engage` skips `lower_token` entirely. Canaries report `allowed` (no sandbox = no isolation, so the autotest correctly fails with `canary_sibling_gate_allowed` exit code 24 — that's the runner asserting sandbox is on, not a real regression).
 
 ## What's slow vs v0.24.4
 
@@ -76,25 +76,29 @@ Together: landlock + seccomp are net-positive in combination, even though each l
 ## Phase breakdown (release tutorial.gate, current state)
 
 ```
-[PHASE] lockdown_done                  t=1ms     delta=1ms
-[PHASE] register_core_extensions_done  t=1ms     delta=0ms
-[PHASE] servers_modules_extensions_done t=8ms    delta=7ms
-[PHASE] display_server_create_start    t=19ms    delta=11ms
-[PHASE] display_server_create_done     t=69ms    delta=50ms
-[PHASE] audio_init_start               t=1468ms  delta=1399ms   <- shader cache loading
-[PHASE] audio_init_done                t=1473ms  delta=5ms
-[PHASE] main_start_entry               t=1520ms  delta=47ms
-[PHASE] main_start_before_boot         t=1734ms  delta=214ms
-[RENDERER-READY]                                                (end of tg_renderer_boot)
-[PHASE] renderer_boot_done             t=1754ms  delta=20ms
+[PHASE] servers_modules_done           t=0ms                    (epoch_ms baseline)
+[PHASE] display_server_create_start    t≈10ms    delta≈10ms
+[PHASE] display_server_create_done     t≈60ms    delta≈50ms     <- Vulkan instance + ICDs
+[PHASE] audio_init_start               t≈1.4s    delta≈1.3s     <- shader cache loading
+[PHASE] audio_init_done                t≈1.4s    delta≈5ms
+[RENDERER-START]                                                (engage begins)
+[LOCKDOWN-ATTEMPT]
+SANDBOX-DIAG-BEGIN/END
+[RENDERER-LOCKED]
+[PHASE] lockdown_done                  t≈1.5s    delta≈small    (lockdown is ~1ms itself)
+                                                                (register_core_extensions +
+                                                                 initialize_extensions(SERVERS) +
+                                                                 TextServer enum + ThemeDB + Nav)
+[PHASE] main_start_entry               t≈1.6s
+[PHASE] main_start_before_boot         t≈1.7s
+[RENDERER-READY]                                                (tg_renderer_boot)
+[PHASE] renderer_boot_done             t≈1.7s
 [ITER] 0..2 frames_drawn=1..3                                   (deferred _ready + 3 frames)
-
-Bootup time (launcher-side): 2.317s
 ```
 
-Two phases dominate, **both showing a ~260-270ms sandbox-vs-unsandboxed delta**:
+Two phases dominate, **both showing a ~260-270ms sandbox-vs-unsandboxed delta on Linux**:
 
-- **Shader cache load** (~1.4s with sandbox vs ~1.14s without): Vulkan pipeline-state loader does many file opens during `RenderingServer::init`. Most of the phase is driver-side SPIR-V → GPU ISA compilation, not filter cost.
+- **Shader cache load** (~1.4s with sandbox vs ~1.14s without): Vulkan pipeline-state loader does many file opens during `RenderingServer::init`. Most of the phase is driver-side SPIR-V → GPU ISA compilation, not filter cost. With the engagement model, this phase still runs pre-lockdown — the renderer needs an initialized RenderingServer before the engagement's external-texture import can attach to the shared memory.
 - **Deferred `_ready` cascade + first 3 drawn frames** (~563ms with sandbox vs ~290ms without): scene/resource loading via GDScript + Vulkan command submission. This was the surprise — equally expensive to the shader cache phase, but the older rough estimate attributed nearly all sandbox cost to the shader cache alone.
 
 The deltas come from the *combined* effect of landlock + seccomp (see [[#Split: landlock vs seccomp]]); removing landlock alone doesn't capture them and actually makes things slower because the engine then probes more paths.

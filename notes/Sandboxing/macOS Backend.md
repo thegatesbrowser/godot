@@ -45,10 +45,12 @@ Sandbox::spawn_target            ──► posix_spawn
        TG_SANDBOX_ALLOW_MICROPHONE    │
        env vars                       │
   posix_spawn(...) -> pid             ▼
-  kqueue + EVFILT_PROC NOTE_EXIT    Main::setup() / setup2()
-                                      GDExtensions, Vulkan/MoltenVK, .pck
-                                    Main::start()
-                                      tg_renderer_boot():
+  kqueue + EVFILT_PROC NOTE_EXIT    Main::setup()
+                                      initialize_modules(CORE)
+                                    Main::setup2()
+                                      Vulkan/MoltenVK, RenderingServer,
+                                      audio, translation
+                                      tg_renderer_engage():
                                         CommandSync bind
                                         TGExternalTexture::recv_filehandle
                                           (IOSurfaceLookup)
@@ -62,7 +64,12 @@ Sandbox::spawn_target            ──► posix_spawn
                                               params[], &errbuf)
                                           kernel installs MACF hooks
                                         SandboxDiagnostics::dump
-                                        [RENDERER-READY]
+                                      register_core_extensions    (target-IL)
+                                      TextServer enum, ThemeDB,
+                                      Navigation, scene types
+                                    Main::start()
+                                      autoload / main-scene _init
+                                      tg_renderer_boot() → [RENDERER-READY]
                                     Main::iteration()
                                       tg_renderer_loop_iterate()
 ```
@@ -262,11 +269,12 @@ Where we diverge:
   `tg_renderer_sandbox_addend` extern hook the vendored `Sandbox.mm`
   checks, so the SBPL itself stays verbatim and re-vendor diffs cleanly.
 - **No "early start" mode.** Firefox supports `-sbStartup` to apply the
-  sandbox before main runs. Our renderer's `lower_token` runs at the
-  top of `Main::setup`, before `register_core_extensions` (so
-  GDExtension `__mod_init_func` blocks already execute at locked-down
-  IL) but after dyld has done its work loading the renderer binary's
-  own dependencies. (Same ordering as the Linux backend post-May-18.)
+  sandbox before main runs. Our renderer's `lower_token` runs from
+  `tg_renderer_engage` in `Main::setup2`, before
+  `register_core_extensions` (so GDExtension `__mod_init_func` blocks
+  already execute at locked-down IL) but after dyld has done its work
+  loading the renderer binary's own dependencies. (Same ordering as
+  the Linux backend.)
 - **Env-var fail-closed hooks.** The harness can flip
   `TG_SIGNATURE_FORCE_FAIL` / `TG_SANDBOX_FORCE_FAIL` to verify the
   abort paths. Firefox has internal test hooks but not at this level.
@@ -283,10 +291,10 @@ Chromium code runs), and policy-source-not-in-target-binary.
 
 None of those wins apply to us today: gate-open is interactive (user
 clicks a link), the SBPL compile cost is invisible relative to
-dyld + MoltenVK init (~80–200 ms), our renderer engages lockdown at
-the top of `Main::setup` (matches the Linux backend; MoltenVK then
-initializes inside the sandbox — addend grants the AGX user-clients
-and Metal cache path it needs), and we ship the launcher and renderer
+dyld + MoltenVK init (~80–200 ms), our renderer engages lockdown via
+`tg_renderer_engage` in `Main::setup2` (matches the Linux backend;
+MoltenVK then initializes inside the sandbox — addend grants the AGX
+user-clients and Metal cache path it needs), and we ship the launcher and renderer
 from the same source tree so policy-hiding is moot.
 
 If we ever need to optimize the parallel-spawn critical path for
@@ -318,7 +326,7 @@ Tracked in [[Future Work]]:
   `SandboxPolicy` / `SandboxDiagnostics` contracts everyone implements).
 - [[Linux Backend]] — sibling tour of the Linux mechanism.
 - [[Reference Material]] — Firefox source paths, Chromium bug tracker.
-- [`tools/run-sandbox-test.sh`](../../tools/run-sandbox-test.sh) — the
-  harness that exercises default + negative-fail-closed + negative-signature
-  + multi-gate-cycles end-to-end. The script auto-detects `darwin` vs
-  `linux` and resolves binary names + log paths accordingly.
+- [`tools/run-sandbox-test.py`](../../tools/run-sandbox-test.py) — the
+  cross-platform harness that exercises default + negative-fail-closed +
+  negative-signature + multi-gate-cycles end-to-end. Auto-detects the
+  running platform and resolves binary names + log paths accordingly.
