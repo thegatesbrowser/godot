@@ -39,6 +39,7 @@
 #ifdef MACOS_ENABLED
 
 #include "Sandbox.h"
+#include "seatbelt_profile.h"
 #include "signature_verify.h"
 
 #include <errno.h>
@@ -64,18 +65,6 @@ extern "C" int _NSGetExecutablePath(char *, uint32_t *);
 extern "C" const char *tg_renderer_sandbox_addend = nullptr;
 
 namespace {
-
-// TODO Network is open today; a Chromium-style brokered channel (renderer
-// asks launcher to make a request, launcher checks an allowlist, returns the
-// bytes) is the target end state. See notes/Sandboxing/Future Work.md.
-const char kRendererAddend[] = R"SANDBOX_LITERAL(
-  ; TheGates renderer needs full read+write under its per-gate user-data dir.
-  ; profileDir / hasProfileDir are defined at the top of SandboxPolicyContent.
-  (if (string=? hasProfileDir "TRUE")
-    (allow file-read* file-write*
-      (subpath profileDir)))
-  (allow network*)
-)SANDBOX_LITERAL";
 
 void write_broker_policy_json(const String &p_log_path, const String &p_executable, pid_t p_pid,
 		const Ref<SandboxPolicy> &p_policy) {
@@ -155,6 +144,8 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 		env_owned.push_back(("TG_SANDBOX_RO_FILES=" + String("|").join(ro_files)).utf8());
 	}
 	env_owned.push_back(("TG_SANDBOX_APP_PATH=" + p_executable).utf8());
+	env_owned.push_back(String(p_policy->is_audio_allowed() ? "TG_SANDBOX_ALLOW_AUDIO=1" : "TG_SANDBOX_ALLOW_AUDIO=0").utf8());
+	env_owned.push_back(String(p_policy->is_microphone_allowed() ? "TG_SANDBOX_ALLOW_MICROPHONE=1" : "TG_SANDBOX_ALLOW_MICROPHONE=0").utf8());
 
 	int env_count = 0;
 	for (char **e = environ; *e != nullptr; ++e) {
@@ -323,12 +314,18 @@ Error SandboxMacOS::lower_token() {
 	}
 
 	const PackedStringArray ro_files = split_pipe(::getenv("TG_SANDBOX_RO_FILES"));
+	const char *allow_audio_env = ::getenv("TG_SANDBOX_ALLOW_AUDIO");
+	const bool allow_audio = allow_audio_env != nullptr && allow_audio_env[0] == '1';
+	const char *allow_mic_env = ::getenv("TG_SANDBOX_ALLOW_MICROPHONE");
+	const bool allow_microphone = allow_mic_env != nullptr && allow_mic_env[0] == '1';
 
 	MacSandboxInfo info;
 	info.type = MacSandboxType_Content;
 	info.level = 3;
 	info.hasFilePrivileges = false;
 	info.hasSandboxedProfile = !rw_dir.is_empty();
+	// hasAudio=true would pull in Firefox's audio addend which unconditionally
+	// includes (allow device-microphone). We build audio/mic rules ourselves.
 	info.hasAudio = false;
 	info.hasWindowServer = true;
 	info.shouldLog = ::getenv("TG_SANDBOX_LOG_SBPL") != nullptr;
@@ -347,7 +344,11 @@ Error SandboxMacOS::lower_token() {
 		info.testingReadPath4 = std::string(ro_files[3].utf8().get_data());
 	}
 
-	tg_renderer_sandbox_addend = kRendererAddend;
+	// addend_utf8 must outlive StartMacSandbox: the extern hook holds a
+	// raw const char* that the call reads synchronously.
+	const String addend = tg_build_seatbelt_addend(allow_audio, allow_microphone);
+	const CharString addend_utf8 = addend.utf8();
+	tg_renderer_sandbox_addend = addend_utf8.get_data();
 	std::string err_msg;
 	const bool ok = mozilla::StartMacSandbox(info, err_msg);
 	tg_renderer_sandbox_addend = nullptr;

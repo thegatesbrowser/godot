@@ -70,51 +70,93 @@ before lockdown affects it. Should Just Work. If not, check that
 `MITIGATION_DYNAMIC_CODE_DISABLE` is NOT set (it blocks JIT and some
 audio codecs use JIT).
 
-## macOS — what to do
+## macOS — done (2026-05-18)
 
-### Build + harness
-
-macOS work was pending push at session end. Once pushed:
+All four harness modes green on Apple M1 / macOS 26.4 dev build:
 
 ```bash
 cd godot
 python tools/build.py launcher
 python tools/build.py renderer
-bash tools/run-sandbox-test.sh
-bash tools/run-sandbox-test.sh --mode negative-fail-closed
-bash tools/run-sandbox-test.sh --mode negative-signature
-bash tools/run-sandbox-test.sh --gate-url https://thegates.io/worlds/world.gate
+bash tools/run-sandbox-test.sh                                              # default
+bash tools/run-sandbox-test.sh --mode negative-fail-closed                  # ✅
+bash tools/run-sandbox-test.sh --mode negative-signature                    # ✅
+bash tools/run-sandbox-test.sh --gate-url https://thegates.io/worlds/world.gate  # ✅
 ```
 
-### What to look for
+Dev bootup: 6.06s tutorial / 8.49s world. Recorded in
+[[Bootup Performance]].
 
-- **Seatbelt profile applied.** The vendored Firefox `Sandbox.mm` in
-  `modules/the_gates/sandbox/macos/` is the entry point. `verify.json`
-  should show `sandbox_active=1`.
-- **GDExtension load post-lockdown.** `dlopen` of the gate's `.dylib`
-  must succeed under the Seatbelt profile. The gate's libs dir lives in
-  `SandboxPolicy.ro_files`. On macOS this maps to
-  `testingReadPath{1..4}` slots in `MacSandboxInfo`. If you have more
-  than 4 ro paths or paths need recursive read, extend
-  `kRendererAddend` in `sandbox_macos.mm` with
-  `(allow file-read* (subpath "<path>"))`.
-- **Audio silent under Seatbelt.** Firefox's content profile usually
-  allows CoreAudio, but verify. If silent, append to `kRendererAddend`:
-  ```
-  (allow mach-lookup (global-name "com.apple.audio.audiohald"))
-  (allow mach-lookup (global-name "com.apple.audio.AUHostingService"))
-  (allow iokit-open (iokit-user-client-class "IOAudioControlUserClient"))
-  ```
+### What landed in this session
+
+- **MoltenVK pipeline-cache hang fixed.** Without
+  `$DARWIN_USER_CACHE_DIR/com.apple.metal` rw, MoltenVK's first
+  `vkCreatePipelineCache` blocks indefinitely in
+  `xpc_connection_send_message_with_reply_sync` to
+  `com.apple.MTLCompilerService` — the XPC service launches but can't
+  reach its on-disk library list. Allow rw on
+  `(subpath (string-append userCacheDir "/com.apple.metal"))` fixes
+  it.
+- **External-texture socket bind under Seatbelt.** Renderer binds
+  `/tmp/external_texture` (zmq AF_UNIX); base profile only allows
+  file-read on `/private/tmp`. Addend grants
+  `file-read*/file-write*` on the specific literal path. libzmq's own
+  bind unlinks orphan files itself; we just need the write permission.
+- **Audio output and mic are separate flags.** `SandboxPolicy` has
+  two distinct booleans now: `allow_audio` (output) and
+  `allow_microphone` (input), both defaulting to true. Each gates a
+  matching SBPL fragment in `seatbelt_profile.mm`. `info.hasAudio` is
+  **false** on `MacSandboxInfo` — we don't want Firefox's
+  `SandboxPolicyContentAudioAddend` bundling `(allow
+  device-microphone)` unconditionally, because that disconnects the
+  policy from what's actually granted. Privacy for mic still flows
+  through TCC at the OS layer.
+- **AGX + IOKit + assorted system queries.** AGX user-clients
+  (`AGXDeviceUserClient`, `AGXSharedUserClient`), broad
+  `iokit-get-properties` (inspection-only), `iohideventsystem`,
+  `windowmanager.server`, `dock.fullscreen`, `coredrag` register,
+  `kern.willshutdown` sysctl, `coregraphics` user-preference,
+  GameController, PowerManagement, SecurityServer (for HTTPS cert
+  validation via SecTrust).
+- **Upstream Godot CoreAudio fix cherry-picked** (PR
+  [godotengine/godot#111691](https://github.com/godotengine/godot/pull/111691)).
+  Upstream's input-only `EnableIO` configuration on `input_unit` was
+  missing, which made `IsDeviceUsable` bail on the default input
+  device. The 5-line fix landed on upstream `4.5` Oct 2025; we
+  cherry-picked it onto `tg-4.5` + `tg-master` ahead of the next
+  submodule rebase. Without it, `init_input_device` would fail and
+  AudioServer would fall back to `AudioDriverDummy` — silent process,
+  output included.
+
+### What did not need changing
+
+- **GDExtension load post-lockdown.** world.gate's
+  `libtwovoip.macos.template_debug.universal.dylib` loads from the
+  gate's libs dir without extra rules — the existing `ro_files` →
+  `testingReadPath{1..4}` plumbing already grants the dylib path
+  `file-map-executable`.
+- **Network.** mbedtls HTTPS handshakes succeed under the existing
+  `(allow network*)`. Some `net.routetable`/`AF_SYSTEM` queries are
+  still denied (Godot's optional IP enumeration) but they're
+  non-fatal — Godot falls back to `getifaddrs()` for what it actually
+  needs.
 - **Spectre.** No per-process API on macOS. xnu handles speculation
-  system-wide on Intel; Apple Silicon's architectural mitigations cover
-  the rest. Nothing to add.
+  system-wide on Intel; Apple Silicon's architectural mitigations
+  cover the rest. Nothing to add.
 
-### If signature verify hangs or is slow
+### Diagnostic recipe (if a future regression hits)
 
-macOS verify_binary uses `SecStaticCodeCheckValidity`. Should be fast
-(milliseconds). If slow, check `_verify_binary_impl` in
-`signature_verify.mm` — should be running on the worker thread via
-`Sandbox::verify_binary`.
+Run with `TG_SANDBOX_LOG_SBPL=1` set in the harness environment and
+grep the system log:
+
+```bash
+/usr/bin/log show --last 90s --predicate 'sender == "Sandbox"' \
+  | grep "godot.macos.template" \
+  | sed -E 's/.*godot.macos.template.*\)//' | sort -u
+```
+
+That gives the unique deny lines; map each one to a rule (`allow
+mach-lookup`, `allow file-read*`, etc.) in `seatbelt_profile.mm`.
 
 ## Per-platform measurement
 

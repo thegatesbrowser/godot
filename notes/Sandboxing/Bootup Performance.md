@@ -35,6 +35,7 @@ binary; the release launcher looks for the renderer at
 | May 18 — post-session | **8.017s** world / **4.655s** tutorial | dev | full sandbox, audio paths, lockdown at top of `Main::setup` |
 | May 18 — release LLVM | **2.590s** world / **2.264s** tutorial | release (clang) | full sandbox, lockdown-first |
 | May 18 — release GCC | (not measured world) / **2.317s** tutorial | release (gcc + LTO) | full sandbox, lockdown-first |
+| May 18 — macOS dev (Apple M1) | **8.49s** world / **6.06s** tutorial | dev (clang) | Seatbelt content profile, lockdown-first |
 
 Key inflection points:
 
