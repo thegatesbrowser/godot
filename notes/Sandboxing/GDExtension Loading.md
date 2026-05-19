@@ -10,28 +10,43 @@ A gate's extension is described by a `.gdextension` config file pointing at the 
 
 ## Lifecycle today
 
-Lockdown engages at the top of `Main::setup`, before any gate-supplied code runs. Extensions load **after** lockdown, via the standard OS loader.
+GDExtension loading happens **after** `Sandbox::lower_token` — extensions enter the renderer process at target-IL, identical to gate-supplied GDScript. The renderer's lifecycle hook `tg_renderer_engage` in `modules/the_gates/renderer/renderer_lifecycle.cpp` is what enforces this ordering. It runs in `Main::setup2` just before the engine's TextServer enumeration, and is responsible for the IPC handshake, the external-texture import, *and* the `lower_token` call — done as one atomic block under the unrestricted token.
 
 ```
 Main::setup
-  ├─ tg_renderer_lockdown(pack_path)       ◄── Sandbox::lower_token, target-IL from here on
-  │     └─ SandboxDiagnostics dump
-  ├─ register_core_extensions(libs_dir)    ◄── LoadLibrary / dlopen at target-IL
-  │     └─ GDExtensionManager::load_extensions
-  │           ├─ Opens extension_list.cfg from the pack
-  │           ├─ For each .gdextension config: load the lib
-  │           └─ OS::load_platform_gdextensions()
-  ├─ initialize_extensions(CORE / SERVERS)  ◄── extension init callbacks at target-IL
-  ├─ DisplayServer::create() / Vulkan      ◄── ICDs load at target-IL
-  └─ ...
+  ├─ initialize_modules(CORE)
+  └─ (launcher only: register_core_extensions; renderer defers)
+Main::setup2
+  ├─ register_server_types()
+  ├─ initialize_modules(SERVERS)
+  ├─ DisplayServer::create() / Vulkan      ◄── unrestricted token; ICDs load here
+  ├─ RenderingServer::init()
+  ├─ AudioDriverManager::initialize / AudioServer::init
+  ├─ Input init, TranslationServer setup
+  ├─ tg_renderer_engage(display_server, pack_path)   ◄── all under the unrestricted token:
+  │     ├─ CommandSync construct + bind_commands + socket_connect
+  │     ├─ TGExternalTexture: send_filehandle / recv_filehandle
+  │     ├─ InputSync construct + socket_connect
+  │     ├─ ext_texture_format command + ext_texture->import (Vulkan external memory bind)
+  │     └─ Sandbox::lower_token  ◄── token drops to USER_LIMITED + UNTRUSTED IL here
+  │           └─ SandboxDiagnostics dump
+  ├─ register_core_extensions(libs_dir)    ◄── LoadLibrary / dlopen at TARGET IL
+  ├─ initialize_extensions(SERVERS)        ◄── extension SERVERS callbacks at target-IL
+  ├─ TextServer enumeration + load_support_data   ◄── ICU init at target-IL
+  ├─ initialize_theme_db, NavigationServer init
+  ├─ register_scene_types()
+  └─ initialize_extensions(SCENE)          ◄── extension SCENE callbacks at target-IL
 Main::start
   ├─ autoload _init / main-scene _init     ◄── at target-IL
-  ├─ initialize_extensions(SCENE)
   ├─ GDExtensionManager::startup()         ◄── startup callbacks at target-IL
-  └─ tg_renderer_boot(display_server)      ◄── IPC + shared texture
+  └─ tg_renderer_boot()                    ◄── prints [RENDERER-READY]
 ```
 
-The OS loader executes `DllMain` (Windows) / `.init_array` (Linux) / `__mod_init_func` (macOS) as part of the load call itself. Because lockdown engaged earlier, this happens at target-IL: Untrusted IL on Windows, capset+landlock+seccomp on Linux, Seatbelt on macOS. Same threat parity as gate-supplied GDScript.
+The OS loader executes `DllMain` (Windows) / `.init_array` (Linux) / `__mod_init_func` (macOS) as part of `LoadLibrary`/`dlopen`. Because that call happens after `lower_token`, every gate-shipped extension's static-init code runs at target IL — Untrusted on Windows, capset+landlock+seccomp on Linux, Seatbelt on macOS. Same threat parity as gate-supplied GDScript.
+
+Why the engagement does texture import too: on Windows, `ext_texture->import` involves Vulkan external-memory binding that the kernel/driver only fully completes under the higher initial token. Moving the import after `lower_token` produces a write-disabled binding (the renderer draws frames but the launcher's view of the shared texture stays at its initialization value). Packing import + lockdown into one atomic block — which only the renderer can sequence safely — avoids that.
+
+Why engagement runs before TextServer enumeration: extensions can register custom TextServer backends via `TextServerManager::add_interface` at SERVERS level. The engine selects the primary TextServer immediately after enumeration, so the extension load must complete before that — which it does, at the engagement site.
 
 ## SandboxPolicy must include the libs directory
 

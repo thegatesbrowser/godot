@@ -6,11 +6,12 @@ tags: [sandbox, security]
 
 ## What the renderer sandbox provides
 
-Lockdown engages at the top of `Main::setup`, **before any gate-supplied
-code runs** (GDExtension `DllMain` / `.init_array`, autoload `_init`,
-main-scene `_init`, `_ready`). Native and scripted gate code have the
-same threat boundary: both run inside the sandbox from the first
-instruction.
+Lockdown engages in `Main::setup2` via `tg_renderer_engage`, **before any
+gate-supplied code runs** (GDExtension `DllMain` / `.init_array`,
+autoload `_init`, main-scene `_init`, `_ready`). Native and scripted
+gate code have the same threat boundary: both run inside the sandbox
+from the first instruction. See [[GDExtension Loading]] for the full
+lifecycle.
 
 On Windows, the renderer process runs at `INTEGRITY_LEVEL_UNTRUSTED`
 under a `USER_LIMITED` token, with:
@@ -94,13 +95,13 @@ flow and emits `[VERIFY-OK] integrity=untrusted ... broker_xcheck=ok`
 when the sandbox is correctly engaged. Both the broker-side
 configuration and the renderer's self-reported state are cross-checked.
 
-- Windows: `pwsh godot/tools/run-sandbox-test.ps1`
-- Linux / macOS: `bash godot/tools/run-sandbox-test.sh`
+From `godot/`:
 
-Both harnesses support `--mode negative-fail-closed` (forces
-`lower_token` to fail; renderer must abort) and `--mode
-negative-signature` (forces `verify_binary` to fail; broker must
-refuse to spawn).
+```
+python tools/run-sandbox-test.py                       # default
+python tools/run-sandbox-test.py negative-fail-closed  # forces lower_token to fail; renderer must abort
+python tools/run-sandbox-test.py negative-signature    # forces verify_binary to fail; broker must refuse to spawn
+```
 
 ## Reporting security issues
 

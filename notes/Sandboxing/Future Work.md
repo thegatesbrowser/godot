@@ -28,13 +28,21 @@ here only for grep-traceability.
 - ~~**Drop `OS_Windows::track_external_process`.**~~ Phase 4: replaced
   by `Sandbox::is_target_running` / `kill_target` holding the HANDLE
   inside the SandboxWin instance.
-- ~~**Engage lockdown before gate-supplied code runs.**~~ `tg_renderer_lockdown`
-  now runs at the top of `Main::setup`, before `register_core_extensions`.
-  `Sandbox::lower_token` + `SandboxDiagnostics` dump happen first; GDExtension
-  load, Vulkan init, autoload `_init`, and main-scene `_init` all run at
-  target-IL. `bind_commands` moved to `tg_renderer_boot` (end of
-  `Main::start`) because DisplayServer's constructor sets
-  `Input::set_mouse_mode_func` and would otherwise clobber the IPC hook.
+- ~~**Engage lockdown before gate-supplied code runs.**~~ `tg_renderer_engage`
+  runs in `Main::setup2` just before TextServer enumeration. It performs the
+  IPC handshake, the external-texture import, and `Sandbox::lower_token` as one
+  atomic block under the unrestricted token. The engine's `register_core_extensions`
+  + `initialize_extensions(SERVERS)` are deferred (renderer-only `#ifdef TG_RENDERER`
+  block) until right after engage — so GDExtension `DllMain` / `.init_array` /
+  `__mod_init_func`, TextServer ICU init, ThemeDB, Navigation, scene-type
+  registration, autoload `_init`, and main-scene `_init` all run at target IL.
+  Launcher build (non-TG_RENDERER) keeps the original engine ordering.
+- ~~**Bound parser inputs in renderer builds.**~~ PCK directory parser and
+  `project.binary` parser both read length/count fields straight from
+  gate-controlled bytes. Renderer builds now bound `file_count`,
+  path-length, settings-count, key-length, and value-blob-length to keep
+  integer-overflow and unbounded-loop shapes unreachable. Launcher's
+  trusted-PCK load path is unchanged.
 - ~~**Spectre v2 / v4 mitigations.**~~ Windows:
   `MITIGATION_RESTRICT_INDIRECT_BRANCH_PREDICTION` (STIBP) in the renderer's
   process mitigations bitmask. Linux: `prctl(PR_SET_SPECULATION_CTRL, …,
@@ -105,7 +113,7 @@ Each of these is real engineering. They take what's already a strong sandbox and
 
 - **Decide fate of the Chromium fork at `C:\code`.** The vendored build no longer depends on it — `cef_sandbox.lib` is unused, and the rebuild helper script (`tools/rebuild-cef-sandbox-lib.ps1`) has been removed from the tree (recover from git history at commit `22fcf94c88` if you need it). The fork remains useful as the source-of-truth for future Chromium uprevs of the vendor (the SANDBOX_EXPORTS patches live there and our snapshot was made from it). Recommendation: keep but mark as reference-only. The fork is no longer in the build's critical path.
 
-- **Cross-platform autotest harness.** `run-sandbox-test.ps1` is Windows-only PowerShell. Equivalent runners for macOS / Linux as those platforms come online.
+- ~~**Cross-platform autotest harness.**~~ Shipped: `tools/run-sandbox-test.py` is a single Python script driving Windows, macOS, and Linux. Replaces the old `.ps1` + `.sh` pair.
 
 - **Reset the open-questions list** in Reference Material. Most of the original list got answered during the 2026-05-14 session. A clean re-read with new open questions for the *current* state is more useful than the stale list.
 

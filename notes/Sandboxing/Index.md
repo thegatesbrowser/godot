@@ -5,21 +5,26 @@ registry, the network, or other gates' IPC channels. Chromium's
 multi-process sandbox is the model; Windows and Linux are implemented,
 macOS is tracked as upcoming work.
 
-Two harness entry points share the same three modes:
+Single cross-platform harness, run from `godot/`:
 
-- `pwsh godot/tools/run-sandbox-test.ps1` (Windows)
-- `bash godot/tools/run-sandbox-test.sh` (Linux)
+```
+python tools/run-sandbox-test.py                               # default mode
+python tools/run-sandbox-test.py negative-fail-closed
+python tools/run-sandbox-test.py negative-signature
+```
 
 Modes:
 
 - default — happy path, expects `[VERIFY-OK] integrity=untrusted ...
-  broker_xcheck=ok`.
-- `--mode negative-fail-closed` (`-Mode` on Windows) — forces
-  `lower_token` to fail, asserts the renderer aborts (no
-  `[RENDERER-READY]`).
-- `--mode negative-signature` (`-Mode` on Windows) — forces
-  `verify_binary` to fail, asserts the broker refuses to spawn (no
-  renderer log).
+  broker_xcheck=ok`. Confirms the renderer reaches `[RENDERER-READY]`
+  and rendered at least one frame.
+- `negative-fail-closed` — forces `lower_token` to fail. Asserts the
+  renderer reached the cliff (logs `[LOCKDOWN-ATTEMPT]`) and aborted
+  before `[RENDERER-READY]`.
+- `negative-signature` — forces `verify_binary` to fail. Asserts the
+  broker refused to spawn (no renderer log) and the launcher surfaced
+  the refusal as a `gate_error` event (`[AUTOTEST-GATE-ERROR]` in the
+  launcher log).
 
 On Linux the sandbox layers chromium's bpf_dsl seccomp filter on top of
 landlock (ABI 3 when available) and a `capset()` capability drop, all
