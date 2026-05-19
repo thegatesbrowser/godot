@@ -53,7 +53,23 @@ InputSync *input_sync = nullptr;
 bool first_frame_sent = false;
 uint64_t heartbeat = 0;
 
+// Captured on first call; shared by tg_renderer_phase and the [ITER] log.
+uint64_t epoch_ms() {
+	static const uint64_t t0 = OS::get_singleton()->get_ticks_msec();
+	return t0;
+}
+
 } // namespace
+
+void tg_renderer_phase(const char *p_label) {
+	const uint64_t now = OS::get_singleton()->get_ticks_msec();
+	const uint64_t t0 = epoch_ms();
+	static uint64_t t_prev = t0;
+	const uint64_t since_start = now - t0;
+	const uint64_t since_prev = now - t_prev;
+	print_line(vformat("[PHASE] %s  t=%dms  delta=%dms", String::utf8(p_label), (int64_t)since_start, (int64_t)since_prev));
+	t_prev = now;
+}
 
 void tg_renderer_lockdown(const String &p_pack_path) {
 	print_line("[RENDERER-START]");
@@ -71,6 +87,7 @@ void tg_renderer_lockdown(const String &p_pack_path) {
 	}
 
 	print_line("[RENDERER-LOCKED]");
+	tg_renderer_phase("lockdown_done");
 }
 
 bool tg_renderer_boot(DisplayServer *p_display_server) {
@@ -122,9 +139,16 @@ void tg_renderer_loop_iterate(uint64_t p_ticks_elapsed) {
 		return;
 	}
 
-	if (!first_frame_sent && Engine::get_singleton()->get_frames_drawn() > 2) {
-		command_sync->send_command("first_frame", Array());
-		first_frame_sent = true;
+	if (!first_frame_sent) {
+		static int iter = 0;
+		const uint32_t drawn = Engine::get_singleton()->get_frames_drawn();
+		print_line(vformat("[ITER] %d frames_drawn=%d t=%dms",
+				iter++, (int)drawn,
+				(int)(OS::get_singleton()->get_ticks_msec() - epoch_ms())));
+		if (drawn > 2) {
+			command_sync->send_command("first_frame", Array());
+			first_frame_sent = true;
+		}
 	}
 
 	heartbeat += p_ticks_elapsed;
