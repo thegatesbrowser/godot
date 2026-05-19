@@ -61,7 +61,9 @@ FAIL_CATALOG: dict[str, int] = {
     "broker_renderer_integrity_mismatch": 27,
     "broker_token_lockdown_regression": 28,
     "negative_fail_closed_not_aborted": 29,
+    "negative_fail_closed_no_attempt": 36,
     "negative_signature_renderer_started": 30,
+    "negative_signature_no_gate_error": 37,
     "multi_gate_cycles_missing": 31,
     "main_thread_frozen": 32,
     "gate_no_first_frame": 33,
@@ -339,12 +341,16 @@ examples:
         wait_budget, results_dir,
     )
 
-    # negative-signature: broker must refuse to spawn -> no fresh renderer log.
+    # negative-signature: broker must refuse to spawn -> no fresh renderer log
+    # AND the launcher must surface the refusal as a user-visible gate_error.
     if args.mode == "negative-signature":
         ns_log = find_renderer_log_for_run(logs_root, launch_start)
         if ns_log and ns_log.stat().st_mtime >= launch_start - 1.0:
             emit_fail(f"negative_signature_renderer_started log={ns_log}", results_dir)
-        emit_pass("negative-signature: broker refused to spawn on forced verify_binary failure as expected", results_dir)
+        launcher_text = launcher_log.read_text(encoding="utf-8", errors="replace") if launcher_log.exists() else ""
+        if "[AUTOTEST-GATE-ERROR]" not in launcher_text:
+            emit_fail("negative_signature_no_gate_error launcher_did_not_surface_refusal", results_dir)
+        emit_pass("negative-signature: broker refused to spawn and launcher surfaced gate_error as expected", results_dir)
 
     renderer_log_file = find_renderer_log_for_run(logs_root, launch_start)
     if not renderer_log_file or not renderer_log_file.is_file():
@@ -361,7 +367,10 @@ examples:
     if args.mode == "negative-fail-closed":
         if ready_line is not None and ready_line > start_line:
             emit_fail("negative_fail_closed_not_aborted", results_dir)
-        emit_pass("negative-fail-closed: renderer aborted on forced lower_token failure as expected", results_dir)
+        attempt_line = last_line_match(renderer_text, r"\[LOCKDOWN-ATTEMPT\]")
+        if attempt_line is None or attempt_line < start_line:
+            emit_fail("negative_fail_closed_no_attempt renderer_aborted_before_reaching_lower_token", results_dir)
+        emit_pass("negative-fail-closed: renderer reached lockdown attempt then aborted on forced lower_token failure as expected", results_dir)
 
     if ready_line is None or ready_line < start_line:
         emit_fail("renderer_no_ready", results_dir)
