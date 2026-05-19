@@ -415,15 +415,17 @@ Each `SandboxXxx::spawn_target` consumes this and translates:
 Ref<Sandbox> Sandbox::create() {
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
     return Ref<Sandbox>(memnew(SandboxWin));
-#elif defined(LINUXBSD_ENABLED)
+#elif defined(TG_SANDBOX) && defined(LINUXBSD_ENABLED)
     return Ref<Sandbox>(memnew(SandboxLinux));
-#elif defined(MACOS_ENABLED)
+#elif defined(TG_SANDBOX) && defined(MACOS_ENABLED)
     return Ref<Sandbox>(memnew(SandboxMacOS));
 #else
     return Ref<Sandbox>();
 #endif
 }
 ```
+
+`TG_SANDBOX` gates every backend, not just the Windows one — `tg_sandbox=no` on Linux or macOS makes the factory return null too, so the launcher falls back to `OS.execute_with_pipe` and the renderer's lockdown is skipped. Earlier the flag only gated Windows code, which silently kept the Linux landlock+seccomp stack engaged in supposedly "no-sandbox" builds.
 
 GDScript:
 
