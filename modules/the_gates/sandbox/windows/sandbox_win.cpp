@@ -170,14 +170,13 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 		}
 	};
 	auto allow_dir_recursive = [&](sandbox::FileSemantics sem, const String &p_dir) {
+		// 3 levels caps the per-dir rules at ~15 (5 services × 3 depths); higher
+		// depths overflow chromium-sandbox's 24 KB policy buffer with FAILED_TO_FREEZE_CONFIG.
 		const std::wstring root = path_to_wstring(p_dir);
 		static const wchar_t *globs[] = {
 			L"\\*",
 			L"\\*\\*",
 			L"\\*\\*\\*",
-			L"\\*\\*\\*\\*",
-			L"\\*\\*\\*\\*\\*",
-			L"\\*\\*\\*\\*\\*\\*",
 		};
 		for (const wchar_t *suffix : globs) {
 			allow_file(sem, root + suffix);
