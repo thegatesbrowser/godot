@@ -42,4 +42,10 @@ Error tg_apply_lockdown(const String &p_rw_dir,
 		const Vector<String> &p_rw_files,
 		const Vector<String> &p_ro_files);
 
+// Engaged landlock ABI captured at lockdown time. Returns 0 if the lockdown
+// hasn't run or the kernel rejected landlock_create_ruleset. Reading
+// landlock_create_ruleset post-lockdown returns EPERM (seccomp blocks it),
+// so the diagnostic must consult this cached value instead.
+int tg_lockdown_landlock_abi();
+
 #endif // LINUXBSD_ENABLED
