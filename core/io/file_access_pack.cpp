@@ -289,6 +289,12 @@ bool PackedSourcePCK::try_open_pack(const String &p_path, bool p_replace_files, 
 
 	// Read directory.
 	int file_count = f->get_32();
+#ifdef TG_RENDERER
+	// Defense against malicious gate PCKs: bound directory size to avoid DoS
+	// loops and integer-overflow shenanigans on attacker-controlled counts.
+	ERR_FAIL_COND_V_MSG(file_count < 0 || file_count > 1'000'000, false,
+			vformat("PackedSourcePCK: file_count=%d outside [0, 1000000].", file_count));
+#endif
 	if (enc_directory) {
 		Ref<FileAccessEncrypted> fae;
 		fae.instantiate();
@@ -307,6 +313,11 @@ bool PackedSourcePCK::try_open_pack(const String &p_path, bool p_replace_files, 
 
 	for (int i = 0; i < file_count; i++) {
 		uint32_t sl = f->get_32();
+#ifdef TG_RENDERER
+		// Bound path length against overflow on sl + 1 and oversized allocations.
+		ERR_FAIL_COND_V_MSG(sl > 4096, false,
+				vformat("PackedSourcePCK: path length %d at entry %d exceeds 4096.", (int)sl, i));
+#endif
 		CharString cs;
 		cs.resize_uninitialized(sl + 1);
 		f->get_buffer((uint8_t *)cs.ptr(), sl);
