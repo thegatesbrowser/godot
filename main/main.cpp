@@ -147,9 +147,7 @@
 #endif // TOOLS_ENABLED && !GDSCRIPT_NO_LSP
 #endif // MODULE_GDSCRIPT_ENABLED
 
-#ifdef TG_RENDERER
 #include "modules/the_gates/renderer/renderer_lifecycle.h"
-#endif
 
 /* Static members */
 
@@ -2134,6 +2132,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #endif
 
 	register_core_extensions(gdext_libs_dir); // core extensions must be registered after globals setup and before display
+	TG_RENDERER_PHASE("register_core_extensions_done");
 
 	ResourceUID::get_singleton()->load_from_cache(true); // load UUIDs from cache.
 
@@ -3164,6 +3163,7 @@ Error Main::setup2(bool p_show_boot_logo) {
 
 		OS::get_singleton()->benchmark_end_measure("Servers", "Modules and Extensions");
 	}
+	TG_RENDERER_PHASE("servers_modules_extensions_done");
 
 	/* Initialize Input */
 
@@ -3259,7 +3259,9 @@ Error Main::setup2(bool p_show_boot_logo) {
 		window_mode = DisplayServer::WindowMode::WINDOW_MODE_WINDOWED;
 		print_line("window_size " + String(window_size));
 #endif
+		TG_RENDERER_PHASE("display_server_create_start");
 		display_server = DisplayServer::create(display_driver_idx, rendering_driver, window_mode, window_vsync_mode, window_flags, window_position, window_size, init_screen, context, init_embed_parent_window_id, err);
+		TG_RENDERER_PHASE("display_server_create_done");
 		if (err != OK || display_server == nullptr) {
 			String last_name = DisplayServer::get_create_function_name(display_driver_idx);
 
@@ -3480,6 +3482,7 @@ Error Main::setup2(bool p_show_boot_logo) {
 
 	{
 		OS::get_singleton()->benchmark_begin_measure("Servers", "Audio");
+		TG_RENDERER_PHASE("audio_init_start");
 
 		AudioDriverManager::initialize(audio_driver_idx);
 
@@ -3488,6 +3491,7 @@ Error Main::setup2(bool p_show_boot_logo) {
 		audio_server->init();
 
 		OS::get_singleton()->benchmark_end_measure("Servers", "Audio");
+		TG_RENDERER_PHASE("audio_init_done");
 	}
 
 #ifndef XR_DISABLED
@@ -3904,6 +3908,7 @@ static MainTimerSync main_timer_sync;
 // an early exit with that error code.
 int Main::start() {
 	OS::get_singleton()->benchmark_begin_measure("Startup", "Main::Start");
+	TG_RENDERER_PHASE("main_start_entry");
 
 	ERR_FAIL_COND_V(!_start_success, EXIT_FAILURE);
 
@@ -4700,11 +4705,13 @@ int Main::start() {
 	OS::get_singleton()->benchmark_end_measure("Startup", "Main::Start");
 	OS::get_singleton()->benchmark_dump();
 
+	TG_RENDERER_PHASE("main_start_before_boot");
 #ifdef TG_RENDERER
 	if (!tg_renderer_boot(display_server)) {
 		return false;
 	}
 #endif
+	TG_RENDERER_PHASE("renderer_boot_done");
 
 	return EXIT_SUCCESS;
 }
