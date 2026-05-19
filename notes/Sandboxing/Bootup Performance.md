@@ -1,27 +1,105 @@
 # Bootup performance
 
-Where time goes from `gate_load` (download complete) to `first_frame`
-received by the launcher. Snapshot taken 2026-05-18. Re-measure when
-you suspect a regression.
+Where time goes from `gate_load` (download complete) to `first_frame` received by the launcher. Snapshot 2026-05-19, release/GCC/LTO, tutorial.gate, kernel 6.6.136.
+
+## TL;DR
+
+- **Current**: 2.317s.
+- **v0.24.4 reference**: 1.667s.
+- **Regression: +650ms — 100% sandbox stack.** Engine version drift contributes zero.
+
+| Cost | Measured | Mechanism |
+|---|---|---|
+| **Sandbox stack net cost** | **~525ms** | Not what it looks like — see [[#Split: landlock vs seccomp]] below. The cost emerges from the *interaction* of landlock denying paths + seccomp filtering the rest. Seccomp alone is ~0ms. Removing landlock without replacing it makes bootup ~800ms *worse*. Splits ~260ms shader cache + ~270ms deferred `_ready` cascade + first 3 frames vs unsandboxed baseline. |
+| **SHA-256 verify of renderer binary** | **~115ms** | SHA-NI hash of 92 MB (~47ms) + worker-thread spawn/join + deferred-signal plumbing (~70ms). Awaited before `spawn_target`, so additive. |
+| **Lockdown sequence itself** | **~1ms** | NO_NEW_PRIVS + Spectre prctls + landlock setup + capset + seccomp install. |
+| **Total** | **~641ms** | matches measured +650ms within ~20ms run-to-run variance |
 
 ## How to measure
 
-Bootup time is logged by the launcher in
-`app/scripts/api/analytics/analytics_sender_gate.gd::send_gate_start`,
-computed as `Time.get_ticks_msec() - gate_load_tick`. It excludes
-download. The marker appears in `launcher.log` as `Bootup time: X.YYY`.
+**Quick total**:
+```bash
+bash godot/tools/run-sandbox-test.sh \
+    --launcher-bin godot/bin/godot.linuxbsd.template_release.x86_64
+grep "Bootup time" /tmp/thegates-autotest/launcher.log
+```
 
-For phase-level data inside the renderer there's an opt-in instrumentation
-hook in `modules/the_gates/renderer/renderer_lifecycle.cpp` —
-`tg_renderer_phase(label)` prints `[PHASE] <label> t=Nms delta=Mms`.
-Not committed (debug-only). Apply the timing patch + a couple of phase
-markers in `main.cpp` to reproduce the numbers below.
+The launcher computes `Time.get_ticks_msec() - gate_load_tick` in `analytics_sender_gate.gd::send_gate_start` and prints `Bootup time: X.YYY`. Excludes download.
 
-Test runner: `bash godot/tools/run-sandbox-test.sh [--gate-url URL]
-[--launcher-bin PATH]`. Default gate is tutorial.gate. To exercise the
-release path pass `--launcher-bin` pointing at the release launcher
-binary; the release launcher looks for the renderer at
-`bin/renderer/Renderer-godot_v4.5.x86_64`, so symlink that.
+Without `--launcher-bin` the harness uses the dev launcher, which resolves the renderer via `linux_debug` (the editor.dev binary) — not the release symlink — and ends up ~2× slower. The release launcher resolves through `bin/renderer/Renderer-godot_v4.5.x86_64`; point that symlink at the freshest release-renderer build.
+
+**Per-phase inside the renderer**: `tg_renderer_phase(label)` in `modules/the_gates/renderer/renderer_lifecycle.cpp` prints `[PHASE] <label> t=Nms delta=Mms` at every lifecycle boundary (`lockdown_done`, `display_server_create_start/done`, `audio_init_start/done`, `main_start_entry`, `main_start_before_boot`, `renderer_boot_done`). Each delta is the gap from the previous marker; the biggest delta is the slow phase. Three `[ITER]` lines between `[RENDERER-READY]` and the `first_frame` IPC send cover the deferred `_ready` cascade + first three drawn frames.
+
+**Isolating sandbox cost from engine cost**:
+```bash
+python godot/tools/build.py renderer-release --no-sandbox
+python godot/tools/build.py launcher-release --no-sandbox
+```
+
+With `TG_SANDBOX` undefined the `Sandbox::create()` factory returns null on every platform, the launcher falls back to `OS.execute_with_pipe`, and the renderer's `tg_renderer_lockdown` skips `lower_token` entirely. Canaries report `allowed` (no sandbox = no isolation, so the autotest correctly fails with `canary_sibling_gate_allowed` exit code 24 — that's the runner asserting sandbox is on, not a real regression).
+
+## What's slow vs v0.24.4
+
+Measured by running the autotest in four configurations:
+
+| Config | Bootup |
+|---|---|
+| Full sandbox (current baseline) | **2.317s** |
+| Lockdown on, verify off | 2.187s |
+| Lockdown off, verify on | 1.777s |
+| Lockdown off, verify off | **1.677s** |
+| v0.24.4 reference | 1.667s |
+
+The middle two rows isolate the two new costs added since v0.24.4. The full-bypass row (1.677s) lands on top of v0.24.4 (1.667s) within run noise — engine-version drift between Feb 20 and May 18 is not material.
+
+The bypasses were temporary env-var short-circuits (`TG_SANDBOX_SKIP_LOCKDOWN=1` in `tg_apply_lockdown`, `TG_SIGNATURE_SKIP=1` in `_verify_binary_impl`) added for measurement and reverted afterwards. Don't recreate them — security-sensitive. For future re-measurement use the `tg_sandbox=no` build above; it now actually disables the sandbox on all platforms (the `Sandbox::create()` factory was fixed 2026-05-19 to require `TG_SANDBOX` on Linux + macOS, not only Windows).
+
+## Split: landlock vs seccomp
+
+A follow-up measurement with separate `TG_SANDBOX_SKIP_LANDLOCK=1` and `TG_SANDBOX_SKIP_SECCOMP=1` env-var bypasses (also reverted after measurement) decomposed the ~525ms further. The result is non-linear and counterintuitive:
+
+| Config | Bootup (3-run mean) |
+|---|---|
+| Full sandbox (baseline) | **2.31s** |
+| Skip seccomp, landlock on | 2.34s (≈ baseline) |
+| Skip landlock, seccomp on | **3.11s** (~800ms *slower*) |
+| Skip both | 1.68s |
+
+Two findings worth landing on:
+
+1. **Seccomp BPF cost is essentially zero.** The kernel compiles the 190-case filter to a balanced tree; per-syscall lookup is sub-microsecond. The whole filter contributes ~30ms of bootup time, well inside run noise. Optimizing the syscall allowlist won't move the needle.
+
+2. **Landlock has a paradoxical net effect.** Removing landlock while keeping seccomp makes bootup ~800ms *slower*, not faster. With landlock denying access, the engine short-circuits expensive code paths fast (fontconfig probes `~/.fonts` and gets EACCES instantly, etc.). Without landlock those probes succeed and the engine reads more files — and with seccomp still BPF-filtering every one of those extra syscalls, the cost compounds. The ~260ms shader cache delta and ~270ms `_ready` delta attributed above to "per-syscall filter overhead" are real *only* against the full-bypass baseline; they can't be captured by removing landlock alone.
+
+Together: landlock + seccomp are net-positive in combination, even though each looks like overhead in isolation. The right framing isn't "the sandbox costs 525ms of per-syscall walks" but "the sandbox shapes which code paths the engine takes, and that shape happens to cost 525ms vs unsandboxed."
+
+## Phase breakdown (release tutorial.gate, current state)
+
+```
+[PHASE] lockdown_done                  t=1ms     delta=1ms
+[PHASE] register_core_extensions_done  t=1ms     delta=0ms
+[PHASE] servers_modules_extensions_done t=8ms    delta=7ms
+[PHASE] display_server_create_start    t=19ms    delta=11ms
+[PHASE] display_server_create_done     t=69ms    delta=50ms
+[PHASE] audio_init_start               t=1468ms  delta=1399ms   <- shader cache loading
+[PHASE] audio_init_done                t=1473ms  delta=5ms
+[PHASE] main_start_entry               t=1520ms  delta=47ms
+[PHASE] main_start_before_boot         t=1734ms  delta=214ms
+[RENDERER-READY]                                                (end of tg_renderer_boot)
+[PHASE] renderer_boot_done             t=1754ms  delta=20ms
+[ITER] 0..2 frames_drawn=1..3                                   (deferred _ready + 3 frames)
+
+Bootup time (launcher-side): 2.317s
+```
+
+Two phases dominate, **both showing a ~260-270ms sandbox-vs-unsandboxed delta**:
+
+- **Shader cache load** (~1.4s with sandbox vs ~1.14s without): Vulkan pipeline-state loader does many file opens during `RenderingServer::init`. Most of the phase is driver-side SPIR-V → GPU ISA compilation, not filter cost.
+- **Deferred `_ready` cascade + first 3 drawn frames** (~563ms with sandbox vs ~290ms without): scene/resource loading via GDScript + Vulkan command submission. This was the surprise — equally expensive to the shader cache phase, but the older rough estimate attributed nearly all sandbox cost to the shader cache alone.
+
+The deltas come from the *combined* effect of landlock + seccomp (see [[#Split: landlock vs seccomp]]); removing landlock alone doesn't capture them and actually makes things slower because the engine then probes more paths.
+
+Curiosity: without the sandbox, the shader cache phase loads *before* `display_server_create_start`. With sandbox on, it shifts to *between* `display_server_create_done` and `audio_init_start`. Different position relative to other phases, similar absolute magnitude.
 
 ## Historical timeline (tutorial.gate on this machine)
 
@@ -40,109 +118,41 @@ binary; the release launcher looks for the renderer at
 Key inflection points:
 
 1. **Phase 3 landing** (May 17 mid-morning): adding landlock + seccomp + capset + signature verify took bootup from 3s to 9.7s. Most of that was mbedtls SHA-256 of the 543 MB debug renderer binary.
-2. **SHA-NI fix** (`4b4deac5d6`, May 17 22:00): cut verify_binary from 6.19s → 0.28s, brought bootup down to ~4s in dev.
-3. **Lockdown reorder** (this session): no measurable change in total bootup; tutorial got ~1.2s faster, world unchanged.
+2. **SHA-NI fix** (`4b4deac5d6`, May 17 22:00): cut `verify_binary` from 6.19s → 0.28s, brought bootup down to ~4s in dev.
+3. **Lockdown reorder** (May 18): no measurable change in total bootup; tutorial got ~1.2s faster, world unchanged.
 4. **Dev vs release**: dev is ~2× slower than release. The 468 MB dev binary vs 92 MB release binary alone accounts for most of it.
 
-## Phase breakdown (release tutorial.gate, this snapshot)
+## Where to look for optimization
 
-Measured inside the renderer process from `tg_renderer_lockdown` entry:
+In rough priority order, weighing against the split-measurement finding that "per-syscall walk cost" is a misleading framing:
 
-```
-[PHASE] lockdown_done                       t=1ms     delta=1ms
-[PHASE] register_core_extensions_done       t=1ms     delta=0ms
-[PHASE] servers_modules_extensions_done     t=9ms     delta=8ms
-[PHASE] display_server_create_start         t=19ms    delta=10ms
-[PHASE] display_server_create_done          t=65ms    delta=46ms
-[PHASE] audio_init_start                    t=1415ms  delta=1350ms  <- shader cache loading
-[PHASE] audio_init_done                     t=1421ms  delta=6ms
-[PHASE] main_start_entry                    t=1465ms  delta=44ms
-[PHASE] main_start_before_boot              t=1673ms  delta=208ms
-[RENDERER-READY]                            (end of tg_renderer_boot)
-[PHASE] renderer_boot_done                  t=1675ms  delta=2ms
-[ITER] 0  frames_drawn=1                    t=2144ms  (deferred _ready + frame 1)
-[ITER] 1  frames_drawn=2                    t=2152ms
-[ITER] 2  frames_drawn=3                    t=2158ms  -> first_frame command sent
+1. **Shared shader cache via `shader_cache_res_dir`** (Approach D). Reduces the actual *amount of work* the engine does in the shader cache phase, regardless of which filter dominates. Cold-cache pain (5–30s on first visit) is the real prize; warm-cache modestly helps with the right Godot-side lookup-order fix. Detailed analysis in [[Bootup Latency — Zygote vs Shared Shader Cache]].
+2. **Constrain fontconfig / locale probing via env vars in the launcher spawn.** The split measurement shows the engine probes a lot of paths that landlock currently short-circuits. Setting `FONTCONFIG_PATH`, `FC_DEBUG=0`, `LC_ALL=C` (or similar narrow values) bounds the engine's path-probe set regardless of sandbox state. Possible 50–150ms in places landlock isn't already saving us. Cheap to try.
+3. **User namespace + chroot at fork time.** The architectural reset button. Replaces landlock with namespace isolation — the engine literally can't see anything outside its jail, no per-path walks, no engine-path-probe interaction. Removes landlock-vs-engine-behavior coupling entirely. Bigger lift; kernel-version handling needed.
+4. **Reduce file opens in the deferred `_ready` cascade.** Resource preloading or `@onready` consolidation. The ~270ms here is a Godot-side syscall-count problem; less work means less for any sandbox layer to filter.
+5. **Trim the SHA-256 verify plumbing.** Hash itself is ~47ms; surrounding ~70ms is worker-thread spawn/join + deferred-signal latency. A direct synchronous hash on the gate-open coroutine (already off the main loop) could shave 50–70ms.
+6. **Gate-side: defer HTTPS in `_ready`.** Gate-author work, not engine. Doesn't help engine bootup; hides gate-content latency from users.
+7. **Smaller release renderer.** 92 MB. SHA-256 scales linearly. Marginal for bootup, meaningful for download size.
 
-Bootup time (launcher-side): 2.264s
-```
+**Done / off the list:**
 
-Mapping bootup time to work:
+- ~~**Landlock ruleset consolidation.**~~ Shipped: list collapsed from ~50 rules to ~22 (`/usr/lib + /usr/lib64 + /usr/share` → `/usr`; ~12 `/etc/*` entries → `/etc`; etc.). Per-syscall walk cost is no longer the obvious target.
+- ~~**Optimize the seccomp allowlist.**~~ Split measurement says seccomp BPF is ~0ms cost. The kernel-compiled tree is already faster than any shrinkage would buy. Don't touch it.
+- ~~**Pre-resolve shader cache paths into mmap'd buffers pre-lockdown** (A2).~~ Tried and reverted (2026-05-19). `_load_from_cache` only fires ~50 times at startup, the walk to pre-open all 590 cache files via `DirAccess` cost ~200ms, and the shader phase is dominated by driver-side SPIR-V → GPU ISA compilation rather than `open()` calls anyway. Could be revisited with a raw POSIX walk + manifest scope, but it's no longer the obvious win the original estimate implied. Details in [[Bootup Latency — Zygote vs Shared Shader Cache]] § "A2 implementation result".
 
-| Phase | Time | Where |
-|---|---|---|
-| Sandbox lockdown engages (landlock + capset + seccomp + Spectre flags + SandboxDiagnostics) | ~1ms | `Sandbox::lower_token` |
-| GDExtension load + module init levels (CORE, SERVERS) | ~10ms | `Main::setup` |
-| Display server create + Vulkan instance | ~50ms | `DisplayServer::create` |
-| **Shader cache load (RenderingServer::init)** | **~1350ms** | between `DisplayServer::create` and `AudioDriverManager::initialize` |
-| Audio driver init (PulseAudio detect, channels, output sink) | ~5ms | `AudioServer::init` |
-| Misc setup + main scene instantiation | ~250ms | end of `Main::setup` + `Main::start` body |
-| Renderer's `tg_renderer_boot` (IPC bind + ext_texture handshake) | ~2ms | end of `Main::start` |
-| SceneTree init: deferred `_ready` cascade + first 3 drawn frames | ~470ms | first 3 `Main::iteration` ticks |
-| IPC: first_frame command → launcher receives + records | ~100ms | zmq AF_UNIX |
-
-Two phases dominate: **shader cache loading (1.35s)** and **deferred `_ready` + 3 frames (470ms)**.
-
-## What's slow vs v0.24.4 release
-
-Delta: **2.26s vs 1.67s = +600ms** between current state and v0.24.4.
-
-Best attribution:
-
-| Cost | Pre-session estimate |
-|---|---|
-| Sandbox lockdown setup itself | ~10ms |
-| SHA-256 verify of renderer binary (SHA-NI on 92 MB) | ~70ms |
-| Per-syscall landlock checks during shader cache load | ~500ms |
-| Per-syscall seccomp filter cost during shader cache load | ~50ms |
-| Misc OS-call slowdown elsewhere | rest |
-
-v0.24.4 was pre-phase-3 — simpler seccomp-only, no landlock, no SHA-256 verify, smaller seccomp ruleset. Most of the 600ms is the per-syscall cost of the modern sandbox stack during shader cache file I/O (~10k `open`/`read` syscalls during shader cache load, each filtered).
+The sandbox itself (lockdown setup) is cheap — ~1ms total for all five `prctl`/syscalls combined. The cost vs unsandboxed is the *combined* effect of landlock shaping the engine's path-probe behavior and seccomp filtering whatever remains. Plus the SHA-256 verify added in front of `spawn_target`.
 
 ## Per-gate variance
 
 | Gate | Release Bootup | What it does |
 |---|---|---|
-| tutorial.gate (default harness) | **2.26s** | Minimal scene, no HTTPS in autoload `_ready` |
-| world.gate (twovoip GDExtension, complex 3D scene) | **2.59s** | Same engine cost, gate's `_ready` makes 6+ HTTPS calls to game backend |
+| tutorial.gate (default harness) | 2.317s | Minimal scene, no HTTPS in autoload `_ready` |
+| world.gate (twovoip GDExtension, complex 3D scene) | 2.590s | Same engine cost; gate's `_ready` makes 6+ HTTPS calls to game backend |
 
-In dev builds the difference is much bigger (4.7s vs 8s) because of verbose mbedtls debug logging in the renderer's TLS code path. In release, debug logging is compiled out so the difference shrinks to ~300ms.
+The gate's own `_ready` code (network calls, scene loading) is **not** sandbox overhead — it's gate-content cost. world.gate could improve its own bootup by deferring network calls to after `first_frame`. In dev builds the difference is bigger (~4.7s vs 8s) because of verbose mbedtls debug logging in the TLS code path; release strips that.
 
-The gate's own `_ready` code (network calls, scene loading) is **not** sandbox overhead. It's gate-content cost. world.gate could improve its own bootup by deferring network calls to after first_frame.
+## Footnotes
 
-## Compiler doesn't matter
-
-| Build | tutorial.gate Bootup |
-|---|---|
-| Release LLVM | 2.264s |
-| Release GCC | 2.317s |
-
-50ms difference. Not the bottleneck. v0.24.4 was GCC; my LLVM and GCC builds of current code both land in the same ballpark.
-
-## Where to look for optimization
-
-In rough priority order:
-
-1. **Landlock ruleset consolidation.** Currently 32+ rules. Each `open` syscall walks all of them. Merging related entries (one `/usr` instead of `/usr/lib + /usr/lib64 + /usr/share`) should cut per-syscall cost during shader cache load. Estimated win: ~200ms.
-2. **Pre-resolve shader cache paths into mmap'd buffers pre-lockdown.** The renderer holds file handles across lockdown by design; the rendering server's cache loader does fresh opens for each shader variant. Hoisting into one mmap call could remove most of the 1.35s shader cache phase. Estimated win: ~1s. Bigger engineering lift.
-3. **Move shader cache load earlier.** It already runs in `RenderingServer::init` which sits between display-server create and audio init. Reordering would require deferring something else (audio?) and may break dependencies. Estimated win: small.
-4. **Gate-side: defer HTTPS in `_ready`.** Gate-author work, not engine. The launcher could keep showing the gate's preview image while the gate's startup network completes in the background, hiding the latency from users.
-5. **Smaller release renderer.** 92 MB. Stripping debug symbols + LTO bytecode could shave 10-20 MB. Marginal win for bootup; meaningful for download size.
-
-The sandbox itself is cheap (~10ms for lockdown setup). The cost is the **per-syscall filter overhead** multiplied across the engine's many file opens, not the lockdown engagement.
-
-## Re-measuring later
-
-Quick check: `bash godot/tools/run-sandbox-test.sh` and grep `Bootup time` in
-`/tmp/thegates-autotest/launcher.log`. Compare against the row in
-"Historical timeline" matching your build profile.
-
-Detailed check: apply the uncommitted `tg_renderer_phase` instrumentation
-(see "How to measure") and rerun. Each `[PHASE]` line gives a delta from
-the previous marker; the biggest delta is the slow phase.
-
-For per-iteration data (post `[RENDERER-READY]` work): the same patch
-adds `[ITER]` prints before `first_frame` is sent. Three iterations
-between RENDERER-READY and first_frame is normal. The wall time between
-them shows shader compilation, scene `_ready` cascade, and any gate
-network work blocking on the renderer's main thread.
+- **Compiler.** ~50ms between LLVM and GCC release builds. Not the bottleneck — both land in the 2.26–2.32s range.
+- **Run-to-run variance.** ~20ms on this machine.
+- **Diagnostic correctness.** Until 2026-05-19 the renderer's `SANDBOX-DIAG` block misreported `landlock_abi: 0` and `no_new_privs: false` even when both layers were engaged. The landlock query was being made *after* seccomp installed and seccomp's allowlist doesn't include the landlock syscalls (returns EPERM, helper reads as 0). The `prctl(PR_GET_NO_NEW_PRIVS)` call was missing the trailing args; glibc's varargs wrapper passed register garbage and the kernel returned -1 EINVAL. Fixed by caching the landlock ABI inside `tg_apply_lockdown` (before seccomp can block future queries) and passing all 5 args to every `prctl(PR_GET_*)`. After 2026-05-19, `landlock_abi: 3` and `no_new_privs: true` in `verify.json` are trustworthy.

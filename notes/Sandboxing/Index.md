@@ -57,8 +57,11 @@ the same shape as Firefox's `security/sandbox/linux/Sandbox.cpp`.
    pick up a research thread.
 7. [[GDExtension Loading]] — how gate-shipped native extensions interact
    with the post-lockdown sandbox.
-8. [[Bootup Performance]] — where bootup time goes, historical timeline,
-   and known optimization levers.
+8. [[Bootup Performance]] — measured decomposition of bootup time, the
+   sandbox-stack regression vs v0.24.4, and the known optimization levers.
+9. [[Bootup Latency — Zygote vs Shared Shader Cache]] — research/ADR for
+   the latency-reduction options: zygote-fork, FD pre-resolve, and the
+   shared shader cache via `shader_cache_res_dir`.
 
 ## Archived
 
