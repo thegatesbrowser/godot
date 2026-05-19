@@ -3592,6 +3592,14 @@ Error Main::setup2(bool p_show_boot_logo) {
 		OS::get_singleton()->benchmark_end_measure("Startup", "Translations and Remaps");
 	}
 
+#ifdef TG_RENDERER
+	if (!tg_renderer_engage(display_server, tg_main_pack_path)) {
+		return ERR_CANT_CREATE;
+	}
+	register_core_extensions(gdext_libs_dir);
+	GDExtensionManager::get_singleton()->initialize_extensions(GDExtension::INITIALIZATION_LEVEL_SERVERS);
+#endif
+
 	MAIN_PRINT("Main: Load TextServer");
 
 	/* Setup Text Server */
@@ -3678,14 +3686,6 @@ Error Main::setup2(bool p_show_boot_logo) {
 #ifndef NAVIGATION_2D_DISABLED
 	NavigationServer2DManager::initialize_server();
 #endif // NAVIGATION_2D_DISABLED
-
-#ifdef TG_RENDERER
-	if (!tg_renderer_engage(display_server, tg_main_pack_path)) {
-		return ERR_CANT_CREATE;
-	}
-	register_core_extensions(gdext_libs_dir);
-	GDExtensionManager::get_singleton()->initialize_extensions(GDExtension::INITIALIZATION_LEVEL_SERVERS);
-#endif
 
 	register_scene_types();
 	register_driver_types();
