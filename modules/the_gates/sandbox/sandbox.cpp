@@ -34,9 +34,9 @@
 
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 #include "windows/sandbox_win.h"
-#elif defined(LINUXBSD_ENABLED)
+#elif defined(TG_SANDBOX) && defined(LINUXBSD_ENABLED)
 #include "linux/sandbox_linux.h"
-#elif defined(MACOS_ENABLED)
+#elif defined(TG_SANDBOX) && defined(MACOS_ENABLED)
 #include "macos/sandbox_macos.h"
 #endif
 
@@ -49,9 +49,9 @@ struct Sandbox::VerifyJob {
 Ref<Sandbox> Sandbox::create() {
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 	return Ref<Sandbox>(memnew(SandboxWin));
-#elif defined(LINUXBSD_ENABLED)
+#elif defined(TG_SANDBOX) && defined(LINUXBSD_ENABLED)
 	return Ref<Sandbox>(memnew(SandboxLinux));
-#elif defined(MACOS_ENABLED)
+#elif defined(TG_SANDBOX) && defined(MACOS_ENABLED)
 	return Ref<Sandbox>(memnew(SandboxMacOS));
 #else
 	return Ref<Sandbox>();
