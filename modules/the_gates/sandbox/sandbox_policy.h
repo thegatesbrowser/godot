@@ -44,7 +44,8 @@ class SandboxPolicy : public RefCounted {
 	PackedStringArray ro_files;
 	String child_stdout_log_path;
 	bool allow_network = false;
-	bool allow_audio = false;
+	bool allow_audio = true;
+	bool allow_microphone = true;
 	int integrity_floor = 0;
 
 protected:
@@ -70,6 +71,9 @@ public:
 
 	void set_allow_audio(bool p_allow) { allow_audio = p_allow; }
 	bool is_audio_allowed() const { return allow_audio; }
+
+	void set_allow_microphone(bool p_allow) { allow_microphone = p_allow; }
+	bool is_microphone_allowed() const { return allow_microphone; }
 
 	// Platform-specific severity dial: Windows passes IntegrityLevel enum
 	// values, Linux uses 0 for "default seccomp+landlock", macOS is binary

@@ -38,6 +38,7 @@ Dictionary SandboxPolicy::to_dict() const {
 	out["child_stdout_log_path"] = child_stdout_log_path;
 	out["allow_network"] = allow_network;
 	out["allow_audio"] = allow_audio;
+	out["allow_microphone"] = allow_microphone;
 	out["integrity_floor"] = integrity_floor;
 	return out;
 }
@@ -62,6 +63,9 @@ void SandboxPolicy::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_allow_audio", "allow"), &SandboxPolicy::set_allow_audio);
 	ClassDB::bind_method(D_METHOD("is_audio_allowed"), &SandboxPolicy::is_audio_allowed);
+
+	ClassDB::bind_method(D_METHOD("set_allow_microphone", "allow"), &SandboxPolicy::set_allow_microphone);
+	ClassDB::bind_method(D_METHOD("is_microphone_allowed"), &SandboxPolicy::is_microphone_allowed);
 
 	ClassDB::bind_method(D_METHOD("set_integrity_floor", "level"), &SandboxPolicy::set_integrity_floor);
 	ClassDB::bind_method(D_METHOD("get_integrity_floor"), &SandboxPolicy::get_integrity_floor);

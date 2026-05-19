@@ -40,7 +40,10 @@ Sandbox::spawn_target            ──► posix_spawn
   pass TG_SANDBOX_RW_DIR,             │
        TG_SANDBOX_RW_FILES,           │
        TG_SANDBOX_RO_FILES,           │
-       TG_SANDBOX_APP_PATH env vars   │
+       TG_SANDBOX_APP_PATH,           │
+       TG_SANDBOX_ALLOW_AUDIO,        │
+       TG_SANDBOX_ALLOW_MICROPHONE    │
+       env vars                       │
   posix_spawn(...) -> pid             ▼
   kqueue + EVFILT_PROC NOTE_EXIT    Main::setup() / setup2()
                                       GDExtensions, Vulkan/MoltenVK, .pck
@@ -66,12 +69,14 @@ Sandbox::spawn_target            ──► posix_spawn
 
 Policy crosses `posix_spawn` as env vars the broker injects:
 
-| env var                  | content                                              |
-|--------------------------|------------------------------------------------------|
-| `TG_SANDBOX_RW_DIR`      | per-gate folder; SBPL `profileDir` param             |
-| `TG_SANDBOX_RW_FILES`    | `|`-joined list (reserved; not currently used)       |
-| `TG_SANDBOX_RO_FILES`    | `|`-joined list — first 4 map to `testingReadPath*`  |
-| `TG_SANDBOX_APP_PATH`    | renderer executable path; SBPL `appPath` param       |
+| env var                   | content                                              |
+|---------------------------|------------------------------------------------------|
+| `TG_SANDBOX_RW_DIR`       | per-gate folder; SBPL `profileDir` param             |
+| `TG_SANDBOX_RW_FILES`     | `|`-joined list (reserved; not currently used)       |
+| `TG_SANDBOX_RO_FILES`     | `|`-joined list — first 4 map to `testingReadPath*`  |
+| `TG_SANDBOX_APP_PATH`     | renderer executable path; SBPL `appPath` param       |
+| `TG_SANDBOX_ALLOW_AUDIO`  | `1` / `0` — toggles the audio-output SBPL fragment   |
+| `TG_SANDBOX_ALLOW_MICROPHONE` | `1` / `0` — toggles `(allow device-microphone)`  |
 
 `Sandbox::is_target()` is compile-time on macOS: `TG_RENDERER` is defined
 for the renderer binary and not for the launcher, so the per-process role
@@ -107,15 +112,58 @@ IOKit, sysctls, signals.
 
 The profile we use is Firefox's `SandboxPolicyContent` (vendored verbatim
 under `thirdparty/chromium-sandbox/firefox-shim/mac/`) concatenated with
-a small renderer-specific addend that grants `(allow file-read* file-write*
-(subpath profileDir))` — Firefox's content profile defaults to read-only
-on the profile dir, but our renderer needs to write gate state and bind
-IPC sockets there. The addend also grants `(allow network*)` as an
-**interim** measure (Firefox's content profile would otherwise deny it
-via `(deny default)`); the target end state is a Chromium-style brokered
-network channel where the renderer cannot open sockets directly and asks
-the launcher to perform requests against an allowlist. Tracked in
-[[Future Work]].
+a renderer-specific addend assembled by `tg_build_seatbelt_addend` in
+`seatbelt_profile.mm`. Firefox's content profile alone is too tight for
+a 3D renderer; the addend covers:
+
+- **Per-gate dir rw** — Firefox grants read-only on the profile dir;
+  we need rw for gate state and IPC socket bind.
+- **Metal shader cache** — `$DARWIN_USER_CACHE_DIR/com.apple.metal` rw.
+  Without this the `com.apple.MTLCompilerService` XPC service blocks
+  indefinitely on first pipeline-cache load and `MVKPipelineCache`
+  never returns. (Firefox's content profile only allows
+  `com.apple.FontRegistry` under `userCacheDir`.)
+- **AGX IOKit** — `AGXDeviceUserClient` and `AGXSharedUserClient` on
+  top of Firefox's `IOAccelerator` set. `iokit-get-properties` is
+  granted broadly (inspection-only) because MoltenVK enumerates many
+  AGX/ARM platform-device properties during device init.
+- **HID + WM extras** — `iohideventsystem`, `windowmanager.server`,
+  `dock.fullscreen`, `coredrag` (per-pid register), `kern.willshutdown`
+  sysctl, `com.apple.coregraphics` user-preference. All queried during
+  `DisplayServerMacOS` construction.
+- **Audio output (conditional)** — when `SandboxPolicy.allow_audio`
+  is true (the default), an audio-output SBPL fragment is concatenated:
+  POSIX SHM for `AudioIO*`, mach-lookups for `coreaudiod`,
+  `audiohald`, `audio.SandboxHelper`, `audio.AUHostingService`,
+  `audio.AudioSession`, `audioanalyticsd`, IOKit user-clients
+  `IOAudioEngineUserClient` + `IOAudioControlUserClient`, and
+  read-only `/Library/Audio/Plug-Ins`. Microphone is a separate flag —
+  see below.
+- **Microphone input (conditional)** — when
+  `SandboxPolicy.allow_microphone` is true (the default), a single
+  `(allow device-microphone)` rule is appended. The sandbox allow only
+  unblocks the syscall path; macOS's TCC still gates actual mic data
+  on a per-app basis via the bundle's `NSMicrophoneUsageDescription`.
+  Dev builds without a bundle get TCC-denied — input doesn't work in
+  dev, but upstream Godot's `init_input_device` no longer cascades
+  that into killing output (PR
+  [godotengine/godot#111691](https://github.com/godotengine/godot/pull/111691),
+  cherry-picked into our fork ahead of the next submodule rebase).
+- **Gamepad + power + keychain** — `GameController.gamecontrollerd`,
+  `PowerManagement.control`, `SecurityServer`. Last one is for cert
+  validation during HTTPS (mbedtls reaches `SecTrust*`).
+- **IPC socket bind** — explicit `file-read* file-write*` on
+  `/private/tmp/external_texture`. The external-texture socket is the
+  only zmq AF_UNIX socket the renderer binds (`command_sync` /
+  `input_sync` are bound by the unsandboxed launcher and the renderer
+  only connects; `/private/tmp` file-read in Firefox's base profile
+  covers those). libzmq's own bind unlinks any stale orphan file
+  before creating its new socket, so we just need the write
+  permission here, no extra cleanup.
+- **`(allow network*)`** — interim. Target end state is a
+  Chromium-style brokered network channel where the renderer asks the
+  launcher to perform requests against an allowlist. Tracked in
+  [[Future Work]].
 
 | Parameter            | Value source                                        |
 |----------------------|-----------------------------------------------------|
@@ -134,11 +182,16 @@ the launcher to perform requests against an allowlist. Tracked in
 
 ```
 godot/modules/the_gates/sandbox/macos/
-├── SCsub                  builds the vendored Firefox subset + our files
-├── sandbox_macos.{h,mm}   SandboxMacOS : Sandbox; posix_spawn + env handoff;
-│                          overrides _verify_binary_impl (sync hash, called
-│                          on the worker thread by the base class)
-└── signature_verify.{h,mm}   SHA-256 via CommonCrypto + tg_signature_pin compare
+├── SCsub                    builds the vendored Firefox subset + our files
+├── sandbox_macos.{h,mm}     SandboxMacOS : Sandbox; posix_spawn, env handoff,
+│                            kqueue exit watcher, lower_token. Overrides
+│                            _verify_binary_impl (sync hash, called on the
+│                            worker thread by the base class)
+├── seatbelt_profile.{h,mm}  SBPL fragments appended to Firefox's content
+│                            profile; tg_build_seatbelt_addend(allow_audio,
+│                            allow_microphone) composes the final addend
+│                            per-policy
+└── signature_verify.{h,mm}  SHA-256 via CommonCrypto + tg_signature_pin compare
 
 godot/thirdparty/chromium-sandbox/firefox-shim/
 ├── LICENSE                MPL-2.0 from mozilla-central
@@ -153,9 +206,20 @@ godot/thirdparty/chromium-sandbox/firefox-shim/
 ```
 
 `SandboxPolicyContent.h` is **verbatim** from
-`security/sandbox/mac/SandboxPolicyContent.h`. A renderer-specific addend
-(`kRendererAddend` in `sandbox_macos.mm`) is concatenated at lockdown
-time via the `tg_renderer_sandbox_addend` extern hook in `Sandbox.mm`.
+`security/sandbox/mac/SandboxPolicyContent.h`. The renderer-specific
+addend lives in `seatbelt_profile.mm` as three fragments — an
+always-applied base (graphics, IOKit, IPC, system queries) plus
+conditional audio-output and microphone blocks — that
+`tg_build_seatbelt_addend(bool allow_audio, bool allow_microphone)`
+composes at lockdown time. The result is handed to the vendored
+`Sandbox.mm` via the `tg_renderer_sandbox_addend` extern hook.
+
+`info.hasAudio` on `MacSandboxInfo` is deliberately left `false` so
+Firefox's `SandboxPolicyContentAudioAddend` — which bundles `(allow
+device-microphone)` unconditionally — is not concatenated. Audio
+output and microphone live in our own fragments instead, each gated
+on a distinct `SandboxPolicy` flag (`allow_audio`,
+`allow_microphone`).
 
 ## Differences vs the Linux backend
 
@@ -198,10 +262,11 @@ Where we diverge:
   `tg_renderer_sandbox_addend` extern hook the vendored `Sandbox.mm`
   checks, so the SBPL itself stays verbatim and re-vendor diffs cleanly.
 - **No "early start" mode.** Firefox supports `-sbStartup` to apply the
-  sandbox before main runs. Our renderer's `lower_token` runs after
-  Vulkan/MoltenVK instance creation and GDExtension load — the loader
-  needs filesystem access the locked-down profile blocks, so we apply
-  late. (Same constraint as the Linux backend.)
+  sandbox before main runs. Our renderer's `lower_token` runs at the
+  top of `Main::setup`, before `register_core_extensions` (so
+  GDExtension `__mod_init_func` blocks already execute at locked-down
+  IL) but after dyld has done its work loading the renderer binary's
+  own dependencies. (Same ordering as the Linux backend post-May-18.)
 - **Env-var fail-closed hooks.** The harness can flip
   `TG_SIGNATURE_FORCE_FAIL` / `TG_SANDBOX_FORCE_FAIL` to verify the
   abort paths. Firefox has internal test hooks but not at this level.
@@ -218,10 +283,11 @@ Chromium code runs), and policy-source-not-in-target-binary.
 
 None of those wins apply to us today: gate-open is interactive (user
 clicks a link), the SBPL compile cost is invisible relative to
-dyld + MoltenVK init (~80–200 ms), our renderer architecturally
-postpones lockdown until after Vulkan/GDExtension init (matches the
-Linux backend), and we ship the launcher and renderer from the same
-source tree so policy-hiding is moot.
+dyld + MoltenVK init (~80–200 ms), our renderer engages lockdown at
+the top of `Main::setup` (matches the Linux backend; MoltenVK then
+initializes inside the sandbox — addend grants the AGX user-clients
+and Metal cache path it needs), and we ship the launcher and renderer
+from the same source tree so policy-hiding is moot.
 
 If we ever need to optimize the parallel-spawn critical path for
 many-renderer scenarios, the chromium-sandbox `sandbox/mac/seatbelt.cc`

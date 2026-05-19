@@ -56,11 +56,25 @@ On Linux, the renderer process runs with:
   (Spectre v4). Best-effort: older kernels / CPUs return EINVAL / ENXIO
   and the renderer continues without that hardening layer.
 
-Same harness modes verify the broker / target flow on both platforms;
-see [[Linux Backend]] for the Linux details and [[Architecture]] for
-the cross-platform shape.
+On macOS, the renderer process runs with:
 
-macOS sandboxing is in development.
+- A Seatbelt profile from `sandbox_init_with_parameters` — Firefox's
+  vendored `SandboxPolicyContent` plus a TheGates-specific addend that
+  unlocks what a 3D Vulkan/MoltenVK renderer needs (per-gate dir rw,
+  Metal shader cache, AGX user-clients, audio HAL, HID, gamepad). The
+  underlying kernel mechanism is TrustedBSD MAC framework hooks; the
+  profile is deny-default.
+- SHA-256 verification of the renderer binary before spawn (same
+  CommonCrypto + `tg_signature_pin` model as Linux). Verify runs on a
+  worker thread; main loop keeps spinning.
+- Same fail-closed contract — `lower_token` returning non-OK aborts
+  the renderer; `verify_binary` returning non-OK refuses to spawn.
+- Spectre mitigations live in the kernel on Apple Silicon (no per-
+  process API). Nothing to engage in userspace.
+
+Same harness modes verify the broker / target flow on all three
+platforms; see [[Linux Backend]] / [[macOS Backend]] for details and
+[[Architecture]] for the cross-platform shape.
 
 ## How to think about it as a user
 
@@ -81,7 +95,7 @@ when the sandbox is correctly engaged. Both the broker-side
 configuration and the renderer's self-reported state are cross-checked.
 
 - Windows: `pwsh godot/tools/run-sandbox-test.ps1`
-- Linux: `bash godot/tools/run-sandbox-test.sh`
+- Linux / macOS: `bash godot/tools/run-sandbox-test.sh`
 
 Both harnesses support `--mode negative-fail-closed` (forces
 `lower_token` to fail; renderer must abort) and `--mode
