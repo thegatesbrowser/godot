@@ -47,6 +47,8 @@
 
 namespace {
 
+constexpr uint64_t HEARTBEAT_INTERVAL_USEC = 1'000'000;
+
 CommandSync *command_sync = nullptr;
 TGExternalTexture *ext_texture = nullptr;
 InputSync *input_sync = nullptr;
@@ -57,6 +59,57 @@ uint64_t heartbeat = 0;
 uint64_t epoch_ms() {
 	static const uint64_t t0 = OS::get_singleton()->get_ticks_msec();
 	return t0;
+}
+
+void exchange_filehandle() {
+	const String filehandle_addr = tg_resolve_ipc_address(FILEHANDLE_PATH);
+	Array arg;
+#ifdef WINDOWS_ENABLED
+	arg.append(filehandle_addr + "|" + itos(OS::get_singleton()->get_process_id()));
+#else
+	arg.append(filehandle_addr);
+#endif
+	command_sync->send_command("send_filehandle", arg);
+
+	print_line("TGExternalTexture: waiting for filehandle");
+	ext_texture = memnew(TGExternalTexture);
+	if (!ext_texture->recv_filehandle(FILEHANDLE_PATH)) {
+		CRASH_NOW_MSG("recv_filehandle failed");
+	}
+}
+
+bool import_external_texture(DisplayServer *p_display_server) {
+	Array arg;
+	arg.append(RenderingDevice::get_singleton()->screen_get_format());
+	command_sync->send_command("ext_texture_format", arg);
+
+	RenderingDevice::TextureView view;
+	RenderingDevice::TextureFormat format;
+	const Size2i size = p_display_server->window_get_size(DisplayServer::MAIN_WINDOW_ID);
+	format.format = RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM;
+	format.usage_bits = RenderingDevice::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+	format.width = static_cast<uint32_t>(size.width);
+	format.height = static_cast<uint32_t>(size.height);
+	format.depth = 1;
+
+	return ext_texture->import(format, view) == OK;
+}
+
+void lockdown(const String &p_pack_path) {
+	Ref<Sandbox> sandbox = Sandbox::create();
+	if (sandbox.is_valid() && sandbox->is_target()) {
+		// Survives __debugbreak; the negative-fail-closed harness checks for this marker.
+		print_line("[LOCKDOWN-ATTEMPT]");
+		if (sandbox->lower_token() != OK) {
+			CRASH_NOW_MSG("Sandbox::lower_token failed; renderer aborting (sandbox lockdown is required).");
+		}
+	}
+
+	SandboxDiagnostics diag(p_pack_path);
+	print_line(diag.to_json_block());
+
+	print_line("[RENDERER-LOCKED]");
+	tg_renderer_phase("lockdown_done");
 }
 
 } // namespace
@@ -71,67 +124,28 @@ void tg_renderer_phase(const char *p_label) {
 	t_prev = now;
 }
 
-void tg_renderer_lockdown(const String &p_pack_path) {
+bool tg_renderer_engage(DisplayServer *p_display_server, const String &p_pack_path) {
 	print_line("[RENDERER-START]");
 
-	Ref<Sandbox> sandbox = Sandbox::create();
-	if (sandbox.is_valid() && sandbox->is_target()) {
-		if (sandbox->lower_token() != OK) {
-			CRASH_NOW_MSG("Sandbox::lower_token failed; renderer aborting (sandbox lockdown is required).");
-		}
-	}
-
-	{
-		SandboxDiagnostics diag(p_pack_path);
-		print_line(diag.to_json_block());
-	}
-
-	print_line("[RENDERER-LOCKED]");
-	tg_renderer_phase("lockdown_done");
-}
-
-bool tg_renderer_boot(DisplayServer *p_display_server) {
 	command_sync = memnew(CommandSync);
 	command_sync->bind_commands();
 	command_sync->socket_connect();
 
-	Array arg;
-	arg.append(RenderingDevice::get_singleton()->screen_get_format());
-	command_sync->send_command("ext_texture_format", arg);
-
-	arg.clear();
-	const String filehandle_addr = tg_resolve_ipc_address(FILEHANDLE_PATH);
-#ifdef WINDOWS_ENABLED
-	arg.append(filehandle_addr + "|" + itos(OS::get_singleton()->get_process_id()));
-#else
-	arg.append(filehandle_addr);
-#endif
-	command_sync->send_command("send_filehandle", arg);
-
-	print_line("TGExternalTexture: waiting for filehandle");
-	ext_texture = memnew(TGExternalTexture);
-	if (!ext_texture->recv_filehandle(FILEHANDLE_PATH)) {
-		return false;
-	}
-
-	RenderingDevice::TextureView view;
-	RenderingDevice::TextureFormat format;
-	const Size2i size = p_display_server->window_get_size(DisplayServer::MAIN_WINDOW_ID);
-	format.format = RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM;
-	format.usage_bits = RenderingDevice::TEXTURE_USAGE_CAN_COPY_TO_BIT;
-	format.width = static_cast<uint32_t>(size.width);
-	format.height = static_cast<uint32_t>(size.height);
-	format.depth = 1;
-
-	if (ext_texture->import(format, view) != OK) {
-		return false;
-	}
+	exchange_filehandle();
 
 	input_sync = memnew(InputSync);
 	input_sync->socket_connect();
 
-	print_line("[RENDERER-READY]");
+	if (!import_external_texture(p_display_server)) {
+		return false;
+	}
+
+	lockdown(p_pack_path);
 	return true;
+}
+
+void tg_renderer_boot() {
+	print_line("[RENDERER-READY]");
 }
 
 void tg_renderer_loop_iterate(uint64_t p_ticks_elapsed) {
@@ -152,9 +166,9 @@ void tg_renderer_loop_iterate(uint64_t p_ticks_elapsed) {
 	}
 
 	heartbeat += p_ticks_elapsed;
-	if (heartbeat > 1000000 && first_frame_sent) {
+	if (heartbeat > HEARTBEAT_INTERVAL_USEC && first_frame_sent) {
 		command_sync->send_command("heartbeat", Array());
-		heartbeat %= 1000000;
+		heartbeat %= HEARTBEAT_INTERVAL_USEC;
 	}
 
 	ext_texture->copy_from_screen();
