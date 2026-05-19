@@ -207,36 +207,21 @@ Error apply_landlock(const String &p_rw_dir, const Vector<String> &p_rw_files,
 		}
 	}
 
-	// Read-side roots the SandboxPolicy doesn't enumerate: shared libs, fonts,
-	// nsswitch + /etc/vulkan ICD JSON, /proc + /sys for driver enumeration,
-	// /etc/alsa + /proc/asound for ALSA fallback.
+	// Read-side system roots the SandboxPolicy doesn't enumerate: shared libs,
+	// fonts, /etc system config (loader cache, nsswitch, hosts, Vulkan + GLVND
+	// ICD JSON, ALSA/Pulse), /proc + /sys for hardware enumeration.
 	static const char *kSystemReadRoots[] = {
-		"/usr/lib",
-		"/usr/lib64",
+		"/usr",
 		"/lib",
 		"/lib64",
-		"/usr/share",
-		"/etc/ld.so.cache",
-		"/etc/ld.so.conf",
-		"/etc/ld.so.conf.d",
-		"/etc/fonts",
-		"/etc/passwd",
-		"/etc/nsswitch.conf",
-		"/etc/host.conf",
-		"/etc/hosts",
-		"/etc/resolv.conf",
-		"/etc/vulkan",
-		"/etc/glvnd",
-		"/etc/alsa",
-		"/etc/pulse",
+		"/etc",
 		"/proc/self",
 		"/proc/cpuinfo",
 		"/proc/meminfo",
 		"/proc/sys/kernel",
 		"/proc/asound",
 		"/sys/devices",
-		"/sys/class/drm",
-		"/sys/class/sound",
+		"/sys/class",
 		"/sys/dev/char",
 	};
 	for (const char *p : kSystemReadRoots) {
