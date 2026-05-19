@@ -312,6 +312,12 @@ RendererCompositorRD::RendererCompositorRD() {
 
 		// Check if a directory exists for the shader cache to pull shaders from as read-only. This is used on exported projects with baked shaders.
 		String shader_cache_res_dir = "res://.godot/shader_cache";
+#ifdef TG_RENDERER
+		extern String tg_shader_cache_res_dir_override;
+		if (!tg_shader_cache_res_dir_override.is_empty()) {
+			shader_cache_res_dir = tg_shader_cache_res_dir_override;
+		}
+#endif
 		Ref<DirAccess> res_da = DirAccess::open(shader_cache_res_dir);
 		if (res_da.is_valid()) {
 			ShaderRD::set_shader_cache_res_dir(shader_cache_res_dir);

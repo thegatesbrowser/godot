@@ -292,6 +292,7 @@ String gdext_libs_dir = "";
 String tg_user_data_dir_override = "";
 String tg_ipc_dir_override = "";
 String tg_main_pack_path = "";
+String tg_shader_cache_res_dir_override = "";
 
 // Constants.
 
@@ -1765,6 +1766,15 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				N = N->next();
 			} else {
 				OS::get_singleton()->print("Missing path to IPC directory.\n");
+				goto error;
+			}
+
+		} else if (arg == "--tg-shader-cache-res-dir") {
+			if (N) {
+				tg_shader_cache_res_dir_override = N->get();
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing path to shader cache res directory.\n");
 				goto error;
 			}
 
