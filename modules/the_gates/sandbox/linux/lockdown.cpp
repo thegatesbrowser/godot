@@ -61,6 +61,8 @@
 
 namespace {
 
+int g_landlock_abi = 0;
+
 // Unbuffered write(2) to fd 2 — survives a SIGSYS or abort that follows.
 void fputs_log(const String &p_msg) {
 	const CharString utf8 = (p_msg + "\n").utf8();
@@ -172,6 +174,7 @@ Error apply_landlock(const String &p_rw_dir, const Vector<String> &p_rw_files,
 	if (abi < 0) {
 		return OK;
 	}
+	g_landlock_abi = abi;
 
 	const uint64_t fs_rights = supported_fs_rights(abi);
 	struct landlock_ruleset_attr ruleset = {};
@@ -327,6 +330,10 @@ void apply_speculation_ctrl() {
 }
 
 } // namespace
+
+int tg_lockdown_landlock_abi() {
+	return g_landlock_abi;
+}
 
 Error tg_apply_lockdown(const String &p_rw_dir,
 		const Vector<String> &p_rw_files,

@@ -46,6 +46,8 @@
 #endif
 
 #ifdef LINUXBSD_ENABLED
+#include "linux/lockdown.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/landlock.h>
@@ -282,14 +284,10 @@ Dictionary run_canaries(const String &p_pack_path) {
 
 #ifdef LINUXBSD_ENABLED
 
+// Cached by lockdown.cpp before seccomp installs; querying landlock_create_ruleset
+// here would return EPERM because seccomp's allowlist doesn't include it.
 int read_landlock_abi() {
-	const long r = ::syscall(__NR_landlock_create_ruleset,
-			(void *)nullptr, (size_t)0,
-			(uint32_t)LANDLOCK_CREATE_RULESET_VERSION);
-	if (r < 0) {
-		return 0;
-	}
-	return (int)r;
+	return tg_lockdown_landlock_abi();
 }
 
 String read_first_line(const char *p_path) {
@@ -633,10 +631,13 @@ Dictionary SandboxDiagnostics::to_dict() const {
 #endif
 	);
 
-	const int seccomp_mode = ::prctl(PR_GET_SECCOMP);
+	const int seccomp_mode = ::prctl(PR_GET_SECCOMP, 0, 0, 0, 0);
 	diag["seccomp_mode"] = seccomp_mode;
 	diag["seccomp"] = seccomp_mode_label(seccomp_mode);
-	diag["no_new_privs"] = ::prctl(PR_GET_NO_NEW_PRIVS) == 1;
+	// glibc's prctl is varargs; calling with fewer than 5 args leaves arg2-5
+	// as register garbage and the kernel returns -1 EINVAL even for the
+	// no-arg PR_GET_* options.
+	diag["no_new_privs"] = ::prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) == 1;
 	diag["landlock_abi"] = read_landlock_abi();
 	diag["userns_active"] = detect_userns_active();
 
