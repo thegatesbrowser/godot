@@ -120,7 +120,7 @@ modules/the_gates/
 │   │   ├── sandbox_win.cpp/.h       SandboxWin : Sandbox
 │   │   ├── broker_delegate.cpp/.h   chromium BrokerServicesDelegate impl (was the long-named file)
 │   │   ├── handle_scope.h           RAII HANDLE wrappers (template, header-only)
-│   │   ├── socket_acl.cpp/.h        tg_apply_untrusted_acl() — depth-limited tree walk
+│   │   ├── socket_acl.cpp/.h        tg_apply_untrusted_acl() — one-shot tree walk gated on root SACL
 │   │   ├── signature_verify.cpp     Authenticode via WinVerifyTrust + thumbprint pin
 │   │   └── linker_stubs.cpp         shim for chromium PolicyDiagnostic + DumpWithoutCrashing
 │   │
