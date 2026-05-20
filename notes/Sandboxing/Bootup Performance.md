@@ -4,9 +4,10 @@ Where time goes from `gate_load` (download complete) to `first_frame` received b
 
 ## TL;DR
 
-- **Current**: 2.317s.
-- **v0.24.4 reference**: 1.667s.
+- **Current (Linux)**: 2.317s.
+- **v0.24.4 reference (Linux)**: 1.667s.
 - **Regression: +650ms — 100% sandbox stack.** Engine version drift contributes zero.
+- **Current (Windows, clang-cl + lld release)**: 2.79s warm / 6.45s on a cold Vulkan pipeline cache. v0.24.4 on the same machine was ~1s, so the Windows regression is ~+1.8s — proportionally larger than Linux. Same sandbox stack; Windows Defender additionally adds a one-time scan penalty on freshly-built renderer binaries (~30s+ on the very first run).
 
 | Cost | Measured | Mechanism |
 |---|---|---|
@@ -118,6 +119,8 @@ Curiosity: without the sandbox, the shader cache phase loads *before* `display_s
 | May 18 — release LLVM | **2.590s** world / **2.264s** tutorial | release (clang) | full sandbox, lockdown-first |
 | May 18 — release GCC | (not measured world) / **2.317s** tutorial | release (gcc + LTO) | full sandbox, lockdown-first |
 | May 18 — macOS dev (Apple M1) | **8.49s** world / **6.06s** tutorial | dev (clang) | Seatbelt content profile, lockdown-first |
+| Feb (v0.24.4) — Windows release | (not measured) / **~1s** tutorial | release | pre-phase-3 |
+| May 20 — Windows release | (not measured) / **2.79s** tutorial warm, 6.45s cold | release (clang-cl + lld) | full sandbox, lockdown-first |
 
 Key inflection points:
 
