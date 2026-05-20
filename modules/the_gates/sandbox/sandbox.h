@@ -76,6 +76,12 @@ public:
 	virtual Error lower_token() = 0;
 	virtual bool is_target() const = 0;
 
+	// Snapshot of the OS-level network filter the platform uses to drop
+	// renderer outbound to RFC 1918 / loopback / link-local. Used by the
+	// launcher's --network-diagnostic flag and by support tooling. Empty
+	// Dictionary on platforms without a filter.
+	virtual Dictionary network_state() const { return Dictionary(); }
+
 	Sandbox() = default;
 	virtual ~Sandbox();
 };

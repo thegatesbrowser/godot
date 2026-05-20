@@ -52,6 +52,44 @@
 
 namespace {
 
+// HKLM key the elevated tg-wfp-tool writes during install (and clears during
+// uninstall). The user-mode launcher reads it because WFP filter / provider
+// enumeration is denied to non-admin callers — the BFE's default DACL hides
+// the filter list from BUILTIN\Users. Admin to write, anyone to read.
+constexpr const wchar_t *kWFPInstallMarkerKey = L"SOFTWARE\\TheGates\\NetworkFilter";
+
+bool read_wfp_install_marker(uint32_t *r_filter_count) {
+	HKEY key = nullptr;
+	LSTATUS res = RegOpenKeyExW(HKEY_LOCAL_MACHINE, kWFPInstallMarkerKey,
+			0, KEY_QUERY_VALUE | KEY_WOW64_64KEY, &key);
+	if (res != ERROR_SUCCESS) {
+		return false;
+	}
+	DWORD installed = 0;
+	DWORD value_size = sizeof(installed);
+	res = RegQueryValueExW(key, L"Installed", nullptr, nullptr,
+			reinterpret_cast<BYTE *>(&installed), &value_size);
+	if (res != ERROR_SUCCESS || installed != 1) {
+		RegCloseKey(key);
+		return false;
+	}
+	if (r_filter_count != nullptr) {
+		DWORD filter_count = 0;
+		value_size = sizeof(filter_count);
+		if (RegQueryValueExW(key, L"FilterCount", nullptr, nullptr,
+					reinterpret_cast<BYTE *>(&filter_count), &value_size) == ERROR_SUCCESS) {
+			*r_filter_count = filter_count;
+		}
+	}
+	RegCloseKey(key);
+	return true;
+}
+
+bool force_network_filter_fail() {
+	wchar_t buf[8] = { 0 };
+	return ::GetEnvironmentVariableW(L"TG_NETWORK_FILTER_FORCE_FAIL", buf, 8) > 0 && buf[0] == L'1';
+}
+
 void write_broker_policy_json(const String &p_log_path, const String &p_executable, DWORD p_pid,
 		const Ref<SandboxPolicy> &p_policy) {
 	Dictionary policy = p_policy->to_dict();
@@ -115,6 +153,26 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	if (broker_service == nullptr) {
 		ERR_PRINT("SandboxWin::spawn_target called from a sandbox target process");
 		return result;
+	}
+
+	// Fail-closed: refuse to spawn if the WFP filter the installer was supposed
+	// to register isn't present. Marker is written by tg-wfp-tool.exe during
+	// the installer's elevated phase; absence means either the install step
+	// was skipped or someone cleared it. Either way, don't run with the
+	// renderer's outbound private-network access unrestricted.
+	if (p_policy->is_private_networks_blocked()) {
+		if (force_network_filter_fail()) {
+			ERR_PRINT("SandboxWin: TG_NETWORK_FILTER_FORCE_FAIL=1 — refusing to spawn renderer.");
+			return result;
+		}
+		uint32_t filter_count = 0;
+		if (!read_wfp_install_marker(&filter_count)) {
+			ERR_PRINT("SandboxWin: WFP install marker missing under "
+					  "HKLM\\SOFTWARE\\TheGates\\NetworkFilter. "
+					  "Run the installer's WFP setup step (tg-wfp-tool.exe install).");
+			return result;
+		}
+		print_line(vformat("SandboxWin: %d WFP filters registered (per install marker)", (int)filter_count));
 	}
 
 	const String stdout_log_path = p_policy->get_child_stdout_log_path();
@@ -341,6 +399,16 @@ Error SandboxWin::lower_token() {
 	target_service->LowerToken();
 	print_line("SandboxWin: LowerToken complete; renderer is now sandboxed");
 	return OK;
+}
+
+Dictionary SandboxWin::network_state() const {
+	Dictionary out;
+	uint32_t filter_count = 0;
+	const bool installed = read_wfp_install_marker(&filter_count);
+	out["installed"] = installed;
+	out["filter_count"] = (int)filter_count;
+	out["status"] = installed ? "active" : "no_filters_installed";
+	return out;
 }
 
 bool SandboxWin::broker_initialized = false;
