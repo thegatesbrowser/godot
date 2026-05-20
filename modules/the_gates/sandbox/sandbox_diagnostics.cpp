@@ -36,6 +36,9 @@
 #include "core/string/print_string.h"
 
 #ifdef WINDOWS_ENABLED
+#include <winsock2.h>
+#include <ws2tcpip.h>
+// windows.h after winsock2.h to avoid winsock.h conflicts.
 #include <windows.h>
 
 #include <fileapi.h>
@@ -43,6 +46,7 @@
 #include <sddl.h>
 #include <securitybaseapi.h>
 #include <winternl.h>
+#pragma comment(lib, "ws2_32.lib")
 #endif
 
 #ifdef LINUXBSD_ENABLED
@@ -70,6 +74,18 @@ extern "C" int sandbox_check(pid_t pid, const char *operation, int type, ...);
 #endif
 
 namespace {
+
+// All canaries return a {status, error?} Dictionary for shape uniformity. The
+// harness asserts on .status; .error is a platform errno for debugging blocked
+// outcomes and is omitted when zero.
+Dictionary make_canary(const String &p_status, int p_error = 0) {
+	Dictionary d;
+	d["status"] = p_status;
+	if (p_error != 0) {
+		d["error"] = p_error;
+	}
+	return d;
+}
 
 #ifdef WINDOWS_ENABLED
 
@@ -205,15 +221,14 @@ Dictionary run_canaries(const String &p_pack_path) {
 			String path = String::utf16((const char16_t *)profile) + "\\thegates-sandbox-canary.txt";
 			HANDLE h = CreateFileW((LPCWSTR)path.utf16().get_data(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 			if (h != INVALID_HANDLE_VALUE) {
-				out["canary_file_write"] = "allowed";
+				out["canary_file_write"] = make_canary("allowed");
 				CloseHandle(h);
 				DeleteFileW((LPCWSTR)path.utf16().get_data());
 			} else {
-				out["canary_file_write"] = "blocked";
-				out["canary_file_write_error"] = (int)GetLastError();
+				out["canary_file_write"] = make_canary("blocked", (int)GetLastError());
 			}
 		} else {
-			out["canary_file_write"] = "skipped_no_userprofile";
+			out["canary_file_write"] = make_canary("skipped_no_userprofile");
 		}
 	}
 
@@ -222,11 +237,10 @@ Dictionary run_canaries(const String &p_pack_path) {
 		HKEY key = nullptr;
 		LONG res = RegOpenKeyExW(HKEY_CURRENT_USER, L"Software", 0, KEY_SET_VALUE, &key);
 		if (res == ERROR_SUCCESS) {
-			out["canary_reg_write"] = "allowed";
+			out["canary_reg_write"] = make_canary("allowed");
 			RegCloseKey(key);
 		} else {
-			out["canary_reg_write"] = "blocked";
-			out["canary_reg_write_error"] = (int)res;
+			out["canary_reg_write"] = make_canary("blocked", (int)res);
 		}
 	}
 
@@ -238,10 +252,9 @@ Dictionary run_canaries(const String &p_pack_path) {
 		if (f.is_valid()) {
 			f->store_string(vformat("pid=%d", (int)GetCurrentProcessId()));
 			f->close();
-			out["canary_user_dir_write"] = "allowed";
+			out["canary_user_dir_write"] = make_canary("allowed");
 		} else {
-			out["canary_user_dir_write"] = "blocked";
-			out["canary_user_dir_write_error"] = (int)err;
+			out["canary_user_dir_write"] = make_canary("blocked", (int)err);
 		}
 	}
 
@@ -253,10 +266,9 @@ Dictionary run_canaries(const String &p_pack_path) {
 		if (f.is_valid()) {
 			f->store_string(vformat("pid=%d", (int)GetCurrentProcessId()));
 			f->close();
-			out["canary_sibling_gate_write"] = "allowed";
+			out["canary_sibling_gate_write"] = make_canary("allowed");
 		} else {
-			out["canary_sibling_gate_write"] = "blocked";
-			out["canary_sibling_gate_write_error"] = (int)err;
+			out["canary_sibling_gate_write"] = make_canary("blocked", (int)err);
 		}
 	}
 
@@ -267,13 +279,94 @@ Dictionary run_canaries(const String &p_pack_path) {
 			Error err = OK;
 			Ref<FileAccess> f = FileAccess::open(p_pack_path, FileAccess::READ, &err);
 			if (f.is_valid()) {
-				out["canary_pck_read"] = "allowed";
+				out["canary_pck_read"] = make_canary("allowed");
 			} else {
-				out["canary_pck_read"] = "blocked";
-				out["canary_pck_read_error"] = (int)err;
+				out["canary_pck_read"] = make_canary("blocked", (int)err);
 			}
 		} else {
-			out["canary_pck_read"] = "skipped_no_pck_path";
+			out["canary_pck_read"] = make_canary("skipped_no_pck_path");
+		}
+	}
+
+	// Network canaries. WSAStartup gracefully fails inside the sandbox; the
+	// canary then reports "blocked" via that failure, which is the correct
+	// outcome (no winsock = no network).
+	{
+		WSADATA wsa = {};
+		const int wsa_rc = WSAStartup(MAKEWORD(2, 2), &wsa);
+
+		auto try_connect = [&](uint32_t addr_be, uint16_t port_be) -> Dictionary {
+			Dictionary r;
+			if (wsa_rc != 0) {
+				r["status"] = "blocked";
+				r["error"] = wsa_rc;
+				return r;
+			}
+			SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+			if (sock == INVALID_SOCKET) {
+				r["status"] = "blocked";
+				r["error"] = (int)WSAGetLastError();
+				return r;
+			}
+			// Non-blocking + select() with a 1.5s timeout. WFP's
+			// ALE_AUTH_CONNECT verdict is delivered as WSAEACCES via the
+			// connect failure; a non-blocking socket sees this through
+			// select(WRITE) + SO_ERROR (or the FD ending up in the except
+			// set on Windows). The canary must wait long enough for the
+			// kernel's filter arbitration to complete, but short enough not
+			// to stall the harness on real network latency.
+			u_long nb = 1;
+			ioctlsocket(sock, FIONBIO, &nb);
+			sockaddr_in dest = {};
+			dest.sin_family = AF_INET;
+			dest.sin_port = port_be;
+			dest.sin_addr.s_addr = addr_be;
+			const int rc = ::connect(sock, reinterpret_cast<sockaddr *>(&dest), sizeof(dest));
+			int last = WSAGetLastError();
+			if (rc != 0 && last != WSAEWOULDBLOCK) {
+				closesocket(sock);
+				r["status"] = "blocked";
+				r["error"] = last;
+				return r;
+			}
+			fd_set wfds, efds;
+			FD_ZERO(&wfds);
+			FD_ZERO(&efds);
+			FD_SET(sock, &wfds);
+			FD_SET(sock, &efds);
+			timeval tv = { 1, 500000 };
+			const int sel = select(0, nullptr, &wfds, &efds, &tv);
+			if (sel <= 0) {
+				closesocket(sock);
+				r["status"] = "blocked";
+				r["error"] = sel == 0 ? -1 : (int)WSAGetLastError();
+				return r;
+			}
+			int so_error = 0;
+			int so_error_len = sizeof(so_error);
+			if (FD_ISSET(sock, &efds) || (FD_ISSET(sock, &wfds) &&
+					getsockopt(sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&so_error), &so_error_len) == 0 &&
+					so_error != 0)) {
+				closesocket(sock);
+				r["status"] = "blocked";
+				r["error"] = so_error != 0 ? so_error : (int)WSAGetLastError();
+				return r;
+			}
+			closesocket(sock);
+			r["status"] = "allowed";
+			return r;
+		};
+
+		// 192.168.1.1:80 — must be blocked by the WFP filter.
+		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80));
+		// 127.0.0.1:22 — must be blocked too (loopback CIDR is in our deny set).
+		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22));
+		// 1.1.1.1:443 — public; must succeed (or fail only because of network
+		// reachability, which the harness tolerates).
+		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443));
+
+		if (wsa_rc == 0) {
+			WSACleanup();
 		}
 	}
 
@@ -377,12 +470,11 @@ Dictionary run_canaries_linux(const String &p_pack_path) {
 		const String path = "/etc/thegates-sandbox-canary";
 		const int fd = ::open(path.utf8().get_data(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
 		if (fd >= 0) {
-			out["canary_etc_write"] = "allowed";
+			out["canary_etc_write"] = make_canary("allowed");
 			::close(fd);
 			::unlink(path.utf8().get_data());
 		} else {
-			out["canary_etc_write"] = "blocked";
-			out["canary_etc_write_error"] = (int)errno;
+			out["canary_etc_write"] = make_canary("blocked", (int)errno);
 		}
 	}
 
@@ -393,15 +485,14 @@ Dictionary run_canaries_linux(const String &p_pack_path) {
 			const String path = String::utf8(home) + "/.thegates-sandbox-canary";
 			const int fd = ::open(path.utf8().get_data(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
 			if (fd >= 0) {
-				out["canary_file_write"] = "allowed";
+				out["canary_file_write"] = make_canary("allowed");
 				::close(fd);
 				::unlink(path.utf8().get_data());
 			} else {
-				out["canary_file_write"] = "blocked";
-				out["canary_file_write_error"] = (int)errno;
+				out["canary_file_write"] = make_canary("blocked", (int)errno);
 			}
 		} else {
-			out["canary_file_write"] = "skipped_no_home";
+			out["canary_file_write"] = make_canary("skipped_no_home");
 		}
 	}
 
@@ -413,10 +504,9 @@ Dictionary run_canaries_linux(const String &p_pack_path) {
 		if (f.is_valid()) {
 			f->store_string(vformat("pid=%d", (int)::getpid()));
 			f->close();
-			out["canary_user_dir_write"] = "allowed";
+			out["canary_user_dir_write"] = make_canary("allowed");
 		} else {
-			out["canary_user_dir_write"] = "blocked";
-			out["canary_user_dir_write_error"] = (int)err;
+			out["canary_user_dir_write"] = make_canary("blocked", (int)err);
 		}
 	}
 
@@ -428,33 +518,42 @@ Dictionary run_canaries_linux(const String &p_pack_path) {
 		if (f.is_valid()) {
 			f->store_string(vformat("pid=%d", (int)::getpid()));
 			f->close();
-			out["canary_sibling_gate_write"] = "allowed";
+			out["canary_sibling_gate_write"] = make_canary("allowed");
 		} else {
-			out["canary_sibling_gate_write"] = "blocked";
-			out["canary_sibling_gate_write_error"] = (int)err;
+			out["canary_sibling_gate_write"] = make_canary("blocked", (int)err);
 		}
 	}
 
-	// Network canary: a non-loopback TCP connect must be blocked.
+	// Network canaries: per-destination connect attempts.
 	{
-		const int sock = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-		if (sock < 0) {
-			out["canary_network"] = "blocked";
-			out["canary_network_error"] = (int)errno;
-		} else {
+		auto try_connect = [](uint32_t addr_be, uint16_t port_be) -> Dictionary {
+			Dictionary r;
+			const int sock = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+			if (sock < 0) {
+				r["status"] = "blocked";
+				r["error"] = (int)errno;
+				return r;
+			}
 			sockaddr_in addr = {};
 			addr.sin_family = AF_INET;
-			addr.sin_port = htons(80);
-			addr.sin_addr.s_addr = htonl(0x08080808u); // 8.8.8.8
+			addr.sin_port = port_be;
+			addr.sin_addr.s_addr = addr_be;
 			const int rc = ::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
 			if (rc == 0 || (rc < 0 && errno == EINPROGRESS)) {
-				out["canary_network"] = "allowed";
+				r["status"] = "allowed";
 			} else {
-				out["canary_network"] = "blocked";
-				out["canary_network_error"] = (int)errno;
+				r["status"] = "blocked";
+				r["error"] = (int)errno;
 			}
 			::close(sock);
-		}
+			return r;
+		};
+
+		// Must be blocked: the network namespace + nftables rules drop these.
+		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80)); // 192.168.1.1:80
+		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22)); // 127.0.0.1:22
+		// Must succeed (or fail for network reachability reasons only).
+		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443)); // 1.1.1.1:443
 	}
 
 	// .pck read canary: load() re-opens the pack on every resource fetch.
@@ -464,13 +563,12 @@ Dictionary run_canaries_linux(const String &p_pack_path) {
 			Error err = OK;
 			Ref<FileAccess> f = FileAccess::open(p_pack_path, FileAccess::READ, &err);
 			if (f.is_valid()) {
-				out["canary_pck_read"] = "allowed";
+				out["canary_pck_read"] = make_canary("allowed");
 			} else {
-				out["canary_pck_read"] = "blocked";
-				out["canary_pck_read_error"] = (int)err;
+				out["canary_pck_read"] = make_canary("blocked", (int)err);
 			}
 		} else {
-			out["canary_pck_read"] = "skipped_no_pck_path";
+			out["canary_pck_read"] = make_canary("skipped_no_pck_path");
 		}
 	}
 
@@ -489,12 +587,11 @@ Dictionary run_canaries_macos(const String &p_pack_path) {
 		const String path = "/etc/thegates-sandbox-canary";
 		const int fd = ::open(path.utf8().get_data(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
 		if (fd >= 0) {
-			out["canary_etc_write"] = "allowed";
+			out["canary_etc_write"] = make_canary("allowed");
 			::close(fd);
 			::unlink(path.utf8().get_data());
 		} else {
-			out["canary_etc_write"] = "blocked";
-			out["canary_etc_write_error"] = (int)errno;
+			out["canary_etc_write"] = make_canary("blocked", (int)errno);
 		}
 	}
 
@@ -505,15 +602,14 @@ Dictionary run_canaries_macos(const String &p_pack_path) {
 			const String path = String::utf8(home) + "/.thegates-sandbox-canary";
 			const int fd = ::open(path.utf8().get_data(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
 			if (fd >= 0) {
-				out["canary_file_write"] = "allowed";
+				out["canary_file_write"] = make_canary("allowed");
 				::close(fd);
 				::unlink(path.utf8().get_data());
 			} else {
-				out["canary_file_write"] = "blocked";
-				out["canary_file_write_error"] = (int)errno;
+				out["canary_file_write"] = make_canary("blocked", (int)errno);
 			}
 		} else {
-			out["canary_file_write"] = "skipped_no_home";
+			out["canary_file_write"] = make_canary("skipped_no_home");
 		}
 	}
 
@@ -524,10 +620,9 @@ Dictionary run_canaries_macos(const String &p_pack_path) {
 		if (f.is_valid()) {
 			f->store_string(vformat("pid=%d", (int)::getpid()));
 			f->close();
-			out["canary_user_dir_write"] = "allowed";
+			out["canary_user_dir_write"] = make_canary("allowed");
 		} else {
-			out["canary_user_dir_write"] = "blocked";
-			out["canary_user_dir_write_error"] = (int)err;
+			out["canary_user_dir_write"] = make_canary("blocked", (int)err);
 		}
 	}
 
@@ -539,39 +634,46 @@ Dictionary run_canaries_macos(const String &p_pack_path) {
 		if (f.is_valid()) {
 			f->store_string(vformat("pid=%d", (int)::getpid()));
 			f->close();
-			out["canary_sibling_gate_write"] = "allowed";
+			out["canary_sibling_gate_write"] = make_canary("allowed");
 		} else {
-			out["canary_sibling_gate_write"] = "blocked";
-			out["canary_sibling_gate_write_error"] = (int)err;
+			out["canary_sibling_gate_write"] = make_canary("blocked", (int)err);
 		}
 	}
 
-	// Network canary: a non-loopback TCP connect — blocked when seccomp denies
-	// socket creation, allowed otherwise. Non-blocking so the canary doesn't
-	// stall on real network latency to 8.8.8.8.
+	// Network canaries: per-destination connect attempts. The NEFilterDataProvider
+	// system extension drops private/loopback destinations in kernel; public
+	// addresses pass through.
 	{
-		const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-		if (sock < 0) {
-			out["canary_network"] = "blocked";
-			out["canary_network_error"] = (int)errno;
-		} else {
+		auto try_connect = [](uint32_t addr_be, uint16_t port_be) -> Dictionary {
+			Dictionary r;
+			const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+			if (sock < 0) {
+				r["status"] = "blocked";
+				r["error"] = (int)errno;
+				return r;
+			}
 			int flags = ::fcntl(sock, F_GETFL, 0);
 			if (flags >= 0) {
 				::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 			}
 			sockaddr_in addr = {};
 			addr.sin_family = AF_INET;
-			addr.sin_port = htons(80);
-			addr.sin_addr.s_addr = htonl(0x08080808u); // 8.8.8.8
+			addr.sin_port = port_be;
+			addr.sin_addr.s_addr = addr_be;
 			const int rc = ::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
 			if (rc == 0 || (rc < 0 && errno == EINPROGRESS)) {
-				out["canary_network"] = "allowed";
+				r["status"] = "allowed";
 			} else {
-				out["canary_network"] = "blocked";
-				out["canary_network_error"] = (int)errno;
+				r["status"] = "blocked";
+				r["error"] = (int)errno;
 			}
 			::close(sock);
-		}
+			return r;
+		};
+
+		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80)); // 192.168.1.1:80
+		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22)); // 127.0.0.1:22
+		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443)); // 1.1.1.1:443
 	}
 
 	// .pck read canary: load() re-opens the pack on every resource fetch.
@@ -581,13 +683,12 @@ Dictionary run_canaries_macos(const String &p_pack_path) {
 			Error err = OK;
 			Ref<FileAccess> f = FileAccess::open(p_pack_path, FileAccess::READ, &err);
 			if (f.is_valid()) {
-				out["canary_pck_read"] = "allowed";
+				out["canary_pck_read"] = make_canary("allowed");
 			} else {
-				out["canary_pck_read"] = "blocked";
-				out["canary_pck_read_error"] = (int)err;
+				out["canary_pck_read"] = make_canary("blocked", (int)err);
 			}
 		} else {
-			out["canary_pck_read"] = "skipped_no_pck_path";
+			out["canary_pck_read"] = make_canary("skipped_no_pck_path");
 		}
 	}
 

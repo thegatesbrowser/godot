@@ -36,7 +36,7 @@ Dictionary SandboxPolicy::to_dict() const {
 	out["rw_files"] = rw_files;
 	out["ro_files"] = ro_files;
 	out["child_stdout_log_path"] = child_stdout_log_path;
-	out["allow_network"] = allow_network;
+	out["block_private_networks"] = block_private_networks;
 	out["allow_audio"] = allow_audio;
 	out["allow_microphone"] = allow_microphone;
 	out["integrity_floor"] = integrity_floor;
@@ -58,8 +58,8 @@ void SandboxPolicy::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_child_stdout_log_path", "path"), &SandboxPolicy::set_child_stdout_log_path);
 	ClassDB::bind_method(D_METHOD("get_child_stdout_log_path"), &SandboxPolicy::get_child_stdout_log_path);
 
-	ClassDB::bind_method(D_METHOD("set_allow_network", "allow"), &SandboxPolicy::set_allow_network);
-	ClassDB::bind_method(D_METHOD("is_network_allowed"), &SandboxPolicy::is_network_allowed);
+	ClassDB::bind_method(D_METHOD("set_block_private_networks", "block"), &SandboxPolicy::set_block_private_networks);
+	ClassDB::bind_method(D_METHOD("is_private_networks_blocked"), &SandboxPolicy::is_private_networks_blocked);
 
 	ClassDB::bind_method(D_METHOD("set_allow_audio", "allow"), &SandboxPolicy::set_allow_audio);
 	ClassDB::bind_method(D_METHOD("is_audio_allowed"), &SandboxPolicy::is_audio_allowed);

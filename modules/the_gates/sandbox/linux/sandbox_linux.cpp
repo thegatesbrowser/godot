@@ -44,9 +44,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -95,6 +97,123 @@ void child_exec_after_log_dup(const char *log_path, char *const argv[], char *co
 	const ssize_t w = ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
 	(void)w;
 	::_exit(127);
+}
+
+// Child-side namespace sync: unshare user+net namespaces, signal the parent
+// the namespace exists, wait for parent to finish privileged setup (veth +
+// nftables), then fall through to log dup + execve.
+void child_netns_handshake(int sync_read_fd, int sync_write_fd, const char *log_path,
+		char *const argv[], char *const envp[]) {
+	if (::unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0) {
+		static const char msg[] = "tg_spawn: unshare failed\n";
+		const ssize_t w = ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+		(void)w;
+		::_exit(127);
+	}
+	char ready = 'r';
+	if (::write(sync_write_fd, &ready, 1) != 1) {
+		::_exit(127);
+	}
+	::close(sync_write_fd);
+	char go = 0;
+	if (::read(sync_read_fd, &go, 1) != 1 || go != 'g') {
+		static const char msg[] = "tg_spawn: parent sync failed\n";
+		const ssize_t w = ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+		(void)w;
+		::_exit(127);
+	}
+	::close(sync_read_fd);
+	child_exec_after_log_dup(log_path, argv, envp);
+}
+
+// Locates the setuid network-namespace helper installed by the package.
+// Search order matches Linux distribution conventions: /usr/local/sbin for
+// hand-installed sysadmin binaries, /usr/sbin for package-managed ones.
+// The mode-4755 check is a defense against a non-setuid binary in the path.
+String find_netns_helper() {
+	static const char *candidates[] = {
+		"/usr/local/sbin/tg-netns-helper",
+		"/usr/sbin/tg-netns-helper",
+		nullptr,
+	};
+	for (int i = 0; candidates[i] != nullptr; i++) {
+		struct stat st = {};
+		if (::stat(candidates[i], &st) != 0) {
+			continue;
+		}
+		if ((st.st_mode & S_ISUID) == 0 || st.st_uid != 0) {
+			continue;
+		}
+		return String::utf8(candidates[i]);
+	}
+	return String();
+}
+
+// Invokes tg-netns-helper. The helper creates a veth pair into the child's
+// netns and installs nftables drops for RFC 1918 / loopback / link-local on
+// the renderer side. Returns OK on success; non-OK fails the spawn closed.
+Error invoke_netns_helper(const String &helper, pid_t child_pid) {
+	const String pid_str = itos(child_pid);
+	const String veth_host = vformat("veth_renderer_%d", child_pid);
+	const String veth_ns = vformat("veth_render_%d_ns", child_pid);
+
+	const char *argv[] = {
+		helper.utf8().get_data(),
+		pid_str.utf8().get_data(),
+		veth_host.utf8().get_data(),
+		veth_ns.utf8().get_data(),
+		nullptr,
+	};
+
+	const pid_t pid = ::fork();
+	if (pid < 0) {
+		return ERR_CANT_FORK;
+	}
+	if (pid == 0) {
+		::execv(argv[0], const_cast<char *const *>(argv));
+		::_exit(127);
+	}
+
+	int status = 0;
+	::waitpid(pid, &status, 0);
+	const bool ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+	return ok ? OK : ERR_CANT_CONNECT;
+}
+
+bool force_network_filter_fail() {
+	const char *v = ::getenv("TG_NETWORK_FILTER_FORCE_FAIL");
+	return v != nullptr && v[0] == '1';
+}
+
+// Parent-side: write identity uid/gid mapping into the child's user namespace
+// ID maps. setgroups must be "deny" before gid_map (user_namespaces(7)).
+bool write_child_idmap(pid_t child_pid) {
+	auto write_file = [](const String &path, const String &content) -> bool {
+		const int fd = ::open(path.utf8().get_data(), O_WRONLY | O_CLOEXEC);
+		if (fd < 0) {
+			return false;
+		}
+		const CharString c = content.utf8();
+		const ssize_t want = c.length();
+		const ssize_t got = ::write(fd, c.get_data(), want);
+		::close(fd);
+		return got == want;
+	};
+
+	const String pid_str = itos(child_pid);
+	const uid_t uid = ::getuid();
+	const gid_t gid = ::getgid();
+
+	if (!write_file("/proc/" + pid_str + "/setgroups", "deny")) {
+		return false;
+	}
+	if (!write_file("/proc/" + pid_str + "/uid_map", vformat("0 %d 1", (int64_t)uid))) {
+		return false;
+	}
+	if (!write_file("/proc/" + pid_str + "/gid_map", vformat("0 %d 1", (int64_t)gid))) {
+		return false;
+	}
+	return true;
 }
 
 } // namespace
@@ -163,12 +282,71 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	const CharString log_cs = p_policy->get_child_stdout_log_path().utf8();
 	const char *log_path = log_cs.length() > 0 ? log_cs.get_data() : nullptr;
 
+	// Fail-closed: when the policy demands private-network blocking, the
+	// setuid helper must be present (mode 4755) or we refuse to spawn.
+	String helper_path;
+	const bool use_netns = p_policy->is_private_networks_blocked();
+	if (use_netns) {
+		if (force_network_filter_fail()) {
+			ERR_FAIL_V_MSG(result, "SandboxLinux: TG_NETWORK_FILTER_FORCE_FAIL=1 — refusing to spawn renderer.");
+		}
+		helper_path = find_netns_helper();
+		if (helper_path.is_empty()) {
+			ERR_FAIL_V_MSG(result,
+					"SandboxLinux: tg-netns-helper not found in /usr/local/sbin or /usr/sbin. "
+					"Reinstall the package; the helper must be setuid root.");
+		}
+	}
+
+	int parent_to_child[2] = { -1, -1 };
+	int child_to_parent[2] = { -1, -1 };
+	if (use_netns) {
+		if (::pipe(parent_to_child) != 0 || ::pipe(child_to_parent) != 0) {
+			ERR_FAIL_V_MSG(result, vformat("SandboxLinux::spawn_target: pipe() failed errno=%d", (int)errno));
+		}
+	}
+
 	const pid_t pid = ::fork();
 	if (pid < 0) {
 		ERR_FAIL_V_MSG(result, vformat("SandboxLinux::spawn_target: fork failed errno=%d", (int)errno));
 	}
 	if (pid == 0) {
+		if (use_netns) {
+			::close(parent_to_child[1]);
+			::close(child_to_parent[0]);
+			child_netns_handshake(parent_to_child[0], child_to_parent[1],
+					log_path, argv.ptrw(), envp.ptrw());
+		}
 		child_exec_after_log_dup(log_path, argv.ptrw(), envp.ptrw());
+	}
+
+	if (use_netns) {
+		::close(parent_to_child[0]);
+		::close(child_to_parent[1]);
+		// Wait for child to signal that the namespace is up.
+		char ready = 0;
+		if (::read(child_to_parent[0], &ready, 1) != 1 || ready != 'r') {
+			::close(parent_to_child[1]);
+			::close(child_to_parent[0]);
+			ERR_FAIL_V_MSG(result, "SandboxLinux::spawn_target: child failed to enter namespace");
+		}
+		::close(child_to_parent[0]);
+
+		if (!write_child_idmap(pid)) {
+			::close(parent_to_child[1]);
+			ERR_FAIL_V_MSG(result, "SandboxLinux::spawn_target: failed to write child uid/gid map");
+		}
+
+		const Error helper_err = invoke_netns_helper(helper_path, pid);
+		if (helper_err != OK) {
+			::close(parent_to_child[1]);
+			ERR_FAIL_V_MSG(result, vformat("SandboxLinux::spawn_target: tg-netns-helper failed err=%d", (int)helper_err));
+		}
+
+		// Signal child it can proceed.
+		const char go = 'g';
+		(void)::write(parent_to_child[1], &go, 1);
+		::close(parent_to_child[1]);
 	}
 
 	target_pid = (int64_t)pid;
@@ -316,4 +494,17 @@ bool SandboxLinux::is_target() const {
 #else
 	return false;
 #endif
+}
+
+Dictionary SandboxLinux::network_state() const {
+	Dictionary out;
+#ifdef LINUXBSD_ENABLED
+	const String helper = find_netns_helper();
+	out["helper_path"] = helper;
+	out["helper_found"] = !helper.is_empty();
+	out["status"] = helper.is_empty() ? "helper_missing" : "ready_for_spawn";
+#else
+	out["status"] = "unsupported_platform";
+#endif
+	return out;
 }

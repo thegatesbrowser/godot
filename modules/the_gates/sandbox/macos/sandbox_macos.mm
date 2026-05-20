@@ -55,8 +55,16 @@
 #include <string>
 #include <vector>
 
+#import <Foundation/Foundation.h>
+#import <NetworkExtension/NetworkExtension.h>
+#import <SystemExtensions/SystemExtensions.h>
+
 extern char **environ;
 extern "C" int _NSGetExecutablePath(char *, uint32_t *);
+
+// Identifier must match tools/tg-netfilter-extension/Info.plist's
+// CFBundleIdentifier exactly.
+static NSString *const kExtensionBundleID = @"io.thegates.launcher.netfilter";
 
 // Cross-file hook into the vendored firefox-shim/mac/Sandbox.mm: set
 // before mozilla::StartMacSandbox to append extra SBPL after the
@@ -95,6 +103,95 @@ PackedStringArray split_pipe(const char *p_env_value) {
 	return out;
 }
 
+bool force_network_filter_fail() {
+	const char *v = ::getenv("TG_NETWORK_FILTER_FORCE_FAIL");
+	return v != nullptr && v[0] == '1';
+}
+
+} // namespace
+
+// OSSystemExtensionRequest delegate. Submitted on first run when the network
+// filter extension isn't installed yet. The user must approve in System
+// Settings before subsequent launches see isEnabled=YES.
+@interface TGNetFilterRequestDelegate : NSObject <OSSystemExtensionRequestDelegate>
+@end
+
+@implementation TGNetFilterRequestDelegate
+- (void)request:(OSSystemExtensionRequest *)request didFailWithError:(NSError *)error {}
+- (void)request:(OSSystemExtensionRequest *)request didFinishWithResult:(OSSystemExtensionRequestResult)result {}
+- (void)requestNeedsUserApproval:(OSSystemExtensionRequest *)request {}
+- (OSSystemExtensionReplacementAction)request:(OSSystemExtensionRequest *)request
+                  actionForReplacingExtension:(OSSystemExtensionProperties *)existing
+                                withExtension:(OSSystemExtensionProperties *)ext {
+    return OSSystemExtensionReplacementActionReplace;
+}
+@end
+
+namespace {
+
+// Pinned singleton delegate: OSSystemExtensionRequest holds a weak reference,
+// and the request continues asynchronously after engage returns.
+TGNetFilterRequestDelegate *netfilter_request_delegate() {
+	static TGNetFilterRequestDelegate *delegate = nil;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		delegate = [[TGNetFilterRequestDelegate alloc] init];
+	});
+	return delegate;
+}
+
+// Synchronously query NEFilterManager state. Times out after 5 seconds so a
+// stuck preferences daemon doesn't hang spawn.
+struct NetFilterState {
+	bool is_enabled = false;
+	bool has_configuration = false;
+};
+
+NetFilterState query_netfilter_state() {
+	NetFilterState s;
+	NEFilterManager *manager = [NEFilterManager sharedManager];
+	__block bool loaded = false;
+	dispatch_semaphore_t done = dispatch_semaphore_create(0);
+	[manager loadFromPreferencesWithCompletionHandler:^(NSError *_Nullable err) {
+		loaded = (err == nil);
+		dispatch_semaphore_signal(done);
+	}];
+	dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+	if (!loaded) {
+		return s;
+	}
+	s.is_enabled = [manager isEnabled];
+	s.has_configuration = [manager providerConfiguration] != nil;
+	return s;
+}
+
+// First-run path: submit an activation request so the user gets a System
+// Settings prompt to approve our system extension, and write a default
+// NEFilterProviderConfiguration so the prompt has the right metadata. The
+// approval is asynchronous; engage returns ERR_UNAUTHORIZED, the launcher
+// fails closed, and the user retries after clicking Allow.
+void submit_netfilter_activation_request() {
+	OSSystemExtensionRequest *req = [OSSystemExtensionRequest
+			activationRequestForExtensionWithIdentifier:kExtensionBundleID
+												  queue:dispatch_get_main_queue()];
+	req.delegate = netfilter_request_delegate();
+	[[OSSystemExtensionManager sharedManager] submitRequest:req];
+
+	NEFilterManager *manager = [NEFilterManager sharedManager];
+	if ([manager providerConfiguration] == nil) {
+		NEFilterProviderConfiguration *config = [[NEFilterProviderConfiguration alloc] init];
+		config.filterSockets = YES;
+		config.filterPackets = NO;
+		manager.providerConfiguration = config;
+		dispatch_semaphore_t save_done = dispatch_semaphore_create(0);
+		[manager saveToPreferencesWithCompletionHandler:^(NSError *_Nullable err) {
+			(void)err;
+			dispatch_semaphore_signal(save_done);
+		}];
+		dispatch_semaphore_wait(save_done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+	}
+}
+
 } // namespace
 
 #endif // MACOS_ENABLED
@@ -110,6 +207,24 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	ERR_FAIL_COND_V_MSG(target_pid != 0 && is_target_running(), result,
 			vformat("SandboxMacOS::spawn_target: previous target pid=%d still running; call kill_target() first",
 					(int)target_pid));
+
+	// Fail-closed: refuse to spawn if the network-filter system extension
+	// isn't installed and enabled. On first run we submit the activation
+	// request so the user gets a System Settings prompt; the launcher retries
+	// after they click Allow.
+	if (p_policy->is_private_networks_blocked()) {
+		if (force_network_filter_fail()) {
+			ERR_FAIL_V_MSG(result, "SandboxMacOS: TG_NETWORK_FILTER_FORCE_FAIL=1 — refusing to spawn renderer.");
+		}
+		const NetFilterState st = query_netfilter_state();
+		if (!st.is_enabled || !st.has_configuration) {
+			submit_netfilter_activation_request();
+			ERR_FAIL_V_MSG(result,
+					"SandboxMacOS: network filter system extension not enabled. "
+					"Approve TheGates Network Filter in System Settings -> Privacy & Security, then try again.");
+		}
+		print_line("SandboxMacOS: NEFilterManager active");
+	}
 
 	if (target_kq >= 0) {
 		::close(target_kq);
@@ -370,4 +485,18 @@ bool SandboxMacOS::is_target() const {
 #else
 	return false;
 #endif
+}
+
+Dictionary SandboxMacOS::network_state() const {
+	Dictionary out;
+#ifdef MACOS_ENABLED
+	const NetFilterState st = query_netfilter_state();
+	out["is_enabled"] = st.is_enabled;
+	out["has_provider_configuration"] = st.has_configuration;
+	out["extension_bundle_id"] = String::utf8([kExtensionBundleID UTF8String]);
+	out["status"] = (st.is_enabled && st.has_configuration) ? "active" : "extension_not_enabled";
+#else
+	out["status"] = "unsupported_platform";
+#endif
+	return out;
 }
