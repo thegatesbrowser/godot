@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+import os
 
 Import("env")
 Import("env_modules")
@@ -19,6 +22,115 @@ if env["platform"] == "linuxbsd":
     thirdparty_sources += [thirdparty_flingfd_dir + file for file in thirdparty_flingfd_sources]
     env_tg.Prepend(CPPPATH=[thirdparty_flingfd_dir])
 
+thirdparty_zmq_dir = "#thirdparty/libzmq/"
+zmq_cpppath = ["#thirdparty/cppzmq", thirdparty_zmq_dir + "include"]
+env.Prepend(CPPPATH=zmq_cpppath)
+env.Append(CPPDEFINES=["ZMQ_STATIC"])
+env_tg.Prepend(CPPPATH=zmq_cpppath)
+env_tg.Append(CPPDEFINES=["ZMQ_STATIC"])
+
+# Drop WebSocket transports — they pull in gnutls/openssl and we only use ipc://.
+zmq_sources_skip = {
+    "ws_address.cpp",
+    "ws_connecter.cpp",
+    "ws_decoder.cpp",
+    "ws_encoder.cpp",
+    "ws_engine.cpp",
+    "ws_listener.cpp",
+    "wss_address.cpp",
+    "wss_engine.cpp",
+}
+zmq_sources_abs = Glob(thirdparty_zmq_dir + "src/*.cpp")
+zmq_sources = [str(f).replace("\\", "/") for f in zmq_sources_abs if os.path.basename(str(f)) not in zmq_sources_skip]
+zmq_sources.append(thirdparty_zmq_dir + "external/sha1/sha1.c")
+if env["platform"] == "windows":
+    zmq_sources.append(thirdparty_zmq_dir + "external/wepoll/wepoll.c")
+
+env_zmq = env_tg.Clone()
+env_zmq.disable_warnings()
+env_zmq.Prepend(
+    CPPPATH=[
+        thirdparty_zmq_dir + "src",
+        thirdparty_zmq_dir + "external/sha1",
+    ]
+)
+env_zmq.Append(CPPDEFINES=["ZMQ_USE_BUILTIN_SHA1"])
+if env["platform"] == "windows":
+    env_zmq.Prepend(CPPPATH=[thirdparty_zmq_dir + "external/wepoll"])
+    env_zmq.Append(
+        CPPDEFINES=[
+            "ZMQ_HAVE_WINDOWS",
+            "ZMQ_IOTHREAD_POLLER_USE_EPOLL",
+            "ZMQ_POLL_BASED_ON_POLL",
+            "ZMQ_USE_CV_IMPL_WIN32API",
+            "ZMQ_HAVE_IPC",
+            "ZMQ_HAVE_STRUCT_SOCKADDR_UN",
+            "HAVE_STRNLEN",
+            ("FD_SETSIZE", 16384),
+            "_CRT_SECURE_NO_WARNINGS",
+            "_WINSOCK_DEPRECATED_NO_WARNINGS",
+        ]
+    )
+    env.Append(LINKFLAGS=["rpcrt4.lib"])
+elif env["platform"] == "linuxbsd":
+    # Upstream libzmq generates platform.hpp via autoconf or cmake; we vendor
+    # the source without that step. These macros are what cmake would emit
+    # for a Linux glibc target with epoll + AF_UNIX + eventfd.
+    env_zmq.Append(
+        CPPDEFINES=[
+            "ZMQ_HAVE_LINUX",
+            ("ZMQ_CACHELINE_SIZE", 64),
+            "ZMQ_IOTHREAD_POLLER_USE_EPOLL",
+            "ZMQ_POLL_BASED_ON_POLL",
+            "ZMQ_USE_CV_IMPL_PTHREADS",
+            "ZMQ_HAVE_IPC",
+            "ZMQ_HAVE_STRUCT_SOCKADDR_UN",
+            "ZMQ_HAVE_EVENTFD",
+            "ZMQ_HAVE_EVENTFD_CLOEXEC",
+            "ZMQ_HAVE_O_CLOEXEC",
+            "ZMQ_HAVE_SOCK_CLOEXEC",
+            "ZMQ_HAVE_SO_KEEPALIVE",
+            "ZMQ_HAVE_TCP_KEEPCNT",
+            "ZMQ_HAVE_TCP_KEEPIDLE",
+            "ZMQ_HAVE_TCP_KEEPINTVL",
+            "ZMQ_HAVE_UIO",
+            "ZMQ_HAVE_IFADDRS",
+            "ZMQ_HAVE_NOEXCEPT",
+            "ZMQ_HAVE_PTHREAD_SETNAME_2",
+            "ZMQ_HAVE_PTHREAD_SET_AFFINITY",
+            "ZMQ_HAVE_STRLCPY",
+            ("HAVE_POSIX_MEMALIGN", 1),
+            "HAVE_STRNLEN",
+            "HAVE_CLOCK_GETTIME",
+            "HAVE_MKDTEMP",
+            "HAVE_FORK",
+            "HAVE_ACCEPT4",
+            "_GNU_SOURCE",
+        ]
+    )
+elif env["platform"] == "macos":
+    env_zmq.Append(
+        CPPDEFINES=[
+            "ZMQ_HAVE_OSX",
+            ("ZMQ_CACHELINE_SIZE", 64),
+            "ZMQ_HAVE_STRLCPY",
+            "ZMQ_IOTHREAD_POLLER_USE_KQUEUE",
+            "ZMQ_POLL_BASED_ON_POLL",
+            "ZMQ_USE_CV_IMPL_PTHREADS",
+            "ZMQ_HAVE_IPC",
+            "ZMQ_HAVE_STRUCT_SOCKADDR_UN",
+            "ZMQ_HAVE_UIO",
+            "ZMQ_HAVE_IFADDRS",
+            "ZMQ_HAVE_KQUEUE",
+            "ZMQ_HAVE_NOEXCEPT",
+            "HAVE_POSIX_MEMALIGN",
+            "HAVE_STRNLEN",
+            "HAVE_CLOCK_GETTIME",
+            "HAVE_MKDTEMP",
+            "HAVE_FORK",
+        ]
+    )
+env_zmq.add_source_files(thirdparty_obj, zmq_sources)
 
 env_thirdparty = env_tg.Clone()
 env_thirdparty.disable_warnings()
@@ -32,6 +144,14 @@ module_obj = []
 
 env_tg.add_source_files(module_obj, "*.cpp")
 env.modules_sources += module_obj
+
+Export("env_tg")
+
+SConscript("ipc/SCsub")
+SConscript("sandbox/SCsub")
+
+if env.tg_renderer:
+    SConscript("renderer/SCsub")
 
 # Needed to force rebuilding the module files when the thirdparty library is updated.
 env.Depends(module_obj, thirdparty_obj)

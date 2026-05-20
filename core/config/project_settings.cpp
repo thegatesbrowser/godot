@@ -716,9 +716,20 @@ Error ProjectSettings::_load_settings_binary(const String &p_path) {
 	ERR_FAIL_COND_V_MSG((hdr[0] != 'E' || hdr[1] != 'C' || hdr[2] != 'F' || hdr[3] != 'G'), ERR_FILE_CORRUPT, "Corrupted header in binary project.binary (not ECFG).");
 
 	uint32_t count = f->get_32();
+#ifdef TG_RENDERER
+	// Defense against malicious gate project.binary: bound counts and field
+	// sizes to prevent unbounded loops and oversized allocations on attacker-
+	// controlled values.
+	ERR_FAIL_COND_V_MSG(count > 100'000, ERR_FILE_CORRUPT,
+			vformat("project.binary: count=%d exceeds 100000.", (int)count));
+#endif
 
 	for (uint32_t i = 0; i < count; i++) {
 		uint32_t slen = f->get_32();
+#ifdef TG_RENDERER
+		ERR_FAIL_COND_V_MSG(slen > 1024, ERR_FILE_CORRUPT,
+				vformat("project.binary: key length %d at entry %d exceeds 1024.", (int)slen, (int)i));
+#endif
 		CharString cs;
 		cs.resize(slen + 1);
 		cs[slen] = 0;
@@ -727,6 +738,10 @@ Error ProjectSettings::_load_settings_binary(const String &p_path) {
 		key.parse_utf8(cs.ptr());
 
 		uint32_t vlen = f->get_32();
+#ifdef TG_RENDERER
+		ERR_FAIL_COND_V_MSG(vlen > 16 * 1024 * 1024, ERR_FILE_CORRUPT,
+				vformat("project.binary: value blob length %d at entry %d exceeds 16 MB.", (int)vlen, (int)i));
+#endif
 		Vector<uint8_t> d;
 		d.resize(vlen);
 		f->get_buffer(d.ptrw(), vlen);

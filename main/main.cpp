@@ -131,12 +131,7 @@
 #endif // TOOLS_ENABLED && !GDSCRIPT_NO_LSP
 #endif // MODULE_GDSCRIPT_ENABLED
 
-#ifdef THE_GATES_SANDBOX
-#include "modules/the_gates/command_sync.h"
-#include "modules/the_gates/external_texture.h"
-#include "modules/the_gates/input_sync.h"
-#include "modules/the_gates/sandboxing.h"
-#endif
+#include "modules/the_gates/renderer/renderer_lifecycle.h"
 
 /* Static members */
 
@@ -258,14 +253,10 @@ static String validate_extension_api_file;
 bool profile_gpu = false;
 
 // TheGates
-#ifdef THE_GATES_SANDBOX
-static ExternalTexture *ext_texture = nullptr;
-static CommandSync *command_sync = nullptr;
-static InputSync *input_sync = nullptr;
-static bool first_frame_sent = false;
-static uint32_t heartbeat = 0;
-#endif
 String gdext_libs_dir = "";
+String tg_user_data_dir_override = "";
+String tg_ipc_dir_override = "";
+String tg_main_pack_path = "";
 
 // Constants.
 
@@ -1624,6 +1615,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		} else if (arg == "--main-pack") {
 			if (N) {
 				main_pack = N->get();
+				tg_main_pack_path = main_pack;
 				N = N->next();
 			} else {
 				OS::get_singleton()->print("Missing path to main pack file, aborting.\n");
@@ -1636,6 +1628,24 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				N = N->next();
 			} else {
 				OS::get_singleton()->print("Missing path to libraries directory.\n");
+				goto error;
+			}
+
+		} else if (arg == "--tg-user-data-dir") {
+			if (N) {
+				tg_user_data_dir_override = N->get();
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing path to renderer user data directory.\n");
+				goto error;
+			}
+
+		} else if (arg == "--tg-ipc-dir") {
+			if (N) {
+				tg_ipc_dir_override = N->get();
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing path to IPC directory.\n");
 				goto error;
 			}
 
@@ -1849,7 +1859,9 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	OS::get_singleton()->ensure_user_data_dir();
 
 	initialize_modules(MODULE_INITIALIZATION_LEVEL_CORE);
+#ifndef TG_RENDERER
 	register_core_extensions(gdext_libs_dir); // core extensions must be registered after globals setup and before display
+#endif
 
 	ResourceUID::get_singleton()->load_from_cache(true); // load UUIDs from cache.
 
@@ -2709,7 +2721,9 @@ Error Main::setup2(bool p_show_boot_logo) {
 		OS::get_singleton()->benchmark_begin_measure("Servers", "Modules and Extensions");
 
 		initialize_modules(MODULE_INITIALIZATION_LEVEL_SERVERS);
+#ifndef TG_RENDERER
 		GDExtensionManager::get_singleton()->initialize_extensions(GDExtension::INITIALIZATION_LEVEL_SERVERS);
+#endif
 
 		OS::get_singleton()->benchmark_end_measure("Servers", "Modules and Extensions");
 	}
@@ -2778,7 +2792,7 @@ Error Main::setup2(bool p_show_boot_logo) {
 
 		// rendering_driver now held in static global String in main and initialized in setup()
 		Error err;
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 		window_flags = DisplayServer::WINDOW_FLAG_BORDERLESS_BIT;
 		window_mode = DisplayServer::WindowMode::WINDOW_MODE_WINDOWED;
 		print_line("window_size " + String(window_size));
@@ -2806,7 +2820,9 @@ Error Main::setup2(bool p_show_boot_logo) {
 				memdelete(display_server);
 			}
 
+#ifndef TG_RENDERER
 			GDExtensionManager::get_singleton()->deinitialize_extensions(GDExtension::INITIALIZATION_LEVEL_SERVERS);
+#endif
 			uninitialize_modules(MODULE_INITIALIZATION_LEVEL_SERVERS);
 			unregister_server_types();
 
@@ -3033,6 +3049,14 @@ Error Main::setup2(bool p_show_boot_logo) {
 
 		OS::get_singleton()->benchmark_end_measure("Startup", "Translations and Remaps");
 	}
+
+#ifdef TG_RENDERER
+	if (!tg_renderer_engage(display_server, tg_main_pack_path)) {
+		return ERR_CANT_CREATE;
+	}
+	register_core_extensions(gdext_libs_dir);
+	GDExtensionManager::get_singleton()->initialize_extensions(GDExtension::INITIALIZATION_LEVEL_SERVERS);
+#endif
 
 	MAIN_PRINT("Main: Load TextServer");
 
@@ -3701,7 +3725,7 @@ int Main::start() {
 
 		bool embed_subwindows = GLOBAL_GET("display/window/subwindows/embed_subwindows");
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 		embed_subwindows = true;
 #endif
 
@@ -4045,53 +4069,8 @@ int Main::start() {
 	OS::get_singleton()->benchmark_end_measure("Startup", "Main::Start");
 	OS::get_singleton()->benchmark_dump();
 
-#ifdef THE_GATES_SANDBOX
-	Error err;
-
-	// CommandSync
-	command_sync = memnew(CommandSync);
-	command_sync->bind_commands();
-	command_sync->socket_connect();
-
-	// Set texture format RGBA8 or BGRA8
-	Array arg;
-	arg.append(RD::get_singleton()->screen_get_format());
-	command_sync->send_command("ext_texture_format", arg);
-
-	// ExternalTexture
-	arg.clear();
-#ifdef WINDOWS_ENABLED
-	arg.append(FILEHANDLE_PATH + "|" + itos(OS::get_singleton()->get_process_id()));
-#else
-	arg.append(FILEHANDLE_PATH);
-#endif
-	command_sync->send_command("send_filehandle", arg);
-
-	print_line("ExternalTexture: waiting for filehandle");
-	ext_texture = memnew(ExternalTexture);
-	bool success = ext_texture->recv_filehandle(FILEHANDLE_PATH); // WARNING: BLOCKING COMMAND
-	if (!success) {
-		return false;
-	}
-
-	RenderingDevice::TextureView view;
-	RenderingDevice::TextureFormat format;
-
-	Size2i size = display_server->window_get_size(DisplayServer::MAIN_WINDOW_ID);
-	format.format = RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM;
-	format.usage_bits = RenderingDevice::TEXTURE_USAGE_CAN_COPY_TO_BIT;
-	format.width = static_cast<uint32_t>(size.width);
-	format.height = static_cast<uint32_t>(size.height);
-	format.depth = 1;
-
-	err = ext_texture->import(format, view);
-	if (err != OK) {
-		return false;
-	}
-
-	// InputSync
-	input_sync = memnew(InputSync);
-	input_sync->socket_connect();
+#ifdef TG_RENDERER
+	tg_renderer_boot();
 #endif
 
 	return EXIT_SUCCESS;
@@ -4300,31 +4279,9 @@ bool Main::iteration() {
 		frames = 0;
 	}
 
-#ifdef THE_GATES_SANDBOX
-	if (!first_frame_sent && Engine::get_singleton()->frames_drawn > 2) {
-		// Send first frame drawn
-		command_sync->send_command("first_frame", Array());
-		first_frame_sent = true;
-	}
-
-	heartbeat += ticks_elapsed;
-	if (heartbeat > 1000000 && first_frame_sent) {
-		command_sync->send_command("heartbeat", Array());
-		heartbeat %= 1000000;
-	}
-
-	// Render send
-	ext_texture->copy_from_screen();
-
-	// Input sync
-	input_sync->receive_input_events();
-
-	// If our command socket lost its peer (parent), request exit.
-	command_sync->poll_monitor();
-	if (!command_sync->is_peer_connected()) {
-		CRASH_NOW_MSG("CommandSync peer disconnected. Exiting child."); // hack to avoid hanging because of uncleaned pipes created by OS::execute_with_pipe
-	}
-#endif // THE_GATES_SANDBOX
+#ifdef TG_RENDERER
+	tg_renderer_loop_iterate(ticks_elapsed);
+#endif
 
 	iterating--;
 

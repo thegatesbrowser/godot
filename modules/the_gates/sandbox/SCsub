@@ -1,0 +1,17 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+Import("env")
+Import("env_tg")
+
+# Cross-platform sandbox sources (socket_acl.cpp uses internal #ifdef to
+# switch impl per OS; included on all platforms so callers in ipc/ can use
+# the no-op fallback on non-Windows).
+env_tg.add_source_files(env.modules_sources, "*.cpp")
+
+if env["platform"] == "windows" and env.tg_sandbox:
+    SConscript("windows/SCsub")
+elif env["platform"] == "linuxbsd":
+    SConscript("linux/SCsub")
+elif env["platform"] == "macos":
+    SConscript("macos/SCsub")
