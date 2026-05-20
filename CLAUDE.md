@@ -19,6 +19,18 @@ Upstream Godot 4.5 plus:
 
 Anything else in this tree is upstream — see [Godot's docs](https://docs.godotengine.org/en/stable/) for it.
 
+## Before you Edit or Write code: required reading by file extension
+
+**Hard rule, no exceptions.** Before your first `Edit` / `Write` / `MultiEdit` to a file matching these patterns, you must have `Read` the linked doc(s) **earlier in this same session**. Once per session is enough.
+
+| About to change... | You must have read first |
+|---|---|
+| `**/*.cpp`, `*.h`, `*.mm` (any C++ file) | [C++ Style Guide](./notes/C%2B%2B%20Style%20Guide.md) |
+| Anything under `modules/the_gates/` | also [Custom Godot Module](./notes/Custom%20Godot%20Module.md) |
+| Code inside an `#ifdef TG_RENDERER` block in upstream files | also [Custom Godot Fork](./notes/Custom%20Godot%20Fork.md) |
+
+If the user pushes back on something stylistic — naming, comment shape, header order, brace style — **re-read the matching guide before responding**. The rule almost certainly exists in the doc and you missed it. Ignoring this is the single most common source of revert-and-redo cycles in this fork.
+
 ## Mandatory reading before writing code
 
 Read these in order. ~10 minutes total.
@@ -39,6 +51,7 @@ For broader project context (launcher app, gate format, two-process model, GDScr
 - **Match upstream Godot 4.5 exactly.** This is a fork; we don't have our own C++ style. Run `pre-commit` (configured in `.pre-commit-config.yaml`) — it enforces clang-format 20.1, clang-tidy, header guards, copyright headers, codespell.
 - **Fork-specific changes go in exactly two places:** `modules/the_gates/`, or `#ifdef TG_RENDERER` blocks in upstream files. Nothing else. If your change doesn't fit one of those, it probably belongs upstream — discuss before merging.
 - **Renderer is hardcoded to Vulkan.** `--rendering-driver d3d12` is silently ignored in `TG_RENDERER` builds. Don't propose D3D12 fixes for the renderer without first patching `main/main.cpp`'s hardcoded line. See [`notes/Custom Godot Fork.md`](./notes/Custom%20Godot%20Fork.md).
+- **No internal-decision prose in comments.** If a comment explains *why you wrote this code* — the constraint that drove a choice, the alternatives you weighed — it's PR-description content. Put it in the commit message. **Agent-specific:** if you feel the urge to leave a comment proving you considered the edge cases of the fix you just made, that *is* the smell. Multi-line is reserved for external-contract docs (Vulkan struct semantics, OS-API quirks, SDDL/RFC citations, `(GH-XXXXX)` workarounds). See [`notes/C++ Style Guide.md`](./notes/C%2B%2B%20Style%20Guide.md) § Comments.
 
 Full rules: [`notes/C++ Style Guide.md`](./notes/C%2B%2B%20Style%20Guide.md).
 
@@ -67,8 +80,10 @@ The cherry-pick is mechanical. The SHA on `tg-master` will differ from `tg-4.5` 
 Build commands are in the parent [`README.md`](../README.md). They change; trust the README, not memory.
 
 Day-to-day:
-- Editor / launcher binary: `scons -j$(nproc) dev_build=yes tg_renderer=no compiledb=yes use_llvm=yes linker=lld disable_exceptions=no`
-- Renderer binary: same with `tg_renderer=yes target=template_debug`
+- Editor / launcher binary: `python tools/build.py launcher`
+- Renderer binary: `python tools/build.py renderer`
+
+`tools/build.py` wraps scons with the canonical flag set and is the single source of truth — VSCode tasks, agent instructions, and the sandbox test loop all route through it. Run `python tools/build.py --help` for profiles (`launcher`, `renderer`, `launcher-release`, `renderer-release`) and flags (`--mac-intel`, `--no-sandbox`, `-j N`).
 
 Output binaries land in `bin/`. On Windows, the `.console.exe` variants are invaluable for renderer logging.
 

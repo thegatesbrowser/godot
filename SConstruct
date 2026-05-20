@@ -185,7 +185,9 @@ opts.Add(
 )
 opts.Add(BoolVariable("production", "Set defaults to build Godot for use in production", False))
 opts.Add(BoolVariable("threads", "Enable threading support", True))
-opts.Add(BoolVariable("tg_renderer", "TheGates renderer build", False))
+opts.Add(BoolVariable("tg_renderer", "TheGates renderer build (changes binary shape: renderer process vs launcher)", False))
+opts.Add(BoolVariable("tg_sandbox", "TheGates chromium sandbox (default on; pass tg_sandbox=no to opt out for faster iteration)", True))
+opts.Add("tg_signature_pin", "TheGates renderer Authenticode SHA-1 thumbprint pin (hex, no spaces or colons). Empty = dev bypass.", "")
 
 # Components
 opts.Add(BoolVariable("deprecated", "Enable compatibility code for deprecated and removed features", True))
@@ -495,6 +497,7 @@ env.editor_build = env["target"] == "editor"
 env.dev_build = env["dev_build"]
 env.debug_features = env["target"] in ["editor", "template_debug"]
 env.tg_renderer = env["tg_renderer"]
+env.tg_sandbox = env["tg_sandbox"]
 
 if env["optimize"] == "auto":
     if env.dev_build:
@@ -526,6 +529,12 @@ else:
 if env.tg_renderer:
     # Run in TheGates renderer mode
     env.Append(CPPDEFINES=["TG_RENDERER"])
+
+if env.tg_sandbox:
+    env.Append(CPPDEFINES=["TG_SANDBOX"])
+
+if env["tg_signature_pin"]:
+    env.Append(CPPDEFINES=[("TG_SIGNATURE_PIN", '\\"' + env["tg_signature_pin"] + '\\"')])
 
 # This is not part of fast_unsafe because the only downside it has compared to
 # the default is that SCons won't mark files that were changed in the last second
@@ -665,6 +674,9 @@ if env.dev_build:
 
 if env.tg_renderer:
     print("NOTE: TheGates renderer build.")
+
+if env.tg_sandbox:
+    print("NOTE: TheGates sandbox build.")
 
 # Enforce our minimal compiler version requirements
 cc_version = methods.get_compiler_version(env)

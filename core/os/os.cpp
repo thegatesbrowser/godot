@@ -319,7 +319,16 @@ String OS::get_user_data_dir(const String &p_user_dir) const {
 	return ".";
 }
 
+#ifdef TG_RENDERER
+extern String tg_user_data_dir_override;
+#endif
+
 String OS::get_user_data_dir() const {
+#ifdef TG_RENDERER
+	if (!tg_user_data_dir_override.is_empty()) {
+		return tg_user_data_dir_override.replace_char('\\', '/');
+	}
+#endif
 	String appname = get_safe_dir_name(GLOBAL_GET("application/config/name"));
 	if (!appname.is_empty()) {
 		bool use_custom_dir = GLOBAL_GET("application/config/use_custom_user_dir");

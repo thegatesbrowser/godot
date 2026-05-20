@@ -1,0 +1,12 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+Import("env")
+Import("env_tg")
+
+env_ipc = env_tg.Clone()
+
+ipc_obj = []
+env_ipc.add_source_files(ipc_obj, "*.cpp")
+
+env.modules_sources += ipc_obj

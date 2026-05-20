@@ -8,10 +8,19 @@ tags: [fork, engine]
 
 ## The diff, in shape
 
-1. **A new SCons option**: `tg_renderer=False` — defines the `TG_RENDERER` macro when true. (`SConstruct`, line ~188.)
+1. **Three new SCons options**: `tg_renderer=False` (renderer build → `TG_RENDERER`),
+   `tg_sandbox=True` (Windows sandbox → `TG_SANDBOX`), `tg_signature_pin=""` (Authenticode
+   thumbprint pin → `TG_SIGNATURE_PIN`).
 2. **A new module**: `modules/the_gates/` — see [[Custom Godot Module]].
-3. **`#ifdef TG_RENDERER` blocks** sprinkled across `main/main.cpp` and the per-OS display servers. Greppable.
-4. **New methods on `RenderingDevice`**: `external_texture_create`, `external_texture_import`, `screen_copy`. Implemented per-driver (currently Vulkan + Metal). See [[External Texture Sharing]].
+3. **`#ifdef TG_RENDERER` blocks** in `main/main.cpp` and the per-OS display servers.
+   `main.cpp` is down to a small number of orchestration calls
+   (`tg_renderer_engage`, `tg_renderer_boot`, `tg_renderer_loop_iterate`,
+   plus `TG_RENDERER_PHASE` instrumentation markers) plus the include that
+   backs them, and a `#ifdef TG_RENDERER` block that defers the engine's
+   `register_core_extensions` + `initialize_extensions(SERVERS)` until
+   after `tg_renderer_engage`.
+4. **New methods on `RenderingDevice`**: `external_texture_create`, `external_texture_import`,
+   `screen_copy`. Implemented per-driver (currently Vulkan + Metal). See [[External Texture Sharing]].
 5. Misc upstream contributions merged in (see commit log).
 
 ## Where to find each
@@ -27,16 +36,69 @@ godot/SConstruct
 
 ### `main/main.cpp` TG_RENDERER blocks
 
+`main.cpp` is down to:
+
 ```
-~line 150  : forward declarations for ext_texture / command_sync / input_sync globals
-~line 296  : static TGExternalTexture *ext_texture = nullptr; (and command/input sync globals)
-~line 2456 : rendering_driver = "vulkan"  ← hardcodes the Vulkan driver for renderer builds
-~line 3240 : (skipped UI bits during setup)
-~line 4323 : (skipped UI bits during start)
-~line 4686 : the handshake — connect command_sync, send_command(...), recv_filehandle, import
-~line 4970 : per-iteration work — first_frame/heartbeat, copy_from_screen, receive_input_events,
-             poll_monitor (CRASH_NOW if disconnected)
+include of modules/the_gates/renderer/renderer_lifecycle.h
+
+setup():
+  (no renderer block; launcher's register_core_extensions runs here,
+   #ifndef TG_RENDERER. Renderer defers extension load to setup2 below.)
+
+setup2():
+  tg_renderer_engage(display_server, tg_main_pack_path)               (#ifdef TG_RENDERER)
+    + register_core_extensions(gdext_libs_dir)                        (renderer-only block)
+    + initialize_extensions(SERVERS)
+  ...
+  TG_RENDERER_PHASE markers at servers_modules_done, display_server_create_*,
+  audio_init_*, etc.
+
+start():
+  tg_renderer_boot()                                                  (#ifdef TG_RENDERER)
+  TG_RENDERER_PHASE markers at main_start_entry, main_start_before_boot,
+  renderer_boot_done.
+
+iteration():
+  tg_renderer_loop_iterate(ticks_elapsed)                             (#ifdef TG_RENDERER)
+
+(plus pre-existing renderer-only blocks: rendering_driver = "vulkan" hardcode,
+ embed_subwindows force, window_flag_borderless force.)
 ```
+
+`tg_renderer_engage` runs in `Main::setup2` right before TextServer
+enumeration. It does the IPC handshake with the launcher, the
+external-texture import, and `Sandbox::lower_token` as one atomic block
+under the unrestricted token. Immediately after it returns, the deferred
+`register_core_extensions` + `initialize_extensions(SERVERS)` calls fire
+— so gate-shipped GDExtensions' `DllMain` / `.init_array` /
+`__mod_init_func` execute at target IL. `tg_renderer_boot` at the end of
+`Main::start` just prints the `[RENDERER-READY]` marker.
+
+All IPC + sandbox + diagnostics orchestration lives module-side (see
+[[Sandboxing/Architecture]] and [[Custom Godot Module]]); the file-scope
+static variables that used to anchor it (`ext_texture`, `command_sync`,
+`input_sync`, `first_frame_sent`, `heartbeat`) are gone from main.cpp.
+
+There are two TG_RENDERER-adjacent changes *outside* any `#ifdef`: two
+CLI arguments and their backing globals.
+
+- `--tg-user-data-dir <abs path>` → `String tg_user_data_dir_override`.
+  The launcher allocates a per-gate folder under its own
+  `OS::get_user_data_dir()` (`gates_storage/<id>/`) and passes it as this
+  flag. Inside the renderer, `OS::get_user_data_dir()` returns that
+  override (see the `#ifdef TG_RENDERER` block in `core/os/os.cpp`), so
+  `user://` resolves to a sandbox-allowed path.
+- `--tg-ipc-dir <abs path>` → `String tg_ipc_dir_override`. The launcher
+  passes its own (shallow) `OS::get_user_data_dir()` here.
+  `modules/the_gates/ipc/zmq_runtime.cpp::tg_resolve_ipc_address`
+  substitutes this for `user://` when resolving `ipc://` addresses, so
+  socket files land at a path short enough to fit AF_UNIX's 108-char
+  `sun_path` limit. Kept separate from the user-data dir because the
+  per-gate folder paths are too deep to use for sockets.
+
+Both globals live in `main.cpp` because they're parsed from argv in the
+engine's CLI loop; the externs are picked up by the module + by
+`os.cpp`'s override block.
 
 ### Per-OS display server tweaks
 
@@ -64,19 +126,6 @@ godot/drivers/vulkan/rendering_device_driver_vulkan.cpp
 ```
 
 The Metal-side IOSurface export uses `VkExportMetalObjectsEXT` — that's why `modules/the_gates/config.py` and the build defaults touch the Metal extension on macOS. See the commit `9b5f90d209` ("default function bodies to build with metal").
-
-### Named-pipe `FileAccess` driver fixes
-
-Unconditional (not `#ifdef`'d) fixes in:
-
-```
-godot/drivers/windows/file_access_windows_pipe.cpp
-godot/drivers/unix/file_access_unix_pipe.cpp
-```
-
-Added in commit `170ccff0a9` ("fix named pipe IPC at the driver layer"). The original drivers were built for `OS.execute_with_pipe` (anonymous pipes to a child, always-connected, blocking-is-fine); they don't work for symmetric named-pipe IPC out of the box. The fork-side fixes set `PIPE_NOWAIT` on the Windows client handle, classify per-OS errors (`GetLastError` / `errno`) into `ERR_BUSY` vs fatal, wrap Unix read/write in `EINTR` retry, and stop spamming `PeekNamedPipe` errors when no peer is attached.
-
-Could be upstreamed — they're not TheGates-specific. See [[IPC Pipe Stack]] for context and the failure modes they fix.
 
 ## What is *not* changed
 

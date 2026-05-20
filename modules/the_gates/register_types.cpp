@@ -29,27 +29,49 @@
 /**************************************************************************/
 
 #include "register_types.h"
-#include "command.h"
-#include "command_sync.h"
+
 #include "core/object/class_db.h"
-#include "external_texture.h"
-#include "input_sync.h"
-#include "sandboxing.h"
+#include "ipc/command.h"
+#include "ipc/command_sync.h"
+#include "ipc/external_texture.h"
+#include "ipc/input_sync.h"
+#include "ipc/zmq_runtime.h"
+#include "sandbox/sandbox.h"
+#include "sandbox/sandbox_policy.h"
+
+#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
+#include "sandbox/windows/sandbox_win.h"
+#elif defined(LINUXBSD_ENABLED)
+#include "sandbox/linux/sandbox_linux.h"
+#elif defined(MACOS_ENABLED)
+#include "sandbox/macos/sandbox_macos.h"
+#endif
 
 void initialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
 
-	GDREGISTER_CLASS(Sandboxing);
 	GDREGISTER_CLASS(InputSync);
 	GDREGISTER_CLASS(Command);
 	GDREGISTER_CLASS(CommandSync);
 	GDREGISTER_CLASS(TGExternalTexture);
+
+	GDREGISTER_CLASS(SandboxPolicy);
+	GDREGISTER_ABSTRACT_CLASS(Sandbox);
+#if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
+	GDREGISTER_CLASS(SandboxWin);
+#elif defined(LINUXBSD_ENABLED)
+	GDREGISTER_CLASS(SandboxLinux);
+#elif defined(MACOS_ENABLED)
+	GDREGISTER_CLASS(SandboxMacOS);
+#endif
 }
 
 void uninitialize_the_gates_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
+
+	tg_zmq_shutdown();
 }
