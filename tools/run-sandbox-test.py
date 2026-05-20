@@ -12,9 +12,12 @@ Designed for an agent loop: every run produces <30 lines of output and a stable
 exit code. Logs are kept on disk for the agent to grep with explicit patterns.
 
 Modes:
-  default               Tutorial gate happy path. Asserts sandbox engaged + IPC works.
-  negative-fail-closed  Forces lower_token to fail; renderer must abort.
-  negative-signature    Forces verify_binary to fail; broker must refuse spawn.
+  default                   Tutorial gate happy path. Asserts sandbox engaged + IPC works
+                            and the three network canaries report as expected.
+  negative-fail-closed      Forces lower_token to fail; renderer must abort.
+  negative-signature        Forces verify_binary to fail; broker must refuse spawn.
+  negative-network-filter   Forces NetworkFilter::engage to fail; launcher must refuse
+                            to spawn the renderer.
 """
 
 from __future__ import annotations
@@ -69,6 +72,10 @@ FAIL_CATALOG: dict[str, int] = {
     "gate_no_first_frame": 33,
     "gate_not_responding": 34,
     "gate_error": 35,
+    "canary_private_ip_reachable": 38,
+    "canary_localhost_reachable": 39,
+    "canary_public_ip_unreachable": 40,
+    "negative_network_filter_not_aborted": 41,
 }
 
 MAX_TICK_GAP_MS = 500
@@ -265,7 +272,7 @@ examples:
     )
     parser.add_argument(
         "mode", nargs="?", default="default",
-        choices=["default", "negative-fail-closed", "negative-signature"],
+        choices=["default", "negative-fail-closed", "negative-signature", "negative-network-filter"],
         help="harness mode (default: default)",
     )
     parser.add_argument("--gate-url", default="https://thegates.io/worlds/tutorial.gate")
@@ -301,10 +308,13 @@ examples:
     # Pop on os.environ directly; dict.update on a copy would never unset.
     os.environ.pop("TG_SANDBOX_FORCE_FAIL", None)
     os.environ.pop("TG_SIGNATURE_FORCE_FAIL", None)
+    os.environ.pop("TG_NETWORK_FILTER_FORCE_FAIL", None)
     if args.mode == "negative-fail-closed":
         os.environ["TG_SANDBOX_FORCE_FAIL"] = "1"
     elif args.mode == "negative-signature":
         os.environ["TG_SIGNATURE_FORCE_FAIL"] = "1"
+    elif args.mode == "negative-network-filter":
+        os.environ["TG_NETWORK_FILTER_FORCE_FAIL"] = "1"
 
     if args.build:
         run_build(args.no_sandbox, build_log, results_dir)
@@ -351,6 +361,19 @@ examples:
         if "[AUTOTEST-GATE-ERROR]" not in launcher_text:
             emit_fail("negative_signature_no_gate_error launcher_did_not_surface_refusal", results_dir)
         emit_pass("negative-signature: broker refused to spawn and launcher surfaced gate_error as expected", results_dir)
+
+    # negative-network-filter: TG_NETWORK_FILTER_FORCE_FAIL forces engage() to
+    # return ERR_UNAVAILABLE. Launcher (GDScript) must refuse to spawn and
+    # surface the refusal as a gate_error. Same shape as negative-signature
+    # because both are launcher-side fail-closed gates.
+    if args.mode == "negative-network-filter":
+        ns_log = find_renderer_log_for_run(logs_root, launch_start)
+        if ns_log and ns_log.stat().st_mtime >= launch_start - 1.0:
+            emit_fail(f"negative_network_filter_not_aborted renderer_log_present={ns_log}", results_dir)
+        launcher_text = launcher_log.read_text(encoding="utf-8", errors="replace") if launcher_log.exists() else ""
+        if "[AUTOTEST-GATE-ERROR]" not in launcher_text:
+            emit_fail("negative_network_filter_not_aborted launcher_did_not_surface_refusal", results_dir)
+        emit_pass("negative-network-filter: launcher refused to spawn renderer as expected", results_dir)
 
     renderer_log_file = find_renderer_log_for_run(logs_root, launch_start)
     if not renderer_log_file or not renderer_log_file.is_file():
@@ -434,13 +457,19 @@ examples:
             node = node[k]
         return str(node)
 
+    # Canaries are uniform {status, error?} dicts. Older string canaries used
+    # to be flat strings; this helper handles both during transition (and stays
+    # correct after the dict migration completes).
+    def canary_status(name: str) -> str:
+        return diag_get("canaries", name, "status")
+
     diag_integrity = diag_get("integrity")
     diag_pid = diag_get("pid")
     diag_build = diag_get("build")
-    canary_file = diag_get("canaries", "canary_file_write")
-    canary_user = diag_get("canaries", "canary_user_dir_write")
-    canary_sibling = diag_get("canaries", "canary_sibling_gate_write")
-    canary_pck = diag_get("canaries", "canary_pck_read")
+    canary_file = canary_status("canary_file_write")
+    canary_user = canary_status("canary_user_dir_write")
+    canary_sibling = canary_status("canary_sibling_gate_write")
+    canary_pck = canary_status("canary_pck_read")
 
     gate_folder = gate_url_to_folder(args.gate_url)
     per_gate_dir = user_data_root() / "gates_storage" / gate_folder
@@ -465,6 +494,33 @@ examples:
         emit_fail(f"canary_sibling_gate_allowed value={canary_sibling} (cross-gate isolation broken)", results_dir)
     if canary_pck not in ("allowed", "skipped_no_main_scene", "skipped_no_pck_path"):
         emit_fail(f"canary_pck_read_blocked value={canary_pck} (gate cannot load resources from .pck post-lockdown)", results_dir)
+
+    # Network filter canaries. Same {status, error?} shape as the rest.
+    canary_priv = canary_status("canary_private_ip_blocked")
+    canary_loop = canary_status("canary_localhost_blocked")
+    canary_pub = canary_status("canary_public_ip_allowed")
+    network_canaries_present = "?" not in (canary_priv, canary_loop, canary_pub)
+    if network_canaries_present:
+        if canary_priv != "blocked":
+            emit_fail(f"canary_private_ip_reachable value={canary_priv} "
+                      "(renderer can reach RFC 1918; OS-level filter not engaged)", results_dir)
+        if canary_loop != "blocked":
+            emit_fail(f"canary_localhost_reachable value={canary_loop} "
+                      "(renderer can reach 127.0.0.1; loopback CIDR missing from filter)", results_dir)
+        # Public IP must be allowed in principle; tolerate environment-side
+        # network unreachability by allowing "blocked" only when error is a
+        # network reachability code (not a filter-enforced denial).
+        if canary_pub == "blocked":
+            pub_err = diag_get("canaries", "canary_public_ip_allowed", "error")
+            try:
+                pub_err_int = int(pub_err)
+            except (TypeError, ValueError):
+                pub_err_int = 0
+            # WSAEACCES (10013) on Windows / EACCES (13) on Linux / macOS means
+            # the filter actively denied — that's the over-broad failure mode.
+            if pub_err_int in (10013, 13):
+                emit_fail(f"canary_public_ip_unreachable err={pub_err_int} "
+                          "(filter denies public outbound; rules too broad)", results_dir)
 
     # Broker / renderer cross-check via broker_policy.json (Windows writes it;
     # other platforms skip silently).

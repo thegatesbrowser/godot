@@ -64,5 +64,7 @@ public:
 
 	bool is_target() const override { return broker_service == nullptr; }
 
+	Dictionary network_state() const override;
+
 	SandboxWin();
 };

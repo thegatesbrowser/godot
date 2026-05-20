@@ -103,6 +103,7 @@ void Sandbox::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("kill_target"), &Sandbox::kill_target);
 	ClassDB::bind_method(D_METHOD("lower_token"), &Sandbox::lower_token);
 	ClassDB::bind_method(D_METHOD("is_target"), &Sandbox::is_target);
+	ClassDB::bind_method(D_METHOD("network_state"), &Sandbox::network_state);
 
 	ADD_SIGNAL(MethodInfo("verify_finished", PropertyInfo(Variant::INT, "err")));
 }

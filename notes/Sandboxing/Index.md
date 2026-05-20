@@ -54,19 +54,23 @@ the same shape as Firefox's `security/sandbox/linux/Sandbox.cpp`.
    implementation: the one kernel call (`sandbox_init_with_parameters`),
    how Firefox's `Sandbox.mm` is vendored, and where the renderer-specific
    addend hooks in.
-5. [[Future Work]] — Tier 1–5 backlog beyond the rewrite (network
+5. [[Network Isolation]] — design for blocking private-IP outbound
+   from the renderer on all three platforms (Linux netns + nftables,
+   macOS NEFilterDataProvider, Windows WFP + AppContainer). Not yet
+   implemented; this is the agreed plan.
+6. [[Future Work]] — Tier 1–5 backlog beyond the rewrite (network
    brokering, win32k disable, audio brokering, AppContainer revisit,
    etc.).
-6. [[Reference Material]] — bug numbers, file paths, key quotes from
+7. [[Reference Material]] — bug numbers, file paths, key quotes from
    Chromium / Firefox / Project Zero sources. Use to verify a claim or
    pick up a research thread.
-7. [[GDExtension Loading]] — how gate-shipped native extensions interact
+8. [[GDExtension Loading]] — how gate-shipped native extensions interact
    with the post-lockdown sandbox.
-8. [[Bootup Performance]] — measured decomposition of bootup time, the
+9. [[Bootup Performance]] — measured decomposition of bootup time, the
    sandbox-stack regression vs v0.24.4, and the known optimization levers.
-9. [[Bootup Latency — Zygote vs Shared Shader Cache]] — research/ADR for
-   the latency-reduction options: zygote-fork, FD pre-resolve, and the
-   shared shader cache via `shader_cache_res_dir`.
+10. [[Bootup Latency — Zygote vs Shared Shader Cache]] — research/ADR for
+    the latency-reduction options: zygote-fork, FD pre-resolve, and the
+    shared shader cache via `shader_cache_res_dir`.
 
 ## Archived
 
