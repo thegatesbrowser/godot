@@ -149,6 +149,7 @@ Export("env_tg")
 
 SConscript("ipc/SCsub")
 SConscript("sandbox/SCsub")
+SConscript("network/SCsub")
 
 if env.tg_renderer:
     SConscript("renderer/SCsub")

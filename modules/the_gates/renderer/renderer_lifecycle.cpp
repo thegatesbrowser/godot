@@ -34,6 +34,8 @@
 #include "../ipc/external_texture.h"
 #include "../ipc/input_sync.h"
 #include "../ipc/zmq_runtime.h"
+#include "../network/brokered_net_socket.h"
+#include "../network/renderer_net_client.h"
 #include "../sandbox/sandbox.h"
 #include "../sandbox/sandbox_diagnostics.h"
 
@@ -44,6 +46,8 @@
 #include "core/variant/array.h"
 #include "servers/display_server.h"
 #include "servers/rendering/rendering_device.h"
+
+#include <stdlib.h>
 
 namespace {
 
@@ -95,6 +99,28 @@ bool import_external_texture(DisplayServer *p_display_server) {
 	return ext_texture->import(format, view) == OK;
 }
 
+// Adopts the broker control FD inherited from the launcher (via
+// posix_spawn_file_actions_adddup2 + env var TG_BROKER_FD on POSIX; Windows
+// pending). Installs BrokeredNetSocket as the engine NetSocket factory and
+// the DNS hook in one shot — both pull from RendererNetClient. Must run
+// pre-lockdown; afterwards, no new FDs can be acquired anyway.
+void engage_network_broker() {
+	const char *env_fd = ::getenv("TG_BROKER_FD");
+	if (env_fd == nullptr || env_fd[0] == '\0') {
+		CRASH_NOW_MSG("TG_BROKER_FD missing; renderer cannot establish network broker (launcher contract violated).");
+	}
+	const int broker_fd = ::atoi(env_fd);
+	if (broker_fd < 0) {
+		CRASH_NOW_MSG("TG_BROKER_FD invalid; renderer cannot establish network broker.");
+	}
+	if (RendererNetClient::install(broker_fd) != OK) {
+		CRASH_NOW_MSG("RendererNetClient::install failed; refusing to lower token without network broker.");
+	}
+	BrokeredNetSocket::make_default();
+	print_line("[NETWORK-BROKER] inherited fd=" + itos(broker_fd) +
+			"; renderer NetSocket + IP factories installed.");
+}
+
 void lockdown(const String &p_pack_path) {
 	Ref<Sandbox> sandbox = Sandbox::create();
 	if (sandbox.is_valid() && sandbox->is_target()) {
@@ -139,6 +165,11 @@ bool tg_renderer_engage(DisplayServer *p_display_server, const String &p_pack_pa
 	if (!import_external_texture(p_display_server)) {
 		return false;
 	}
+
+	// MUST happen before lockdown: opens AF_UNIX socket to the broker and
+	// installs NetSocket/IP factory overrides. Post-lockdown, no new
+	// sockets can be created — only the broker FD remains usable.
+	engage_network_broker();
 
 	lockdown(p_pack_path);
 	return true;

@@ -37,13 +37,11 @@ firefox_obj = []
 env_firefox.add_source_files(firefox_obj, firefox_sources)
 env.modules_sources += firefox_obj
 
-# Apple frameworks: CoreFoundation for the vendored Firefox shim,
-# NetworkExtension + SystemExtensions for the NEFilterManager
-# / OSSystemExtensionRequest checks in sandbox_macos.mm.
+# Apple frameworks: CoreFoundation for the vendored Firefox shim.
+# Network isolation is in-process (see modules/the_gates/network/) — no
+# NEFilterManager / OSSystemExtensionRequest, no NetworkExtension framework.
 env.Append(LINKFLAGS=[
     "-framework", "CoreFoundation",
-    "-framework", "NetworkExtension",
-    "-framework", "SystemExtensions",
 ])
 
 env.Depends(macos_sandbox_obj, firefox_obj)

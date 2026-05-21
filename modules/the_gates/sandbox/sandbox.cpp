@@ -30,6 +30,7 @@
 
 #include "sandbox.h"
 
+#include "../network/network_broker.h"
 #include "sandbox_policy.h"
 
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
@@ -91,6 +92,35 @@ void Sandbox::_verify_done() {
 	current_job = nullptr;
 
 	emit_signal(SNAME("verify_finished"), (int)err);
+}
+
+void Sandbox::start_broker(int p_launcher_fd, void *p_target_handle) {
+	if (network_broker.is_null()) {
+		network_broker = Ref<NetworkBroker>(memnew(NetworkBroker));
+	}
+	if (p_target_handle != nullptr) {
+		network_broker->set_target_process_handle(p_target_handle);
+	}
+	const Error e = network_broker->start(p_launcher_fd);
+	if (e != OK) {
+		network_broker = Ref<NetworkBroker>();
+	}
+}
+
+void Sandbox::stop_broker() {
+	if (network_broker.is_valid()) {
+		network_broker->shutdown();
+		network_broker = Ref<NetworkBroker>();
+	}
+}
+
+Dictionary Sandbox::network_state() const {
+	if (network_broker.is_null()) {
+		Dictionary out;
+		out["status"] = "stopped";
+		return out;
+	}
+	return network_broker->state();
 }
 
 void Sandbox::_bind_methods() {

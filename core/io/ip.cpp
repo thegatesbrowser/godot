@@ -35,6 +35,14 @@
 #include "core/templates/hash_map.h"
 #include "core/variant/typed_array.h"
 
+#ifdef TG_RENDERER
+// DNS brokering hook implemented by modules/the_gates/network/brokered_ip.cpp.
+// The renderer's sandbox denies socket() so getaddrinfo would fail; the
+// launcher's NetworkBroker resolves on the renderer's behalf via the AF_UNIX
+// control channel established before lower_token.
+extern "C" bool tg_renderer_resolve_hostname(const String &p_hostname, IP::Type p_type, List<IPAddress> &r_addresses);
+#endif
+
 /************* RESOLVER ******************/
 
 struct _IP_ResolverPrivate {
@@ -89,7 +97,13 @@ struct _IP_ResolverPrivate {
 
 			// We should not lock while resolving the hostname,
 			// only when modifying the queue.
+#ifdef TG_RENDERER
+			if (!tg_renderer_resolve_hostname(hostname, type, response)) {
+				IP::get_singleton()->_resolve_hostname(response, hostname, type);
+			}
+#else
 			IP::get_singleton()->_resolve_hostname(response, hostname, type);
+#endif
 
 			MutexLock lock(mutex);
 			// Could have been completed by another function, or deleted.
@@ -138,7 +152,13 @@ PackedStringArray IP::resolve_hostname_addresses(const String &p_hostname, Type 
 		// This should be run unlocked so the resolver thread can keep resolving
 		// other requests.
 		resolver->mutex.unlock();
+#ifdef TG_RENDERER
+		if (!tg_renderer_resolve_hostname(p_hostname, p_type, res)) {
+			_resolve_hostname(res, p_hostname, p_type);
+		}
+#else
 		_resolve_hostname(res, p_hostname, p_type);
+#endif
 		resolver->mutex.lock();
 		// We might be overriding another result, but we don't care as long as the result is valid.
 		if (res.size()) {
