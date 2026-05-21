@@ -33,6 +33,8 @@
 #include "../network/network_broker.h"
 #include "sandbox_policy.h"
 
+#include "core/object/worker_thread_pool.h"
+
 #if defined(TG_SANDBOX) && defined(WINDOWS_ENABLED)
 #include "windows/sandbox_win.h"
 #elif defined(TG_SANDBOX) && defined(LINUXBSD_ENABLED)
@@ -107,11 +109,23 @@ void Sandbox::start_broker(int p_launcher_fd, void *p_target_handle) {
 	}
 }
 
+void Sandbox::_drain_broker_task(void *p_userdata) {
+	Ref<NetworkBroker> *handoff = static_cast<Ref<NetworkBroker> *>(p_userdata);
+	memdelete(handoff);
+}
+
 void Sandbox::stop_broker() {
-	if (network_broker.is_valid()) {
-		network_broker->shutdown();
-		network_broker = Ref<NetworkBroker>();
+	if (network_broker.is_null()) {
+		return;
 	}
+	// Synchronous getaddrinfo / ::connect inside the service thread aren't
+	// canceled by closing the control FD, so a direct join can stall for the
+	// kernel's TCP-connect timeout (macOS: 75 s). Move the join off-thread.
+	network_broker->request_shutdown();
+	Ref<NetworkBroker> *handoff = memnew(Ref<NetworkBroker>(network_broker));
+	network_broker = Ref<NetworkBroker>();
+	WorkerThreadPool::get_singleton()->add_native_task(
+			&Sandbox::_drain_broker_task, handoff, false, "TheGates: drain network broker");
 }
 
 Dictionary Sandbox::network_state() const {
