@@ -56,8 +56,6 @@ public:
 	// the launcher. Per-binary invariant, matches SandboxWin's runtime nullptr check.
 	bool is_target() const override;
 
-	Dictionary network_state() const override;
-
 	SandboxLinux() = default;
 	~SandboxLinux();
 };

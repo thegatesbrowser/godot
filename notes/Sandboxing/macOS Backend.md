@@ -84,6 +84,7 @@ Policy crosses `posix_spawn` as env vars the broker injects:
 | `TG_SANDBOX_APP_PATH`     | renderer executable path; SBPL `appPath` param       |
 | `TG_SANDBOX_ALLOW_AUDIO`  | `1` / `0` — toggles the audio-output SBPL fragment   |
 | `TG_SANDBOX_ALLOW_MICROPHONE` | `1` / `0` — toggles `(allow device-microphone)`  |
+| `TG_BROKER_FD`            | fd number the renderer half of the network-broker socketpair is dup'd to (`posix_spawn_file_actions_adddup2`) — typically `3` |
 
 `Sandbox::is_target()` is compile-time on macOS: `TG_RENDERER` is defined
 for the renderer binary and not for the launcher, so the per-process role
@@ -167,10 +168,7 @@ a 3D renderer; the addend covers:
   covers those). libzmq's own bind unlinks any stale orphan file
   before creating its new socket, so we just need the write
   permission here, no extra cleanup.
-- **`(allow network*)`** — interim. Target end state is a
-  Chromium-style brokered network channel where the renderer asks the
-  launcher to perform requests against an allowlist. Tracked in
-  [[Future Work]].
+- **Network: brokered.** The addend allows `network-outbound (remote ip)` / `network-inbound (local ip)` / `network-bind (local ip)` for operations on inherited FDs, then denies twelve BSD syscalls. The six that create a new network FD (`socket`, `socketpair`, `socket_delegate`, `necp_client_action`, `necp_session_open`, `__channel_open`) plus the six that could retarget an existing FD bypassing the broker's destination filter (`connect`, `bind`, `listen`, `accept`, and the `_nocancel` pair `accept_nocancel`, `connect_nocancel`). The renderer cannot make its own sockets and cannot redirect ones it already has; every TCP/UDP/DTLS/HTTPS/WebSocket/ENet flow comes from FDs the launcher passes via SCM_RIGHTS. See [[Network Isolation]] for the full architecture, the broker design, and the SBPL audit trail.
 
 | Parameter            | Value source                                        |
 |----------------------|-----------------------------------------------------|
@@ -316,9 +314,6 @@ Tracked in [[Future Work]]:
 - `hasWindowServer = true` is required for MoltenVK; tightening to a
   windowserver-less profile would mean splitting renderer into a "GPU"
   subprocess (mirrors the Linux Tier 3 backlog).
-- Renderer has full `(allow network*)`. Same gap Linux has today. The
-  Chromium-style brokered-network channel (renderer→launcher request,
-  launcher checks an allowlist, returns bytes) closes this for both.
 
 ## Related
 

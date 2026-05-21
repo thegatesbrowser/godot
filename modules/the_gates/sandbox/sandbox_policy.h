@@ -43,7 +43,6 @@ class SandboxPolicy : public RefCounted {
 	PackedStringArray rw_files;
 	PackedStringArray ro_files;
 	String child_stdout_log_path;
-	bool block_private_networks = true;
 	bool allow_audio = true;
 	bool allow_microphone = true;
 	int integrity_floor = 0;
@@ -65,12 +64,6 @@ public:
 
 	void set_child_stdout_log_path(const String &p_path) { child_stdout_log_path = p_path; }
 	String get_child_stdout_log_path() const { return child_stdout_log_path; }
-
-	// Engages the OS-level filter that drops RFC 1918 / loopback / link-local
-	// outbound from the renderer. Default true: each platform's spawn_target
-	// refuses to spawn if the filter cannot be confirmed active.
-	void set_block_private_networks(bool p_block) { block_private_networks = p_block; }
-	bool is_private_networks_blocked() const { return block_private_networks; }
 
 	void set_allow_audio(bool p_allow) { allow_audio = p_allow; }
 	bool is_audio_allowed() const { return allow_audio; }

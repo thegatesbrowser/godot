@@ -1,189 +1,288 @@
+---
+tags: [sandbox, network]
+---
+
 # Network isolation
 
-Block outbound connections from the renderer to private network addresses (RFC 1918, loopback, link-local) on all three platforms, while leaving public-internet traffic untouched. The threat model matches the web's Private Network Access spec: a hostile gate should not be able to scan the user's home router, hit localhost services, or probe internal corporate networks. Public outbound stays free so HTTP, HTTPS, WebSocket, WebRTC, and multiplayer UDP keep working — gates are "browser-tab-equivalent" for network.
+The renderer cannot create kernel sockets directly — the OS sandbox denies
+`socket()` (Linux seccomp, macOS Seatbelt by BSD syscall number, Windows
+USER_LIMITED token + UNTRUSTED IL). The only way for the renderer to obtain
+a usable TCP/UDP socket is to ask the launcher's in-process **network
+broker**, which validates the destination against a CIDR allowlist, opens
+the kernel socket itself, and hands the FD to the renderer via SCM_RIGHTS
+(POSIX) or WSADuplicateSocket (Windows). After that, the renderer uses the
+FD with ordinary kernel I/O — no per-byte broker overhead. Only socket
+creation and DNS resolution cross the broker.
 
-Enforcement is below the application layer on every platform. A GDExtension that calls libcurl or raw sockets directly is filtered by the OS, not by Godot — bypass is not a feature.
-
-## Bottom line
-
-| Platform | Mechanism | Privileged setup | Per-spawn cost |
-|---|---|---|---|
-| Linux | Network namespace + veth pair + nftables MASQUERADE/drop | Setuid helper installed by package manager | Small (namespace + veth creation in helper) |
-| macOS | NEFilterDataProvider system extension with static [[#CIDR list]] of drop rules | User clicks "Allow" once in System Settings | Zero (rules live in kernel, evaluated before extension code) |
-| Windows | WFP filters scoped to the renderer image path | Single UAC at Inno Setup installer run | Zero (filters persist in the OS) |
+Threat model: a hostile gate cannot scan the user's home router, hit
+localhost services, or probe internal corporate networks. Public outbound
+(HTTP, HTTPS, WebSocket, TCP, UDP, ENet) flows normally. Matches the web's
+Private Network Access spec.
 
 ## Architecture
 
-Network filtering is a property of the [[Architecture#Sandbox factory|Sandbox]], not a separate subsystem. There is no `NetworkFilter` class. The flow is:
+```
+LAUNCHER                                  RENDERER
+──────                                    ────────
+Sandbox::spawn_target(policy, ...)
+  ├─ socketpair(AF_UNIX, SOCK_STREAM)        ◄── inherited control FD
+  │   sv[0] = launcher half                  ┌────────────────────────┐
+  │   sv[1] = child half (dup2 to FD 3)      │ posix_spawn child sees │
+  ├─ env: TG_BROKER_FD=3                     │ FD 3 + env TG_BROKER_FD│
+  ├─ posix_spawn / fork+exec                 └────────────────────────┘
+  ├─ start_broker(sv[0])
+  └─ NetworkBroker thread runs                tg_renderer_engage()
+                                                ├─ RendererNetClient::install(getenv TG_BROKER_FD)
+                                                ├─ BrokeredNetSocket::make_default()
+                                                └─ Sandbox::lower_token()  ◄── fail-closed
 
-1. Launcher calls `Sandbox.create()` and gets the platform's implementation.
-2. Launcher builds a `SandboxPolicy` with `block_private_networks: true` (the default).
-3. Launcher calls `broker.spawn_target(policy, renderer_exe, args)`.
-4. The platform's `SandboxXxx::spawn_target` reads `policy.is_private_networks_blocked()`. If true:
-   - Verifies the OS-level filter is active. If not, returns an empty `Dictionary` — the launcher refuses to spawn.
-   - On Linux, additionally inserts a fork-time pipe sync so the helper can wire up the renderer's namespace before `execve`.
-5. The spawn proceeds with the OS filter already in place. Once the renderer's `connect()` returns, the filter's verdict is in effect.
+Per request (NetSocket::create → BrokeredNetSocket):
+  open(TCP/UDP)               — records type; no kernel FD yet.
+  connect_to_host(ip, port)   — singleton sends [opcode][ip6:16][port:2][hostname_len][hostname]
+                                framed by [u32 length], one length-prefixed message.
+  bind() / listen() / accept()— ERR_UNAUTHORIZED. Renderer is client-only.
 
-The `--network-diagnostic` launcher flag reads `Sandbox.network_state()` — a per-platform Dictionary describing the filter's current state. Used for support cases.
+Per request (IP::resolve_hostname under #ifdef TG_RENDERER):
+  tg_renderer_resolve_hostname → RendererNetClient::resolve_hostname
+    sends OP_RESOLVE_HOSTNAME, receives [ST_OK][count][ip:16]..
 
-## Per-platform implementation
+Broker side (network_broker.cpp::_serve):
+  ├─ TGFDPassing::recv_msg — one length-prefixed message
+  ├─ resolve hostname if present (renderer cannot reach DNS)
+  ├─ CIDRPolicy::is_allowed(dest) — RFC 1918 / loopback / link-local / IPv4-mapped denied
+  ├─ create AF_INET6 dual-stack socket, connect()
+  └─ TGFDPassing::send_msg(peer_fd, sock, ..., [ST_OK]) — FD via SCM_RIGHTS / WSADuplicateSocket
+```
 
-### Linux
+## Why this shape
 
-Reference: [Firefox `SandboxLaunch.cpp`](https://searchfox.org/mozilla-central/source/security/sandbox/linux/launch/SandboxLaunch.cpp). Firefox uses `unshare(CLONE_NEWNET)` for content processes; we do the same with a veth pair to the launcher so public outbound can still flow.
+- **Inherited FD, no filesystem rendezvous.** The control channel exists
+  before the child runs, so the renderer never sees a path and there is
+  nothing for another local process to squat. Two launchers run side by
+  side without colliding. Cycle tests don't unlink-and-rebind anything.
+  Same pattern Chromium uses for its Mojo channel and Firefox for the
+  content-process pipe.
 
-**Spawn flow change.** `SandboxLinux::spawn_target` finds `tg-netns-helper` (mode 4755, owner root) under `/usr/local/sbin` or `/usr/sbin`. If absent, refuses to spawn. After `fork()`, the child immediately calls `unshare(CLONE_NEWUSER | CLONE_NEWNET)` and blocks on a pipe. The parent writes `/proc/<pid>/setgroups=deny`, `/proc/<pid>/uid_map`, `/proc/<pid>/gid_map` to give the child an identity-mapped user namespace, then invokes the setuid helper to create the veth pair and install nftables rules. Once the helper exits cleanly, the parent signals the child via the pipe; child closes the sync fds and proceeds to log dup + `execve`.
+- **One trust boundary.** `Sandbox` owns the `NetworkBroker`. There is no
+  separate GDScript broker object, no separate lifecycle to keep in sync.
+  `spawn_target` starts the broker on the launcher side of the socketpair;
+  `kill_target` shuts it down. `Sandbox.network_state()` reports the
+  broker's stats directly.
 
-**Setuid helper.** Small C binary (~250 lines, narrow surface). Verifies its caller is the launcher binary by reading `/proc/<ppid>/exe`. Creates the veth pair, moves the namespace end into the child's network namespace, configures IPs, enables forwarding on the host side, loads nftables rules dropping RFC 1918 / loopback / link-local on the renderer's iif. Writes a per-renderer `/run/tg-netns/<veth>-resolv.conf` pointing at 1.1.1.1 / 8.8.8.8 so the child has DNS without leaking to the LAN.
+- **One renderer-side owner.** `RendererNetClient` holds the broker FD and
+  the request mutex. Both `BrokeredNetSocket` (socket creation) and the
+  `tg_renderer_resolve_hostname` hook (DNS) pull from it. No friend-exposed
+  statics duplicated across files.
 
-**Composes with the existing stack.** Network namespace inheritance happens through `execve`, so the renderer's `tg_apply_lockdown` (landlock + seccomp + capset) runs inside the new netns with no ordering changes.
+- **Identical wire on all platforms.** Every request and reply is one
+  length-prefixed message via `TGFDPassing::send_msg` / `recv_msg`. On
+  POSIX the FD travels via `SCM_RIGHTS` ancillary; on Windows the
+  `WSAPROTOCOL_INFOW` blob is appended after the user payload. The Windows
+  pipe is in byte mode to match POSIX `SOCK_STREAM` semantics.
 
-### macOS
+## UDP and ENet
 
-Reference: [LuLu's filter extension](https://github.com/objective-see/LuLu). Same mechanism: NEFilterDataProvider as a system extension with `content-filter-provider-systemextension` entitlement (self-service since November 2016 — no Apple approval queue).
+UDP sockets are connected at the broker. The renderer's
+`BrokeredNetSocket::open(TYPE_UDP)` no longer pre-binds a wildcard FD —
+that produced an unconnected UDP socket that bypassed kernel destination
+filtering. Instead, `open()` records the requested type only. The first
+`sendto(addr, ...)` (or `connect_to_host(addr)`) triggers
+`OP_OPEN_UDP(addr)` on the broker, which `connect()`s the kernel socket to
+that address. Subsequent `sendto` calls to a *different* address return
+`ERR_UNAUTHORIZED`. The kernel enforces destination from that point on.
 
-**System extension target.** `.systemextension` bundle inside the launcher app, embedded via Xcode's build phase. Bundle ID `io.thegates.launcher.netfilter`.
+ENet client mode uses one host with one peer (the gate server). Godot's
+`ENetMultiplayerPeer.create_client(addr, port)` ends up calling
+`NetSocket::sendto(server_addr, ...)` on first packet — which we intercept
+to connect via the broker. Works transparently.
 
-**Filter logic.** In `startFilter`, builds a `NEFilterSettings` containing one `NEFilterRule` per CIDR with action `NEFilterActionDrop`, default action `NEFilterActionAllow`. The kernel evaluates these rules before `handleNewFlow` runs, so the runtime cost for matching flows is zero.
+ENet server mode (`bind()` to a local port) is denied. Renderers do not
+host network services. Mesh / P2P via ENet is also unsupported — it needs
+STUN/TURN signalling we don't ship, and Godot's official answer for
+real-world P2P is WebRTC (separately out of scope; see Future Work).
 
-**Spawn flow check.** `SandboxMacOS::spawn_target` calls `NEFilterManager.loadFromPreferences` (synchronous, 5s timeout) and checks `isEnabled` + `providerConfiguration`. If either is missing, submits an `OSSystemExtensionRequest` activation request (so the user sees the System Settings prompt) and refuses to spawn. After the user clicks Allow, the next launcher run sees the filter enabled and proceeds.
+## Per-platform sandbox tightening
 
-**Renderer identity.** The extension identifies the renderer via `SecCodeCopyGuestWithAttributes` against the source flow's audit token, checking the designated requirement (Team ID + bundle ID).
+The primary enforcement on every platform is the `NetSocket` factory
+replacement (`BrokeredNetSocket`). The OS sandbox closes the
+defense-in-depth gap against malicious GDExtensions that try to call
+`socket()` directly:
 
-### Windows
+- **Linux.** Seccomp policy removes `__NR_socket`, `__NR_socketpair`,
+  `__NR_bind`, `__NR_listen`, `__NR_connect` from the allow list. The
+  inherited broker FD survives because seccomp filters new socket
+  syscalls, not operations on existing FDs.
 
-Reference: [Project Zero on AppContainer network capabilities](https://googleprojectzero.blogspot.com/2021/08/understanding-network-access-windows-app.html). The AppContainer capability model has a documented Public-profile gap; our explicit WFP filters close it regardless of profile.
+- **Windows.** USER_LIMITED + INTEGRITY_LEVEL_UNTRUSTED denies AF_INET
+  socket creation at access-check time. (Broker plumbing for the
+  inherited handle via Chromium's `TargetPolicy::AddHandleToShare` is
+  pending — Windows tests are deferred.)
 
-**WFP filters.** Five persistent IPv4 filter rules + four persistent IPv6 filter rules installed at install time (admin context via the Inno Setup installer), scoped via `FWPM_CONDITION_ALE_APP_ID` to the renderer's image path. The filters use `FWPM_FILTER_FLAG_PERSISTENT` and live under a registered provider GUID so the uninstaller can find and remove them. Sublayer weight is 0xFFFF so they outbid Windows Defender's WSH sublayer (otherwise Defender's blanket outbound PERMIT arbitrates first).
+- **macOS.** Seatbelt addend denies the complete enumeration of xnu
+  syscalls that return a new network FD: `SYS_socket` (97),
+  `SYS_socketpair` (135), `SYS_socket_delegate` (450),
+  `SYS_necp_client_action` (502), `SYS_necp_session_open` (522),
+  `SYS___channel_open` (510). Inherited FDs from SCM_RIGHTS survive
+  because the kernel syscall hook fires only at creation.
 
-**Registry install marker.** `HKLM\SOFTWARE\TheGates\NetworkFilter\Installed = 1` written by `tg-wfp-tool install` during its elevated phase, deleted by `tg-wfp-tool uninstall`. The launcher reads this marker without admin (WFP filter enumeration is denied to non-admin callers, so the launcher can't query WFP directly).
+All three platforms verified by `canary_raw_socket_denied=blocked` in
+`tools/run-sandbox-test.py`.
 
-**Spawn flow check.** `SandboxWin::spawn_target` reads the marker. If absent, refuses to spawn. Otherwise prints the registered filter count and proceeds.
+## Honest threat-model notes
 
-**Identity stability.** Filters scope to the renderer image path's NT device form. Downloaded renderers and renderer upgrades to a different path require re-running `tg-wfp-tool install <new-path>` (one UAC). Future Work: a Windows service that updates filters at runtime without UAC each time.
+Real attacker paths and what stops them:
 
-## CIDR list
+1. **GDExtension calls libc `socket()`.** Blocked by the OS sandbox. No
+   new FDs.
 
-IPv4:
-- `10.0.0.0/8`
-- `172.16.0.0/12`
-- `192.168.0.0/16`
-- `127.0.0.0/8`
-- `169.254.0.0/16`
+2. **GDExtension uses Godot's `NetSocket` API.** Goes through
+   `BrokeredNetSocket`. Destination is validated by the broker and the
+   kernel socket is `connect()`ed. Cannot send to other destinations.
 
-IPv6:
-- `::1/128`
-- `fc00::/7` (ULA)
-- `fe80::/10` (link-local)
-- `::ffff:0:0/96` (IPv4-mapped — covers IPv6-socket calls to RFC 1918 destinations)
+3. **GDExtension grabs an existing FD and calls libc `sendto` directly.**
+   For TCP and connect-mode UDP, the kernel rejects this — the socket is
+   already connected. For unconnected UDP, only possible if the renderer
+   has an unconnected UDP FD, which the new flow doesn't create.
 
-The list is duplicated across the three standalone helpers (`tg-wfp-tool.cpp`, `tg-netns-helper.c`, `tg-netfilter-extension/FilterDataProvider.mm`) by design — each tool is a standalone artifact built outside the engine SCons system. The launcher itself doesn't need the list; it only checks whether the filter is active.
+4. **Compromised renderer binary skipping the in-renderer check.** The
+   binary itself is signed (`Sandbox::verify_binary`); a tampered binary
+   is refused at spawn time.
 
-## Failure mode
+5. **Kernel bugs in socket handling, NECP type confusion, etc.** Out of
+   scope; identical to Chromium / Firefox. Every userspace sandbox is
+   bounded by kernel correctness.
 
-Fail-closed on every platform. `SandboxXxx::spawn_target` returns an empty `Dictionary` if the filter cannot be confirmed active:
+What we do *not* claim to defend against: kernel exploits, hardware
+exploits, side-channel attacks, or compromise of the launcher itself.
 
-- **Linux:** `tg-netns-helper` missing or non-setuid. "Reinstall the package."
-- **macOS first run:** system extension not yet approved. `OSSystemExtensionRequest` is submitted automatically; the user clicks Allow in System Settings, then retries.
-- **macOS subsequent runs:** filter disabled in System Settings. Re-enable.
-- **Windows:** WFP marker missing under `HKLM\SOFTWARE\TheGates\NetworkFilter`. "Run the installer's WFP setup step."
+## Failure modes
 
-The `TG_NETWORK_FILTER_FORCE_FAIL=1` env var forces a fail-closed result on all three platforms; the harness uses this for the `negative-network-filter` mode.
+Fail-closed across the board:
 
-## Distribution
+- **Renderer can't reach the broker** (env var missing, FD invalid,
+  `install()` failed): `engage_network_broker` crashes the renderer with
+  `CRASH_NOW_MSG` before lockdown. There is no quiet "networking
+  disabled" fallback — running without the broker would silently break
+  every gate.
 
-**Linux.** Standard package manager flow. Setuid helper installed as part of the launcher package with mode `4755`.
+- **Renderer asks for a private CIDR**: broker returns `ST_DENIED_POLICY`.
+  Renderer-side `BrokeredNetSocket::connect_to_host` returns
+  `ERR_UNAUTHORIZED`. ENet / HTTPClient / WebSocketPeer surface this to
+  gate code as a normal connection error.
 
-**macOS.** Standard notarized app bundle with embedded system extension. First launch triggers `OSSystemExtensionRequest`; the user clicks Allow once.
+- **Renderer tries `socket()` directly**: sandbox returns EPERM. Canary
+  `canary_raw_socket_denied` verifies this on every harness run.
 
-**Windows.** Inno Setup installer (`tools/installer-windows/TheGates.iss`). Single UAC at install time. Installer:
-1. Copies the launcher and renderer to `%LOCALAPPDATA%\TheGates\` (per-user install — avoids needing admin for auto-updates).
-2. Runs `tg-wfp-tool.exe install <renderer-path>` during its elevated phase, which registers the WFP filters and writes the install marker.
-3. Registers an uninstaller that runs `tg-wfp-tool.exe uninstall`.
+- **`TG_NETWORK_BROKER_FORCE_FAIL=1`** env var: `CIDRPolicy::is_allowed`
+  always returns false. Used by the harness's `negative-broker` mode to
+  verify the renderer fails closed.
 
-Launcher auto-updates write to `%LOCALAPPDATA%\TheGates\` without further UAC. If the CIDR list ever changes (it doesn't for beta) the user re-runs the installer.
+- **DNS failure**: broker returns `ST_DNS_FAILED`; renderer treats it as
+  a connection failure.
+
+- **`sendto` to a different destination than the first**: renderer
+  returns `ERR_UNAUTHORIZED` — destination is locked to the first one.
+  Practically only happens if a gate misuses the API; legitimate code
+  paths (HTTP, WebSocket, ENet client) always send to the same address.
+
+## What gate code sees
+
+Identical to vanilla Godot for HTTP/HTTPS/WebSocket/raw TCP/raw UDP/ENet
+client. Gate authors use:
+- `HTTPRequest` for HTTP/HTTPS — works
+- `WebSocketPeer.connect_to_url()` — works
+- `StreamPeerTCP.connect_to_host()` — works
+- `PacketPeerUDP.connect_to_host()` — works
+- `ENetMultiplayerPeer.create_client()` — works
+- `IP.resolve_hostname()` — works (brokered)
+
+Public IPs work normally. Private IPs return the platform's
+"connection refused" error. Server-mode `create_server()` and `bind()`
+return `ERR_UNAUTHORIZED`.
+
+## What does NOT work
+
+- **ENet server / mesh modes.** Renderers cannot host. Use a hosted
+  server outside the gate.
+- **WebRTC** (`webrtc-native` GDExtension via libdatachannel/libjuice).
+  libjuice opens raw UDP sockets bypassing Godot's `NetSocket`. The
+  sandbox denies those. Fix is a forked `webrtc-native` that routes
+  libjuice's UDP through `NetSocket`. See [[Future Work]].
+- **GDExtensions calling libcurl or raw `socket()`.** Sandbox denies the
+  syscall. By design — gate-supplied native code cannot bypass the
+  network policy.
+
+## Source map
+
+```
+modules/the_gates/network/
+├── SCsub                       build wiring
+├── cidr_policy.{h,cpp}         IPv4 + IPv6 CIDR matching, force-fail env var
+├── fd_passing.h                length-prefixed framed-message API
+├── fd_passing_unix.cpp         SCM_RIGHTS over AF_UNIX SOCK_STREAM
+├── fd_passing_windows.cpp      WSADuplicateSocket over named pipe in byte mode
+├── network_broker.{h,cpp}      launcher service thread; owned by Sandbox
+├── renderer_net_client.{h,cpp} renderer-side singleton: FD + mutex + request helpers
+├── brokered_net_socket.{h,cpp} NetSocket factory, lazy FD acquisition
+└── brokered_ip.{h,cpp}         renderer DNS hook (thin wrapper over RendererNetClient)
+```
+
+Launcher policy (per-platform) lives next to the sandbox impl:
+- `modules/the_gates/sandbox/macos/sandbox_macos.mm` — socketpair + posix_spawn file_actions
+- `modules/the_gates/sandbox/linux/sandbox_linux.cpp` — socketpair + fork + dup2 in child
+- `modules/the_gates/sandbox/windows/sandbox_win.cpp` — TODO (Chromium AddHandleToShare)
+
+## CIDR blocklist
+
+IPv4: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`,
+`169.254.0.0/16`.
+
+IPv6: `::1/128`, `fc00::/7` (ULA), `fe80::/10` (link-local),
+`::ffff:0:0/96` (IPv4-mapped).
+
+Implemented in `modules/the_gates/network/cidr_policy.cpp`. Checked once
+per socket-open request in the broker; destination is then `connect()`ed
+so the kernel enforces it.
 
 ## Testing
 
-### Canaries
+Harness modes (`tools/run-sandbox-test.py`):
 
-Three new fields in the renderer's `SANDBOX-DIAG` block, alongside the existing filesystem canaries:
-
-- `canary_private_ip_blocked` — TCP connect to `192.168.1.1:80` with select/SO_ERROR readback. Expected `blocked`.
-- `canary_localhost_blocked` — TCP connect to `127.0.0.1:22`. Expected `blocked`.
-- `canary_public_ip_allowed` — TCP connect to `1.1.1.1:443`. Expected `allowed`.
-
-All canaries (file / registry / network / pck) share a uniform `{status, error?}` Dictionary shape. The error sub-field is the platform's errno (`WSAEACCES = 10013` on Windows, `EACCES = 13` on Linux/macOS) and is omitted when zero.
-
-### Harness modes
-
-`tools/run-sandbox-test.py`:
-
-- **`default`** — happy path. Asserts all canaries report expected status, sandbox engaged, IPC works, first frame received.
-- **`negative-fail-closed`** — `TG_SANDBOX_FORCE_FAIL=1`. Renderer reaches `[LOCKDOWN-ATTEMPT]` then aborts.
-- **`negative-signature`** — `TG_SIGNATURE_FORCE_FAIL=1`. Broker refuses to spawn; launcher surfaces `[AUTOTEST-GATE-ERROR]`.
-- **`negative-network-filter`** — `TG_NETWORK_FILTER_FORCE_FAIL=1`. `SandboxXxx::spawn_target` returns empty; launcher surfaces `[AUTOTEST-GATE-ERROR]`. Verifies fail-closed on the network gate without needing to uninstall the OS filter.
-
-### CI
-
-- **Linux runners:** unprivileged user namespaces work; CI installs the setuid helper as a setup step.
-- **Windows runners:** GitHub Actions Windows runners run as admin; CI installs WFP filters via `tg-wfp-tool.exe`, runs harness, tears down.
-- **macOS runners:** system extensions need user consent that can't be clicked on a headless runner. Build/lint only on GitHub-hosted Macs; integration tests require a self-hosted Mac with `systemextensionsctl developer on`.
-
-## Dev workflow
-
-**Linux.** `sudo install -m 4755 build/tg-netns-helper /usr/local/sbin/` once on the dev machine. Iterate normally. Debug: `ip netns list`, `nft list ruleset`, `tcpdump -i veth_renderer_0`, renderer-side `strace -e network`.
-
-**macOS.** `systemextensionsctl developer on` once on the dev machine. Build the extension via Xcode, install via the launcher's normal flow, click Allow once. Debug: Console.app filtered to subsystem `com.apple.networkextension`, `systemextensionsctl list`.
-
-**Windows.** Build `tg-wfp-tool.exe` via `tools/tg-wfp-tool/build.bat`. Run `tg-wfp-tool.exe install <renderer-path>` once with admin. Iterate normally. Debug: `netsh wfp show filters file=dump.xml` and grep for the provider GUID, `netsh wfp show state`.
-
-## Diagnostic flag
-
-`--network-diagnostic` prints `Sandbox.network_state()` and exits. Used for support cases ("my gate can't reach my server"):
-
-- **Windows:** `{installed: bool, filter_count: int, status}`
-- **Linux:** `{helper_path, helper_found, status}`
-- **macOS:** `{is_enabled, has_provider_configuration, extension_bundle_id, status}`
-
-## Implementation status
-
-Landed on `tg-4.5` and `app/main`:
-
-| Commit | What | Build-verified |
-|---|---|---|
-| `805f06426` → ... → `6cb6533cd` | NetworkFilter abstraction (intermediate scaffold, since merged) | — |
-| `6cb6533cd` | Architecture rewrite: NetworkFilter merged into Sandbox | Windows launcher dev |
-| `8d3a861cb` | Image-path scoping + registry install marker + sublayer weight fix | Windows end-to-end |
-| `3dc32158a` | Canary fix: select + SO_ERROR for accurate WFP verdict | Windows end-to-end |
-| `2380d23cc` | Uniform `{status, error?}` canary shape across all canaries | Windows end-to-end |
-
-Plus on `app/`:
-- `73d4b40` — renderer_manager.gd cleanup: drop NetworkFilter coordination
-- `b4b272d` — `--network-diagnostic` flag + Sandbox.network_state() integration
-
-All 4 harness modes pass on Windows: `default`, `negative-fail-closed`, `negative-signature`, `negative-network-filter`.
-
-## What's left
-
-- **macOS Xcode project integration.** The system extension source files exist in `tools/tg-netfilter-extension/` but are not built by the Godot SCons system. The launcher's macOS Xcode project (not in this tree) needs a new `.systemextension` target. Steps documented in `tools/tg-netfilter-extension/README.md`. Requires Xcode + a Mac.
-- **Linux compile-test.** Source for `SandboxLinux::spawn_target` pipe-sync, `tg-netns-helper`, and the setuid install step is written but not built or run end-to-end. Compile on Linux, install the helper, run the harness.
-- **macOS compile-test.** Source for `SandboxMacOS::spawn_target` NE check + OSSystemExtensionRequest is written but not built. Compile on macOS via Xcode + the system extension target setup.
-- **Inno Setup build.** Source for `TheGates.iss` exists but Inno Setup compiler not in this session.
-- **WebRTC test gate.** Real WebRTC end-to-end testing requires a separate `.gate` package; the existing `canary_public_ip_allowed` proves the OS filter doesn't break outbound TCP to public destinations and WebRTC uses the same code path through to the kernel.
-- **Branch sync.** Per the fork's branch workflow rule, every `tg-4.5` commit needs to be cherry-picked to `tg-master`. Not yet done.
+- **`default`** — happy path. All canaries report expected:
+  `canary_raw_socket_denied=blocked`, `canary_private_ip_blocked=blocked`,
+  `canary_localhost_blocked=blocked`, `canary_public_ip_allowed=allowed`.
+- **`negative-fail-closed`** — `TG_SANDBOX_FORCE_FAIL=1`. Renderer's
+  `lower_token` returns failure; renderer aborts.
+- **`negative-signature`** — `TG_SIGNATURE_FORCE_FAIL=1`. Broker refuses
+  to spawn.
+- **`negative-broker`** — `TG_NETWORK_BROKER_FORCE_FAIL=1`. Every CIDR
+  policy check returns false; renderer can't open any socket. Look for
+  `[NETWORK-BROKER] DENY` lines in launcher log.
 
 ## Future work
 
-- **Per-gate origin allowlist.** Extend `SandboxPolicy` with a `network_allowlist: PackedStringArray` field; each platform's `spawn_target` translates it before engaging. The architecture supports this naturally — no new abstraction needed.
-- **Windows service.** Replace the install-time persistent filter with a SYSTEM service the launcher talks to over a named pipe. Enables runtime filter changes without re-running the installer.
-- **DNS observability.** `NEDNSProxyProvider` on macOS / NRPT on Windows / nsswitch hook on Linux to log domains gates resolve. Useful for support and for a "what hosts did this gate hit?" UI.
+- **Windows broker plumbing.** Inherit the named-pipe handle via
+  Chromium's `TargetPolicy::AddHandleToShare`. Currently a TODO in
+  `sandbox_win.cpp`.
+- **WebRTC support via forked libjuice.** Patch
+  `libdatachannel/deps/libjuice/src/udp.c` to use Godot's `NetSocket`.
+  Mirrors the existing ENet integration pattern.
+- **Per-gate origin allowlist.** Add a `NetworkPolicy` value to
+  `SandboxPolicy` carrying additional CIDRs the gate is allowed to
+  reach. Useful for gates with a known set of backend hosts.
+- **DNS observability.** Log every hostname the renderer asks the broker
+  to resolve. Useful for support cases.
 
 ## Sources
 
-- Apple: [NEFilterDataProvider](https://developer.apple.com/documentation/networkextension/nefilterdataprovider), [TN3134](https://developer.apple.com/documentation/technotes/tn3134-network-extension-provider-deployment)
-- LuLu: [Extension.entitlements](https://github.com/objective-see/LuLu)
-- Project Zero: [Understanding Network Access in Windows AppContainers](https://googleprojectzero.blogspot.com/2021/08/understanding-network-access-windows-app.html)
-- Microsoft: [FwpmFilterAdd0](https://learn.microsoft.com/en-us/windows/win32/api/fwpmu/nf-fwpmu-fwpmfilteradd0), [WFP Operation](https://learn.microsoft.com/en-us/windows/win32/fwp/basic-operation)
-- Mozilla: [SandboxLaunch.cpp](https://searchfox.org/mozilla-central/source/security/sandbox/linux/launch/SandboxLaunch.cpp), [Bug 1430949](https://bugzilla.mozilla.org/show_bug.cgi?id=1430949)
-- Chromium: [Linux sandbox README](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/sandbox/linux/README.md), [renderer.sb](https://chromium.googlesource.com/chromium/src/+/HEAD/sandbox/policy/mac/renderer.sb)
+- POSIX SCM_RIGHTS: [Cloudflare: Know your SCM_RIGHTS](https://blog.cloudflare.com/know-your-scm_rights/),
+  Linux `unix(7)` man page.
+- Windows shared sockets: [Winsock Programmer's FAQ — Passing Sockets Between Processes](https://tangentsoft.com/wskfaq/articles/passing-sockets.html),
+  Microsoft Learn: `WSADuplicateSocketA`, `WSASocketW`.
+- Chromium IPC: [docs/design/sandbox.md](https://chromium.googlesource.com/chromium/src/+/main/docs/design/sandbox.md).
+  Renderer has no direct socket access; URLLoaderFactory + Mojo bridges
+  all network through the Network Service. Same architectural idea,
+  smaller surface here.
+- Godot ENet abstraction: `thirdparty/enet/enet_godot.cpp` —
+  `ENetGodotSocket` wraps Godot's `NetSocket`. We exploit this:
+  patching `NetSocket` gets ENet for free.

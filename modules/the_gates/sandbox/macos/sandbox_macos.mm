@@ -49,22 +49,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/event.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <string>
 #include <vector>
 
-#import <Foundation/Foundation.h>
-#import <NetworkExtension/NetworkExtension.h>
-#import <SystemExtensions/SystemExtensions.h>
-
 extern char **environ;
 extern "C" int _NSGetExecutablePath(char *, uint32_t *);
-
-// Identifier must match tools/tg-netfilter-extension/Info.plist's
-// CFBundleIdentifier exactly.
-static NSString *const kExtensionBundleID = @"io.thegates.launcher.netfilter";
 
 // Cross-file hook into the vendored firefox-shim/mac/Sandbox.mm: set
 // before mozilla::StartMacSandbox to append extra SBPL after the
@@ -103,95 +97,6 @@ PackedStringArray split_pipe(const char *p_env_value) {
 	return out;
 }
 
-bool force_network_filter_fail() {
-	const char *v = ::getenv("TG_NETWORK_FILTER_FORCE_FAIL");
-	return v != nullptr && v[0] == '1';
-}
-
-} // namespace
-
-// OSSystemExtensionRequest delegate. Submitted on first run when the network
-// filter extension isn't installed yet. The user must approve in System
-// Settings before subsequent launches see isEnabled=YES.
-@interface TGNetFilterRequestDelegate : NSObject <OSSystemExtensionRequestDelegate>
-@end
-
-@implementation TGNetFilterRequestDelegate
-- (void)request:(OSSystemExtensionRequest *)request didFailWithError:(NSError *)error {}
-- (void)request:(OSSystemExtensionRequest *)request didFinishWithResult:(OSSystemExtensionRequestResult)result {}
-- (void)requestNeedsUserApproval:(OSSystemExtensionRequest *)request {}
-- (OSSystemExtensionReplacementAction)request:(OSSystemExtensionRequest *)request
-                  actionForReplacingExtension:(OSSystemExtensionProperties *)existing
-                                withExtension:(OSSystemExtensionProperties *)ext {
-    return OSSystemExtensionReplacementActionReplace;
-}
-@end
-
-namespace {
-
-// Pinned singleton delegate: OSSystemExtensionRequest holds a weak reference,
-// and the request continues asynchronously after engage returns.
-TGNetFilterRequestDelegate *netfilter_request_delegate() {
-	static TGNetFilterRequestDelegate *delegate = nil;
-	static dispatch_once_t once;
-	dispatch_once(&once, ^{
-		delegate = [[TGNetFilterRequestDelegate alloc] init];
-	});
-	return delegate;
-}
-
-// Synchronously query NEFilterManager state. Times out after 5 seconds so a
-// stuck preferences daemon doesn't hang spawn.
-struct NetFilterState {
-	bool is_enabled = false;
-	bool has_configuration = false;
-};
-
-NetFilterState query_netfilter_state() {
-	NetFilterState s;
-	NEFilterManager *manager = [NEFilterManager sharedManager];
-	__block bool loaded = false;
-	dispatch_semaphore_t done = dispatch_semaphore_create(0);
-	[manager loadFromPreferencesWithCompletionHandler:^(NSError *_Nullable err) {
-		loaded = (err == nil);
-		dispatch_semaphore_signal(done);
-	}];
-	dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
-	if (!loaded) {
-		return s;
-	}
-	s.is_enabled = [manager isEnabled];
-	s.has_configuration = [manager providerConfiguration] != nil;
-	return s;
-}
-
-// First-run path: submit an activation request so the user gets a System
-// Settings prompt to approve our system extension, and write a default
-// NEFilterProviderConfiguration so the prompt has the right metadata. The
-// approval is asynchronous; engage returns ERR_UNAUTHORIZED, the launcher
-// fails closed, and the user retries after clicking Allow.
-void submit_netfilter_activation_request() {
-	OSSystemExtensionRequest *req = [OSSystemExtensionRequest
-			activationRequestForExtensionWithIdentifier:kExtensionBundleID
-												  queue:dispatch_get_main_queue()];
-	req.delegate = netfilter_request_delegate();
-	[[OSSystemExtensionManager sharedManager] submitRequest:req];
-
-	NEFilterManager *manager = [NEFilterManager sharedManager];
-	if ([manager providerConfiguration] == nil) {
-		NEFilterProviderConfiguration *config = [[NEFilterProviderConfiguration alloc] init];
-		config.filterSockets = YES;
-		config.filterPackets = NO;
-		manager.providerConfiguration = config;
-		dispatch_semaphore_t save_done = dispatch_semaphore_create(0);
-		[manager saveToPreferencesWithCompletionHandler:^(NSError *_Nullable err) {
-			(void)err;
-			dispatch_semaphore_signal(save_done);
-		}];
-		dispatch_semaphore_wait(save_done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
-	}
-}
-
 } // namespace
 
 #endif // MACOS_ENABLED
@@ -208,29 +113,25 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 			vformat("SandboxMacOS::spawn_target: previous target pid=%d still running; call kill_target() first",
 					(int)target_pid));
 
-	// Fail-closed: refuse to spawn if the network-filter system extension
-	// isn't installed and enabled. On first run we submit the activation
-	// request so the user gets a System Settings prompt; the launcher retries
-	// after they click Allow.
-	if (p_policy->is_private_networks_blocked()) {
-		if (force_network_filter_fail()) {
-			ERR_FAIL_V_MSG(result, "SandboxMacOS: TG_NETWORK_FILTER_FORCE_FAIL=1 — refusing to spawn renderer.");
-		}
-		const NetFilterState st = query_netfilter_state();
-		if (!st.is_enabled || !st.has_configuration) {
-			submit_netfilter_activation_request();
-			ERR_FAIL_V_MSG(result,
-					"SandboxMacOS: network filter system extension not enabled. "
-					"Approve TheGates Network Filter in System Settings -> Privacy & Security, then try again.");
-		}
-		print_line("SandboxMacOS: NEFilterManager active");
-	}
+	// Network isolation is enforced by the in-process NetworkBroker (see
+	// modules/the_gates/network/) plus the Seatbelt addend's deny rules on
+	// the BSD socket-creation syscalls. The control channel is a socketpair
+	// inherited at FD TG_BROKER_FD_NUM; the launcher half stays here.
 
 	if (target_kq >= 0) {
 		::close(target_kq);
 		target_kq = -1;
 	}
 	target_pid = 0;
+
+	int broker_sv[2] = { -1, -1 };
+	if (::socketpair(AF_UNIX, SOCK_STREAM, 0, broker_sv) != 0) {
+		ERR_FAIL_V_MSG(result, vformat(
+				"SandboxMacOS::spawn_target: socketpair failed errno=%d", (int)errno));
+	}
+	const int launcher_broker_fd = broker_sv[0];
+	const int child_broker_fd = broker_sv[1];
+	const int CHILD_BROKER_FD_NUM = 3;
 
 	// Build argv.
 	const CharString exe_cs = p_executable.utf8();
@@ -261,6 +162,7 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	env_owned.push_back(("TG_SANDBOX_APP_PATH=" + p_executable).utf8());
 	env_owned.push_back(String(p_policy->is_audio_allowed() ? "TG_SANDBOX_ALLOW_AUDIO=1" : "TG_SANDBOX_ALLOW_AUDIO=0").utf8());
 	env_owned.push_back(String(p_policy->is_microphone_allowed() ? "TG_SANDBOX_ALLOW_MICROPHONE=1" : "TG_SANDBOX_ALLOW_MICROPHONE=0").utf8());
+	env_owned.push_back(vformat("TG_BROKER_FD=%d", CHILD_BROKER_FD_NUM).utf8());
 
 	int env_count = 0;
 	for (char **e = environ; *e != nullptr; ++e) {
@@ -276,10 +178,13 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	}
 	envp.write[env_count + env_owned.size()] = nullptr;
 
-	// Set up file_actions to redirect child stdout/stderr to the log path.
+	// Set up file_actions: redirect stdout/stderr to log, dup the broker
+	// socketpair end to a known FD number that survives the execve.
 	posix_spawn_file_actions_t actions;
 	const int actions_init = ::posix_spawn_file_actions_init(&actions);
 	if (actions_init != 0) {
+		::close(launcher_broker_fd);
+		::close(child_broker_fd);
 		ERR_FAIL_V_MSG(result, vformat(
 				"SandboxMacOS::spawn_target: posix_spawn_file_actions_init failed errno=%d", actions_init));
 	}
@@ -292,19 +197,32 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 		const int rc2 = ::posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
 		if (rc1 != 0 || rc2 != 0) {
 			::posix_spawn_file_actions_destroy(&actions);
+			::close(launcher_broker_fd);
+			::close(child_broker_fd);
 			ERR_FAIL_V_MSG(result, vformat(
 					"SandboxMacOS::spawn_target: posix_spawn_file_actions setup failed rc1=%d rc2=%d", rc1, rc2));
 		}
+	}
+	const int rc_dup = ::posix_spawn_file_actions_adddup2(&actions, child_broker_fd, CHILD_BROKER_FD_NUM);
+	if (rc_dup != 0) {
+		::posix_spawn_file_actions_destroy(&actions);
+		::close(launcher_broker_fd);
+		::close(child_broker_fd);
+		ERR_FAIL_V_MSG(result, vformat(
+				"SandboxMacOS::spawn_target: posix_spawn_file_actions_adddup2 failed rc=%d", rc_dup));
 	}
 
 	pid_t pid = 0;
 	const int rc = ::posix_spawn(&pid, exe_cs.get_data(), &actions, nullptr, argv.ptrw(), envp.ptrw());
 	::posix_spawn_file_actions_destroy(&actions);
+	::close(child_broker_fd);
 	if (rc != 0) {
+		::close(launcher_broker_fd);
 		ERR_FAIL_V_MSG(result, vformat("SandboxMacOS::spawn_target: posix_spawn failed errno=%d", rc));
 	}
 
 	target_pid = (int64_t)pid;
+	start_broker(launcher_broker_fd);
 	target_kq = ::kqueue();
 	if (target_kq >= 0) {
 		struct kevent kev = {};
@@ -385,6 +303,7 @@ bool SandboxMacOS::is_target_running() const {
 Error SandboxMacOS::kill_target() {
 #ifdef MACOS_ENABLED
 	if (target_pid == 0) {
+		stop_broker();
 		return ERR_DOES_NOT_EXIST;
 	}
 	const pid_t pid = (pid_t)target_pid;
@@ -398,6 +317,7 @@ Error SandboxMacOS::kill_target() {
 		::close(target_kq);
 		target_kq = -1;
 	}
+	stop_broker();
 	return OK;
 #else
 	return ERR_UNAVAILABLE;
@@ -487,16 +407,3 @@ bool SandboxMacOS::is_target() const {
 #endif
 }
 
-Dictionary SandboxMacOS::network_state() const {
-	Dictionary out;
-#ifdef MACOS_ENABLED
-	const NetFilterState st = query_netfilter_state();
-	out["is_enabled"] = st.is_enabled;
-	out["has_provider_configuration"] = st.has_configuration;
-	out["extension_bundle_id"] = String::utf8([kExtensionBundleID UTF8String]);
-	out["status"] = (st.is_enabled && st.has_configuration) ? "active" : "extension_not_enabled";
-#else
-	out["status"] = "unsupported_platform";
-#endif
-	return out;
-}

@@ -288,9 +288,12 @@ Dictionary run_canaries(const String &p_pack_path) {
 		}
 	}
 
-	// Network canaries. WSAStartup gracefully fails inside the sandbox; the
-	// canary then reports "blocked" via that failure, which is the correct
-	// outcome (no winsock = no network).
+	// Network canaries. With the FD-passing broker architecture, the
+	// renderer's raw socket() syscall is denied (Seatbelt/seccomp/Windows
+	// token); all three connect attempts must fail at socket creation.
+	// The "private blocked / public allowed" distinction is verified by
+	// the GDScript-level broker test in run-sandbox-test.py, which goes
+	// through Godot's NetSocket (i.e. through the broker).
 	{
 		WSADATA wsa = {};
 		const int wsa_rc = WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -308,13 +311,11 @@ Dictionary run_canaries(const String &p_pack_path) {
 				r["error"] = (int)WSAGetLastError();
 				return r;
 			}
-			// Non-blocking + select() with a 1.5s timeout. WFP's
-			// ALE_AUTH_CONNECT verdict is delivered as WSAEACCES via the
-			// connect failure; a non-blocking socket sees this through
-			// select(WRITE) + SO_ERROR (or the FD ending up in the except
-			// set on Windows). The canary must wait long enough for the
-			// kernel's filter arbitration to complete, but short enough not
-			// to stall the harness on real network latency.
+			// Non-blocking + select() with a 1.5s timeout. The USER_LIMITED
+			// token blocks raw socket() creation, so this connect should
+			// never get past socket(); we still do select() defensively in
+			// case a future kernel/driver path routes the denial through
+			// connect+SO_ERROR.
 			u_long nb = 1;
 			ioctlsocket(sock, FIONBIO, &nb);
 			sockaddr_in dest = {};
@@ -357,12 +358,11 @@ Dictionary run_canaries(const String &p_pack_path) {
 			return r;
 		};
 
-		// 192.168.1.1:80 — must be blocked by the WFP filter.
+		// All three targets — the USER_LIMITED token denies socket(AF_INET)
+		// outright, so the destination address doesn't matter; we keep the
+		// per-destination canaries to match the Linux/macOS shape.
 		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80));
-		// 127.0.0.1:22 — must be blocked too (loopback CIDR is in our deny set).
 		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22));
-		// 1.1.1.1:443 — public; must succeed (or fail only because of network
-		// reachability, which the harness tolerates).
 		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443));
 
 		if (wsa_rc == 0) {
@@ -524,7 +524,11 @@ Dictionary run_canaries_linux(const String &p_pack_path) {
 		}
 	}
 
-	// Network canaries: per-destination connect attempts.
+	// Network canaries: with the FD-passing broker architecture the
+	// renderer's raw socket() syscall is denied by seccomp; all three
+	// connect attempts fail at socket creation (EPERM/EACCES). The
+	// CIDR-policy distinction is verified at the broker level via the
+	// GDScript test that uses Godot's NetSocket. See run-sandbox-test.py.
 	{
 		auto try_connect = [](uint32_t addr_be, uint16_t port_be) -> Dictionary {
 			Dictionary r;
@@ -549,11 +553,11 @@ Dictionary run_canaries_linux(const String &p_pack_path) {
 			return r;
 		};
 
-		// Must be blocked: the network namespace + nftables rules drop these.
-		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80)); // 192.168.1.1:80
-		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22)); // 127.0.0.1:22
-		// Must succeed (or fail for network reachability reasons only).
-		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443)); // 1.1.1.1:443
+		// All three are now blocked at socket() creation by seccomp.
+		out["canary_raw_socket_denied"] = try_connect(htonl(0x01010101u), htons(443));
+		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80));
+		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22));
+		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443));
 	}
 
 	// .pck read canary: load() re-opens the pack on every resource fetch.
@@ -640,9 +644,10 @@ Dictionary run_canaries_macos(const String &p_pack_path) {
 		}
 	}
 
-	// Network canaries: per-destination connect attempts. The NEFilterDataProvider
-	// system extension drops private/loopback destinations in kernel; public
-	// addresses pass through.
+	// Network canaries: per-destination connect attempts. The Seatbelt
+	// addend denies the BSD socket-creating syscalls outright, so this
+	// connect should never get past socket(); all three destinations
+	// report "blocked" by EPERM. See seatbelt_profile.mm.
 	{
 		auto try_connect = [](uint32_t addr_be, uint16_t port_be) -> Dictionary {
 			Dictionary r;
@@ -671,9 +676,13 @@ Dictionary run_canaries_macos(const String &p_pack_path) {
 			return r;
 		};
 
-		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80)); // 192.168.1.1:80
-		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22)); // 127.0.0.1:22
-		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443)); // 1.1.1.1:443
+		// With Seatbelt's (deny network-outbound (remote ip)) all three fail
+		// at socket creation. CIDR-level distinction is verified by the
+		// broker test (run-sandbox-test.py).
+		out["canary_raw_socket_denied"] = try_connect(htonl(0x01010101u), htons(443));
+		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80));
+		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22));
+		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443));
 	}
 
 	// .pck read canary: load() re-opens the pack on every resource fetch.

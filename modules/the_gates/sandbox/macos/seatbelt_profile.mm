@@ -70,8 +70,55 @@ const char kSeatbeltBase[] = R"SANDBOX_LITERAL(
   (allow file-read* file-write*
     (literal "/private/tmp/external_texture"))
 
-  ; TODO interim; replace with brokered channel (Future Work, Tier 3).
-  (allow network*)
+  ; The network-broker control channel is an inherited socketpair end; no
+  ; filesystem path involved, so nothing to allow here.
+
+  ; Network policy: allow network-outbound + network-inbound + network-bind
+  ; (so operations on broker-handed FDs work — sendto/recvfrom for UDP,
+  ; send/recv for TCP). Do NOT call (system-network) — that primitive is
+  ; what Apple's App Sandbox base profile uses to enable socket() creation
+  ; in the first place. Without (system-network), raw socket(AF_INET) in
+  ; the renderer is denied by the base profile's (moz-deny default).
+  ; Inherited FDs from SCM_RIGHTS survive because the syscall hook for
+  ; "create a new socket" doesn't fire on already-open FDs.
+  ;
+  ; Reference: /System/Library/Sandbox/Profiles/appsandbox-common.sb
+  ;   (define (network-client) (system-network) (allow network-outbound (remote ip)) ...)
+  ; Both pieces are needed to use the network normally; we only enable
+  ; the second.
+  (allow network-outbound (remote ip))
+  (allow network-inbound (local ip))
+  (allow network-bind (local ip))
+  ; Deny EVERY xnu syscall that creates a new network file descriptor.
+  ; Inherited FDs from SCM_RIGHTS (broker-passed) and pre-lockdown zmq
+  ; sockets survive — these hooks fire only at the syscall entry point,
+  ; not on operations (sendto/recvfrom/send/recv/read/write) against
+  ; existing FDs.
+  ;
+  ; Each deny catches every invocation path: libsystem wrappers, direct
+  ; libc syscall() calls, and inline-assembly traps (the kernel hook is
+  ; at the syscall entry, not at the libc level).
+  ;
+  ; xnu bsd/kern/syscalls.master numbers (verified against current main):
+  (deny syscall-unix (syscall-number 97))   ; SYS_socket
+  (deny syscall-unix (syscall-number 135))  ; SYS_socketpair
+  (deny syscall-unix (syscall-number 450))  ; SYS_socket_delegate (private SPI)
+  (deny syscall-unix (syscall-number 502))  ; SYS_necp_client_action
+  (deny syscall-unix (syscall-number 522))  ; SYS_necp_session_open
+  (deny syscall-unix (syscall-number 510))  ; SYS___channel_open (Network.framework)
+  ;
+  ; Also deny syscalls that retarget an existing socket FD. UDP allows
+  ; ::connect() multiple times to switch peers; without this deny, a
+  ; renderer GDExtension could call libc connect(broker_fd, private_addr)
+  ; to bypass the broker's per-open CIDR enforcement. Linux's seccomp
+  ; filter already denies __NR_connect / __NR_bind post-lockdown — these
+  ; bring macOS to parity.
+  (deny syscall-unix (syscall-number 98))   ; SYS_connect
+  (deny syscall-unix (syscall-number 104))  ; SYS_bind
+  (deny syscall-unix (syscall-number 106))  ; SYS_listen
+  (deny syscall-unix (syscall-number 30))   ; SYS_accept
+  (deny syscall-unix (syscall-number 409))  ; SYS_accept_nocancel
+  (deny syscall-unix (syscall-number 446))  ; SYS_connect_nocancel
 )SANDBOX_LITERAL";
 
 const char kSeatbeltAudioOutput[] = R"SANDBOX_LITERAL(
