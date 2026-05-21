@@ -67,6 +67,12 @@ public:
 	// Signals the broker thread to exit; joins. Idempotent.
 	void shutdown();
 
+	// Non-blocking half of `shutdown`: closes the peer FD and signals the
+	// loop, but does not join. For callers that can't afford to block on
+	// in-flight `getaddrinfo` / `::connect`; see `Sandbox::stop_broker`.
+	// Idempotent.
+	void request_shutdown();
+
 	// Snapshot for --network-diagnostic and support tooling.
 	Dictionary state() const;
 

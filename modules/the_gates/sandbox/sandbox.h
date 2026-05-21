@@ -48,6 +48,9 @@ class Sandbox : public RefCounted {
 	static void _verify_thread_func(void *p_userdata);
 	void _verify_done();
 
+	// Pool-task body for `stop_broker`'s off-thread broker join.
+	static void _drain_broker_task(void *p_userdata);
+
 protected:
 	static void _bind_methods();
 

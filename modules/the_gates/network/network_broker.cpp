@@ -91,7 +91,7 @@ Error NetworkBroker::start(int p_peer_fd) {
 	return OK;
 }
 
-void NetworkBroker::shutdown() {
+void NetworkBroker::request_shutdown() {
 	shutdown_requested.store(true);
 	if (peer_fd >= 0) {
 #ifdef WINDOWS_ENABLED
@@ -102,6 +102,10 @@ void NetworkBroker::shutdown() {
 #endif
 		peer_fd = -1;
 	}
+}
+
+void NetworkBroker::shutdown() {
+	request_shutdown();
 	if (service_thread.is_started()) {
 		service_thread.wait_to_finish();
 	}
