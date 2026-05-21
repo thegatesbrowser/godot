@@ -1,0 +1,25 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+Import("env")
+Import("env_tg")
+
+# Per-platform exclusion: both fd_passing_unix.cpp and fd_passing_windows.cpp
+# live in this directory, but only one builds on a given target. Wildcard the
+# common files, then conditionally add the platform-matched FD-passing impl.
+network_obj = []
+common_sources = [
+    "cidr_policy.cpp",
+    "network_broker.cpp",
+    "renderer_net_client.cpp",
+    "brokered_net_socket.cpp",
+    "brokered_ip.cpp",
+]
+env_tg.add_source_files(network_obj, common_sources)
+
+if env["platform"] == "windows":
+    env_tg.add_source_files(network_obj, "fd_passing_windows.cpp")
+else:
+    env_tg.add_source_files(network_obj, "fd_passing_unix.cpp")
+
+env.modules_sources += network_obj

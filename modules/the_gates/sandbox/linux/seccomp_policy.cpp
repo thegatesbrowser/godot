@@ -190,13 +190,13 @@ ResultExpr TheGatesRendererPolicy::EvaluateSyscall(int sysno) const {
 		case __NR_inotify_rm_watch:
 		case __NR_fanotify_init:
 		case __NR_fanotify_mark:
-		// Sockets — IPC over AF_UNIX. AF_INET egress is currently unfiltered;
-		// notes/Sandboxing/Future Work.md Tier 3 narrows this.
-		case __NR_socket:
-		case __NR_socketpair:
-		case __NR_connect:
-		case __NR_bind:
-		case __NR_listen:
+		// Sockets — only ops that work on already-opened FDs are allowed.
+		// Socket CREATION (__NR_socket, __NR_socketpair, __NR_bind, __NR_listen,
+		// __NR_connect) is denied so the renderer cannot make new IP sockets
+		// directly. It must ask the launcher's NetworkBroker (over the
+		// pre-lockdown AF_UNIX channel) for an FD, which is passed via
+		// SCM_RIGHTS. sendmsg/recvmsg/sendto/recvfrom on existing FDs are
+		// allowed because the broker handshake needs them.
 		case __NR_accept:
 		case __NR_accept4:
 		case __NR_sendto:

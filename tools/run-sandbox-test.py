@@ -13,11 +13,14 @@ exit code. Logs are kept on disk for the agent to grep with explicit patterns.
 
 Modes:
   default                   Tutorial gate happy path. Asserts sandbox engaged + IPC works
-                            and the three network canaries report as expected.
+                            and that all renderer raw-socket() canaries are denied
+                            (the FD-passing broker is the only path to network).
   negative-fail-closed      Forces lower_token to fail; renderer must abort.
   negative-signature        Forces verify_binary to fail; broker must refuse spawn.
-  negative-network-filter   Forces NetworkFilter::engage to fail; launcher must refuse
-                            to spawn the renderer.
+  negative-broker           Forces CIDRPolicy::is_allowed to return false; any renderer
+                            request through the broker returns ST_DENIED_FORCE_FAIL.
+                            The renderer launches but all NetSocket open calls fail
+                            cleanly (legacy 'negative-network-filter' alias retained).
 """
 
 from __future__ import annotations
@@ -76,6 +79,8 @@ FAIL_CATALOG: dict[str, int] = {
     "canary_localhost_reachable": 39,
     "canary_public_ip_unreachable": 40,
     "negative_network_filter_not_aborted": 41,
+    "canary_raw_socket_allowed": 42,
+    "negative_broker_not_denied": 43,
 }
 
 MAX_TICK_GAP_MS = 500
@@ -272,8 +277,10 @@ examples:
     )
     parser.add_argument(
         "mode", nargs="?", default="default",
-        choices=["default", "negative-fail-closed", "negative-signature", "negative-network-filter"],
-        help="harness mode (default: default)",
+        choices=["default", "negative-fail-closed", "negative-signature",
+                 "negative-broker", "negative-network-filter"],
+        help="harness mode (default: default); negative-network-filter is a "
+             "legacy alias for negative-broker",
     )
     parser.add_argument("--gate-url", default="https://thegates.io/worlds/tutorial.gate")
     parser.add_argument("--timeout", type=int, default=25,
@@ -308,13 +315,14 @@ examples:
     # Pop on os.environ directly; dict.update on a copy would never unset.
     os.environ.pop("TG_SANDBOX_FORCE_FAIL", None)
     os.environ.pop("TG_SIGNATURE_FORCE_FAIL", None)
+    os.environ.pop("TG_NETWORK_BROKER_FORCE_FAIL", None)
     os.environ.pop("TG_NETWORK_FILTER_FORCE_FAIL", None)
     if args.mode == "negative-fail-closed":
         os.environ["TG_SANDBOX_FORCE_FAIL"] = "1"
     elif args.mode == "negative-signature":
         os.environ["TG_SIGNATURE_FORCE_FAIL"] = "1"
-    elif args.mode == "negative-network-filter":
-        os.environ["TG_NETWORK_FILTER_FORCE_FAIL"] = "1"
+    elif args.mode in ("negative-broker", "negative-network-filter"):
+        os.environ["TG_NETWORK_BROKER_FORCE_FAIL"] = "1"
 
     if args.build:
         run_build(args.no_sandbox, build_log, results_dir)
@@ -362,18 +370,16 @@ examples:
             emit_fail("negative_signature_no_gate_error launcher_did_not_surface_refusal", results_dir)
         emit_pass("negative-signature: broker refused to spawn and launcher surfaced gate_error as expected", results_dir)
 
-    # negative-network-filter: TG_NETWORK_FILTER_FORCE_FAIL forces engage() to
-    # return ERR_UNAVAILABLE. Launcher (GDScript) must refuse to spawn and
-    # surface the refusal as a gate_error. Same shape as negative-signature
-    # because both are launcher-side fail-closed gates.
-    if args.mode == "negative-network-filter":
-        ns_log = find_renderer_log_for_run(logs_root, launch_start)
-        if ns_log and ns_log.stat().st_mtime >= launch_start - 1.0:
-            emit_fail(f"negative_network_filter_not_aborted renderer_log_present={ns_log}", results_dir)
+    # negative-broker: TG_NETWORK_BROKER_FORCE_FAIL makes CIDRPolicy::is_allowed
+    # return false unconditionally. Renderer launches (broker is in-process so
+    # it starts) but every BrokeredNetSocket::connect_to_host returns
+    # ERR_UNAUTHORIZED. The broker prints "[NETWORK-BROKER] DENY ..." to the
+    # launcher's stdout (broker thread runs in the launcher process).
+    if args.mode in ("negative-broker", "negative-network-filter"):
         launcher_text = launcher_log.read_text(encoding="utf-8", errors="replace") if launcher_log.exists() else ""
-        if "[AUTOTEST-GATE-ERROR]" not in launcher_text:
-            emit_fail("negative_network_filter_not_aborted launcher_did_not_surface_refusal", results_dir)
-        emit_pass("negative-network-filter: launcher refused to spawn renderer as expected", results_dir)
+        if "[NETWORK-BROKER] DENY" not in launcher_text:
+            emit_fail("negative_broker_not_denied no broker DENY line in launcher log", results_dir)
+        emit_pass("negative-broker: broker denied socket requests with TG_NETWORK_BROKER_FORCE_FAIL=1 as expected", results_dir)
 
     renderer_log_file = find_renderer_log_for_run(logs_root, launch_start)
     if not renderer_log_file or not renderer_log_file.is_file():
@@ -495,32 +501,31 @@ examples:
     if canary_pck not in ("allowed", "skipped_no_main_scene", "skipped_no_pck_path"):
         emit_fail(f"canary_pck_read_blocked value={canary_pck} (gate cannot load resources from .pck post-lockdown)", results_dir)
 
-    # Network filter canaries. Same {status, error?} shape as the rest.
+    # Raw-socket canaries. The primary network-isolation enforcement is the
+    # FD-passing broker; raw socket() denial is defense-in-depth on top.
+    #   Linux:   seccomp denies __NR_socket.
+    #   Windows: USER_LIMITED token denies AF_INET socket creation.
+    #   macOS:   Seatbelt denies SYS_socket via (deny syscall-unix
+    #            (syscall-number 97)) — inherited FDs from SCM_RIGHTS survive.
+    # All three platforms enforce equally.
+    canary_raw = canary_status("canary_raw_socket_denied")
     canary_priv = canary_status("canary_private_ip_blocked")
     canary_loop = canary_status("canary_localhost_blocked")
     canary_pub = canary_status("canary_public_ip_allowed")
-    network_canaries_present = "?" not in (canary_priv, canary_loop, canary_pub)
+    network_canaries_present = "?" not in (canary_raw, canary_priv, canary_loop, canary_pub)
     if network_canaries_present:
+        if canary_raw != "blocked":
+            emit_fail(f"canary_raw_socket_allowed value={canary_raw} "
+                      "(renderer can still open AF_INET sockets; sandbox not denying)", results_dir)
         if canary_priv != "blocked":
             emit_fail(f"canary_private_ip_reachable value={canary_priv} "
-                      "(renderer can reach RFC 1918; OS-level filter not engaged)", results_dir)
+                      "(raw socket to RFC 1918 succeeded; broker bypass)", results_dir)
         if canary_loop != "blocked":
             emit_fail(f"canary_localhost_reachable value={canary_loop} "
-                      "(renderer can reach 127.0.0.1; loopback CIDR missing from filter)", results_dir)
-        # Public IP must be allowed in principle; tolerate environment-side
-        # network unreachability by allowing "blocked" only when error is a
-        # network reachability code (not a filter-enforced denial).
-        if canary_pub == "blocked":
-            pub_err = diag_get("canaries", "canary_public_ip_allowed", "error")
-            try:
-                pub_err_int = int(pub_err)
-            except (TypeError, ValueError):
-                pub_err_int = 0
-            # WSAEACCES (10013) on Windows / EACCES (13) on Linux / macOS means
-            # the filter actively denied — that's the over-broad failure mode.
-            if pub_err_int in (10013, 13):
-                emit_fail(f"canary_public_ip_unreachable err={pub_err_int} "
-                          "(filter denies public outbound; rules too broad)", results_dir)
+                      "(raw socket to 127.0.0.1 succeeded; broker bypass)", results_dir)
+        if canary_pub != "blocked":
+            emit_fail(f"canary_public_ip_unreachable value={canary_pub} "
+                      "(raw socket to 1.1.1.1 succeeded; sandbox not denying socket())", results_dir)
 
     # Broker / renderer cross-check via broker_policy.json (Windows writes it;
     # other platforms skip silently).

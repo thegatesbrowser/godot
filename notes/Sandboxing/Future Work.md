@@ -79,7 +79,7 @@ Before this is something to point at and say "trust the sandbox."
 
 Each of these is real engineering. They take what's already a strong sandbox and bring it to the level Chrome shipped in 2018.
 
-- **Brokered network IPC.** Renderer can't open sockets directly; sends HTTP/WebSocket requests through a pipe to the launcher, launcher executes and pipes the response back. Today the sandbox policy is presumably permissive enough that the renderer can still reach the network — that's the gap. Mitigation gives a hostile gate the ability to exfiltrate to anywhere it pleases. Real defense requires brokering. The biggest item in this tier. Chrome's Mojo is the reference, but a much smaller subset for our use case (no extensions, no service workers, no cookies-as-sandbox-API).
+- ~~**Brokered network IPC.**~~ Shipped on all three platforms. See [[Network Isolation]].
 
 - **`WIN32K_DISABLE` mitigation.** Eliminates the entire `win32k.sys` kernel attack surface from the renderer. Historically responsible for over half of all Windows kernel CVEs. Two paths:
   - **Split the renderer into two processes**: a "game logic + scripts" process at UNTRUSTED with `WIN32K_DISABLE` on, and a "GPU + windowing" process at LOW integrity that handles Vulkan and win32k calls. Mirrors Chrome's renderer ↔ GPU process split. Our existing Vulkan-texture-sharing IPC is the right primitive — the GPU process owns the swapchain, the logic process draws into a shared texture. Cleaner architecture; bigger change.
@@ -105,7 +105,25 @@ Each of these is real engineering. They take what's already a strong sandbox and
 
 - ~~**Linux deeper seccomp.**~~ Shipped: `SandboxLinux` runs chromium's bpf_dsl seccomp filter on top of landlock + a `capset` capability drop. The vendored subset mirrors Firefox's `moz.yaml` list; the policy + loader live in `modules/the_gates/sandbox/linux/`. User-namespace + chroot are still future work (see Tier 3 brokered-IPC).
 
-- **Linux network brokering / user namespace.** The Linux backend still allows AF_INET sockets to be created; landlock + the canary report `network=allowed` for now. The chromium-sandbox approach is to (a) enter a fresh user namespace before lockdown so the renderer has its own loopback-only network, or (b) route network through a launcher-side broker. Either restores the `network=blocked` canary outcome that the Windows backend already has.
+- **WebRTC support.** The `webrtc-native` GDExtension's libjuice
+  opens raw UDP sockets bypassing Godot's `NetSocket` — fails to
+  initialize in the sandboxed renderer. Plan: fork `webrtc-native`,
+  patch libjuice's `src/udp.c` (~611 lines, 9-function API surface) to
+  use `NetSocket`. Mirrors `thirdparty/enet/enet_godot.cpp`. ~1-2 weeks.
+
+- **Per-gate origin allowlist.** Extend the network broker with a
+  `network_allowlist: PackedStringArray` field on `SandboxPolicy`;
+  broker checks against this in addition to the CIDR blocklist. Useful
+  for gates that have a known set of backend hosts and want to declare
+  them upfront.
+
+- **DNS observability.** Log every hostname the renderer asks the
+  broker to resolve. Useful for support cases and a "what hosts did
+  this gate hit?" debug UI in the launcher.
+
+- **Linux user namespace / chroot.** Landlock catches filesystem paths
+  but the renderer still sees the real mount tree. Chromium uses a
+  fresh user namespace + chroot to make the real filesystem invisible.
 
 ## Tier 5 — research and hygiene
 
@@ -119,20 +137,18 @@ Each of these is real engineering. They take what's already a strong sandbox and
 
 ## Sequencing
 
+Tier 1 and the brokered network shipped, so Tier 3 is half done. Remaining big items:
+
 ```
-Tier 1 (finish current win)
-  ↓
-Tier 2 (productionization)
-  ↓
-Tier 3 network brokering        ──┐
-                                  │  parallelizable
-Tier 3 WIN32K_DISABLE           ──┘
-  ↓
-Tier 4 macOS + Linux deeper
-  ↓
+WIN32K_DISABLE (Tier 3)        ──┐  Windows-only kernel attack-surface reduction
+AppContainer / LPAC (Tier 3)   ──┘  Modern Windows containment; could simplify WIN32K work
+
+WebRTC fork (Tier 4)               libjuice over NetSocket
+Linux userns + chroot (Tier 4)     filesystem-tree invisibility
+Per-gate origin allowlist (Tier 4) SandboxPolicy.network_allowlist
+DNS observability (Tier 4)         broker logs every resolve
+
 Tier 5 (hygiene as time permits)
 ```
 
-Tier 1 is non-negotiable. Tier 3's two big items (network and win32k) are independent and can run in parallel with different agents. Tier 4 should wait until at least one Tier 3 item lands so the cross-platform port doesn't have to redo the same work three times.
-
-By end of Tier 3 the sandbox is at Chrome-2018 level. Tier 4 + Tier 5 are quality-of-life and platform parity. WIN32K_DISABLE is the last big single-defense win on Windows; everything after that is incremental hardening or platform coverage.
+WIN32K_DISABLE is the last single-defense win on Windows. WebRTC support is the last gap that gates can hit at the application layer. Everything else is incremental hardening or platform parity.

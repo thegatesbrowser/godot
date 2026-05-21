@@ -53,8 +53,6 @@ public:
 	Error lower_token() override;
 	bool is_target() const override;
 
-	Dictionary network_state() const override;
-
 	SandboxMacOS() = default;
 	~SandboxMacOS() override;
 };

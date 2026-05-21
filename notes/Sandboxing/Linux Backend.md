@@ -72,6 +72,7 @@ Policy crosses processes through env vars the broker injects:
 | `TG_SANDBOX_RW_DIR`      | per-gate folder; landlock grants rw rights here      |
 | `TG_SANDBOX_RW_FILES`    | `|`-joined list of socket paths the renderer binds   |
 | `TG_SANDBOX_RO_FILES`    | `|`-joined list (just the `.pck` today)              |
+| `TG_BROKER_FD`           | fd number the renderer half of the network-broker socketpair is dup'd to (in-child `dup2` between fork and execve) — typically `3` |
 
 `Sandbox::is_target()` is compile-time on Linux: `TG_RENDERER` is defined for
 the renderer binary and not for the launcher, so the per-process role is a
@@ -143,15 +144,11 @@ The big one. A BPF program that the kernel runs on every syscall:
 matches the syscall number against an allowlist and returns either
 `SECCOMP_RET_ALLOW` or `SECCOMP_RET_ERRNO(EPERM)`.
 
-The allowlist is built with Chromium's bpf_dsl in
-`seccomp_policy.cpp` — about 200 syscalls covering read/write/mmap,
-threading primitives (futex, clone for pthread, signals), file I/O,
-sockets (the IPC pipes use AF_UNIX), event fds (epoll, eventfd2,
-timerfd, signalfd), time, scheduling, ioctl (Vulkan/DRM needs many),
-and getrandom. Anything else — `mount`, `ptrace`, `kexec_load`, `bpf`,
-`init_module`, `pivot_root`, `setns`, `io_uring_*` — returns `EPERM`.
-io_uring is deliberately blocked: it's been a recurring sandbox-escape
-vector and both Chromium and Firefox deny it.
+The allowlist is built with Chromium's bpf_dsl in `seccomp_policy.cpp` — about 200 syscalls covering read/write/mmap, threading primitives (futex, clone for pthread, signals), file I/O, event fds (epoll, eventfd2, timerfd, signalfd), time, scheduling, ioctl (Vulkan/DRM needs many), and getrandom.
+
+**Socket-creating syscalls are NOT in the allow list.** `__NR_socket`, `__NR_socketpair`, `__NR_connect`, `__NR_bind`, `__NR_listen` fall through to `Error(EPERM)`. The renderer cannot create new network sockets; every TCP / UDP / DTLS / HTTPS / WebSocket / ENet flow goes through the in-process broker in the launcher — see [[Network Isolation]]. The broker opens kernel sockets and passes FDs via SCM_RIGHTS; `sendmsg`/`recvmsg`/`sendto`/`recvfrom` on inherited FDs are allowed and operate directly on the kernel socket.
+
+Anything else — `mount`, `ptrace`, `kexec_load`, `bpf`, `init_module`, `pivot_root`, `setns`, `io_uring_*` — returns `EPERM`. io_uring is deliberately blocked: it's been a recurring sandbox-escape vector and both Chromium and Firefox deny it.
 
 The filter installs through:
 
@@ -266,11 +263,6 @@ more layers we haven't built yet.
   enabling `chroot` into an empty mount namespace. The renderer
   literally cannot reach the real filesystem even if landlock fails.
   We don't do this yet — tracked in [[Future Work]].
-- **Brokered network.** Chromium's renderer can't open sockets at
-  all; it sends a Mojo message to the GPU/browser process which opens
-  the socket and passes the fd back. Our seccomp allows `socket()`
-  unrestricted today; the network canary correctly reports
-  `network=allowed`. Network brokering is the biggest Tier 3 item.
 - **Per-process-type policies.** Chrome has `RendererProcessPolicy`,
   `GpuProcessPolicy`, `AudioProcessPolicy`, etc., each derived from
   `BaselinePolicy`. We have one policy: "the renderer." When the
@@ -282,9 +274,6 @@ more layers we haven't built yet.
 
 Tracked in [[Future Work]]:
 
-- AF_INET / AF_INET6 sockets are not blocked — the network canary
-  reports `allowed`. Either filter the socket family in seccomp or
-  enter a user namespace with no network.
 - No user namespace / no chroot. Landlock catches the filesystem path,
   but the renderer still sees the real mount tree.
 - Filter is one-size-fits-all. When we split logic and GPU into

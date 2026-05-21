@@ -27,7 +27,7 @@ context only — see [[#Notes hygiene]].
 - IPC-protocol redesign — `CommandSync` / `InputSync` / `TGExternalTexture` semantics are preserved; only their physical layout and runtime helpers change.
 - Alternative sandbox technologies (AppContainer, LPAC, custom Win32). The decision to use Chromium sandbox stands.
 - macOS notarization, Gatekeeper, or platform-distribution concerns.
-- Network brokering, audio brokering, win32k disable — these are post-rewrite Tier 2+ items, tracked separately.
+- Audio brokering, win32k disable, AppContainer / LPAC — post-rewrite Tier 2+ items, tracked separately. (Network brokering shipped after the Phase 0–5 rewrite; see [[Network Isolation]].)
 
 ## Architecture at a glance
 
@@ -137,6 +137,18 @@ modules/the_gates/
 │       ├── seatbelt_profile.mm/.h   .sb profile generation + sandbox_init / sandbox_init_with_parameters
 │       └── signature_verify.mm      SecCodeCheckValidity / SecStaticCode API
 │
+├── network/                         ── in-process network broker (see [[Network Isolation]])
+│   ├── SCsub
+│   ├── broker_protocol.h            shared opcodes / status / Request layout for both ends
+│   ├── network_broker.cpp/.h        launcher-side service thread; owned by Sandbox
+│   ├── renderer_net_client.cpp/.h   renderer-side singleton (FD + mutex + request helpers)
+│   ├── brokered_net_socket.cpp/.h   NetSocket factory replacement in renderer builds
+│   ├── brokered_ip.cpp/.h           IP::resolve_hostname hook in renderer builds
+│   ├── cidr_policy.cpp/.h           RFC 1918 / NAT64 / multicast / loopback blocklist
+│   ├── fd_passing.h                 length-prefixed framed-message API (POSIX + Windows)
+│   ├── fd_passing_unix.cpp          SCM_RIGHTS over AF_UNIX SOCK_STREAM
+│   └── fd_passing_windows.cpp       WSADuplicateSocket over named pipe in byte mode
+│
 ├── renderer/                        ── module-side homes for what used to be main.cpp #ifdef blocks
 │   └── renderer_lifecycle.cpp/.h    tg_renderer_engage():        IPC + ext-texture import + lockdown, runs in Main::setup2
 │                                    tg_renderer_boot():          prints [RENDERER-READY] at end of Main::start
@@ -191,12 +203,18 @@ RefCounted (Godot)
     │       String         rw_dir
     │       PackedStringArray rw_files
     │       PackedStringArray ro_files
-    │       bool           allow_network        — default false
     │       bool           allow_audio          — default true; macOS honors it (output-only SBPL fragment)
     │       bool           allow_microphone     — default true; macOS honors it
     │                                              (TCC at the OS level still gates actual mic data)
     │       String         child_stdout_log_path
     │       int            integrity_floor      — platform-specific enum value
+    │
+    │   Network access is NOT a SandboxPolicy field. Network isolation is
+    │   structural: the renderer's OS sandbox denies socket() creation
+    │   syscalls unconditionally; the launcher's NetworkBroker (see
+    │   modules/the_gates/network/ and [[Network Isolation]]) is the
+    │   only path to a usable socket. Per-gate origin allowlists are a
+    │   future-work item that would live on SandboxPolicy.
     │
     ├── SandboxDiagnostics  (returns Dictionary via to_dict())
     │       Dictionary  to_dict() const         — flat key-value, ready for JSON
@@ -432,7 +450,6 @@ public:
     void set_child_stdout_log_path(const String &p_path);        // file the child stdout/stderr goes to
 
     // Behavior gates
-    void set_allow_network(bool p_allow);                        // default false; future-honored on Linux/macOS (brokered network)
     void set_allow_audio(bool p_allow);                          // default true; honored on macOS (audio-output SBPL fragment)
     void set_allow_microphone(bool p_allow);                     // default true; honored on macOS ((allow device-microphone))
 
@@ -451,7 +468,6 @@ Each `SandboxXxx::spawn_target` consumes this and translates:
 | `rw_dir`                      | `AllowFileAccess(FILES_ALLOW_ANY, glob)`    | `landlock_add_rule(... PATH_BENEATH ...)` | `.sb`: `(allow file-read* file-write* (subpath "X"))` |
 | `ro_files[]`                  | `AllowFileAccess(FILES_ALLOW_READONLY, ...)`| `landlock` read-only path beneath         | `.sb`: `(allow file-read* (literal "X"))` |
 | `child_stdout_log_path`       | broker `CreateFile` + `SetStdoutHandle`     | open + pass via posix_spawn file_actions  | open + pass via posix_spawn file_actions  |
-| `allow_network = false`       | (today: not enforced by policy; canary only)| seccomp: deny `socket(AF_INET\|AF_INET6)` | `.sb`: `(deny network*)` (default profile) |
 | `allow_audio`                 | (today: not enforced; COM/WASAPI pre-lockdown) | (today: not enforced; landlock always allows audio paths) | env var → audio-output SBPL fragment (CoreAudio HAL, IOAudioEngine) |
 | `allow_microphone`            | (not yet implemented)                       | (not yet implemented)                     | env var → `(allow device-microphone)`; TCC also gates |
 | `integrity_floor = UNTRUSTED` | `SetIntegrityLevel(INTEGRITY_UNTRUSTED)`    | n/a — capability drop is comprehensive    | n/a — Seatbelt profile is binary on/off   |

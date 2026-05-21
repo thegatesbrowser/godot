@@ -35,6 +35,7 @@
 #include "core/variant/callable.h"
 #include "core/variant/dictionary.h"
 
+class NetworkBroker;
 class SandboxPolicy;
 
 class Sandbox : public RefCounted {
@@ -49,6 +50,15 @@ class Sandbox : public RefCounted {
 
 protected:
 	static void _bind_methods();
+
+	// Owned by the Sandbox; one per renderer process. Started by the
+	// platform spawn_target on the launcher half of a pre-spawn socketpair,
+	// stopped by kill_target.
+	Ref<NetworkBroker> network_broker;
+
+	// Helpers for platform implementations of spawn_target / kill_target.
+	void start_broker(int p_launcher_fd, void *p_target_handle = nullptr);
+	void stop_broker();
 
 	// Per-platform synchronous verify. Called from a worker thread by
 	// verify_binary(); see _verify_thread_func. Returns OK / ERR_UNAUTHORIZED.
@@ -76,11 +86,10 @@ public:
 	virtual Error lower_token() = 0;
 	virtual bool is_target() const = 0;
 
-	// Snapshot of the OS-level network filter the platform uses to drop
-	// renderer outbound to RFC 1918 / loopback / link-local. Used by the
-	// launcher's --network-diagnostic flag and by support tooling. Empty
-	// Dictionary on platforms without a filter.
-	virtual Dictionary network_state() const { return Dictionary(); }
+	// Snapshot of the in-process network broker mediating renderer socket
+	// creation. Forwards to NetworkBroker::state(). Used by support tooling
+	// and the --network-diagnostic GDScript path.
+	Dictionary network_state() const;
 
 	Sandbox() = default;
 	virtual ~Sandbox();
