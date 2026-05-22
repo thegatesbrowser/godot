@@ -73,12 +73,12 @@ Error read_exact(HANDLE p_pipe, uint8_t *p_buf, int p_len) {
 // Wire format on Windows (pipe in byte mode):
 //   [u32 length BE][u8 has_fd][user payload][WSAPROTOCOL_INFOW if has_fd]
 // `length` covers everything after itself.
-Error TGFDPassing::send_msg(int p_control_fd, int p_payload_fd,
+Error TGFDPassing::send_msg(intptr_t p_control_handle, int p_payload_fd,
 		void *p_target_handle, const uint8_t *p_payload, int p_payload_len) {
-	if (p_control_fd < 0 || p_payload_len < 0) {
+	if (p_control_handle < 0 || p_payload_len < 0) {
 		return ERR_INVALID_PARAMETER;
 	}
-	const HANDLE pipe = (HANDLE)(intptr_t)p_control_fd;
+	const HANDLE pipe = (HANDLE)p_control_handle;
 	const HANDLE target_proc = (HANDLE)p_target_handle;
 
 	const bool has_fd = (p_payload_fd >= 0) && (p_payload_fd != (int)INVALID_SOCKET);
@@ -124,14 +124,14 @@ Error TGFDPassing::send_msg(int p_control_fd, int p_payload_fd,
 	return OK;
 }
 
-Error TGFDPassing::recv_msg(int p_control_fd, int *r_received_fd,
+Error TGFDPassing::recv_msg(intptr_t p_control_handle, int *r_received_fd,
 		uint8_t *r_payload_buf, int p_payload_buf_capacity, int *r_payload_len) {
-	if (p_control_fd < 0 || r_received_fd == nullptr || r_payload_len == nullptr) {
+	if (p_control_handle < 0 || r_received_fd == nullptr || r_payload_len == nullptr) {
 		return ERR_INVALID_PARAMETER;
 	}
 	*r_received_fd = -1;
 	*r_payload_len = 0;
-	const HANDLE pipe = (HANDLE)(intptr_t)p_control_fd;
+	const HANDLE pipe = (HANDLE)p_control_handle;
 
 	uint8_t length_be[4] = {};
 	Error e = read_exact(pipe, length_be, (int)sizeof(length_be));

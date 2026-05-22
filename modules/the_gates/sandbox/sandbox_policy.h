@@ -42,6 +42,11 @@ class SandboxPolicy : public RefCounted {
 	String rw_dir;
 	PackedStringArray rw_files;
 	PackedStringArray ro_files;
+	// Subset of rw_files the renderer binds at runtime (zmq AF_UNIX / named-pipe
+	// listeners). Launcher cleans these between renderer respawns because an
+	// AppContainer-confined renderer can't always unlink the previous instance's
+	// file.
+	PackedStringArray renderer_bound_files;
 	String child_stdout_log_path;
 	bool allow_audio = true;
 	bool allow_microphone = true;
@@ -61,6 +66,10 @@ public:
 	void add_ro_file(const String &p_path) { ro_files.push_back(p_path); }
 	PackedStringArray get_ro_files() const { return ro_files; }
 	void set_ro_files(const PackedStringArray &p_files) { ro_files = p_files; }
+
+	void add_renderer_bound_file(const String &p_path) { renderer_bound_files.push_back(p_path); }
+	PackedStringArray get_renderer_bound_files() const { return renderer_bound_files; }
+	void set_renderer_bound_files(const PackedStringArray &p_files) { renderer_bound_files = p_files; }
 
 	void set_child_stdout_log_path(const String &p_path) { child_stdout_log_path = p_path; }
 	String get_child_stdout_log_path() const { return child_stdout_log_path; }

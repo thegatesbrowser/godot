@@ -113,10 +113,36 @@ defense-in-depth gap against malicious GDExtensions that try to call
   inherited broker FD survives because seccomp filters new socket
   syscalls, not operations on existing FDs.
 
-- **Windows.** USER_LIMITED + INTEGRITY_LEVEL_UNTRUSTED denies AF_INET
-  socket creation at access-check time. (Broker plumbing for the
-  inherited handle via Chromium's `TargetPolicy::AddHandleToShare` is
-  pending — Windows tests are deferred.)
+- **Windows.** The renderer runs inside an AppContainer profile registered
+  with no networking capabilities (no `internetClient`, no
+  `privateNetworkClientServer`). Windows Filtering Platform blocks every
+  AF_INET `connect()` from the renderer at the `FWPM_LAYER_ALE_AUTH_CONNECT`
+  layer — public IPs, RFC 1918, and loopback are all denied. The inherited
+  broker pipe and the kernel sockets the broker hands across via
+  `WSADuplicateSocketW` survive because AFD captured the launcher's
+  security context at socket creation, not the renderer's. Matches the
+  macOS/Linux end state: all four network canaries report `blocked`,
+  including `canary_raw_socket_denied`.
+
+  Per-gate isolation: each gate gets a unique AppContainer profile name
+  derived from a stable hash of its rw_dir (`TheGates.Renderer.gate-<hash>`).
+  The per-gate package SID is granted GENERIC_ALL on that rw_dir alone,
+  so even with the All-Application-Packages alias inherited by IPC files
+  in the launcher's scratch dir, the chromium-sandbox `AllowFileAccess`
+  interceptor blocks any path not in this gate's policy — sibling gate
+  dirs are unreachable.
+
+  Control-channel plumbing: a duplex byte-mode named pipe; the launcher
+  creates both ends with `CreateNamedPipeW` + `CreateFileW`, marks the
+  child end inheritable, and hands it to Chromium's
+  `TargetPolicy::AddHandleToShare`. That routes the handle through
+  `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` so the child inherits exactly the
+  broker handle and nothing else. The numeric handle value crosses as
+  `--tg-broker-fd=<intptr>` on the renderer's argv (chromium-sandbox
+  does not filter `lpCommandLine`). After spawn, the launcher closes its
+  local copy of the child handle and passes `PROCESS_INFORMATION.hProcess`
+  to `NetworkBroker::set_target_process_handle` so `WSADuplicateSocketW`
+  can target the renderer's PID.
 
 - **macOS.** Seatbelt addend denies the complete enumeration of xnu
   syscalls that return a new network FD: `SYS_socket` (97),
@@ -159,11 +185,11 @@ exploits, side-channel attacks, or compromise of the launcher itself.
 
 Fail-closed across the board:
 
-- **Renderer can't reach the broker** (env var missing, FD invalid,
-  `install()` failed): `engage_network_broker` crashes the renderer with
-  `CRASH_NOW_MSG` before lockdown. There is no quiet "networking
-  disabled" fallback — running without the broker would silently break
-  every gate.
+- **Renderer can't reach the broker** (`--tg-broker-fd` missing,
+  handle invalid, `install()` failed): `engage_network_broker` crashes
+  the renderer with `CRASH_NOW_MSG` before lockdown. There is no quiet
+  "networking disabled" fallback — running without the broker would
+  silently break every gate.
 
 - **Renderer asks for a private CIDR**: broker returns `ST_DENIED_POLICY`.
   Renderer-side `BrokeredNetSocket::connect_to_host` returns
@@ -230,7 +256,7 @@ modules/the_gates/network/
 Launcher policy (per-platform) lives next to the sandbox impl:
 - `modules/the_gates/sandbox/macos/sandbox_macos.mm` — socketpair + posix_spawn file_actions
 - `modules/the_gates/sandbox/linux/sandbox_linux.cpp` — socketpair + fork + dup2 in child
-- `modules/the_gates/sandbox/windows/sandbox_win.cpp` — TODO (Chromium AddHandleToShare)
+- `modules/the_gates/sandbox/windows/sandbox_win.cpp` — duplex named pipe pair + AddHandleToShare + argv handover; AppContainer profile + WFP block
 
 ## CIDR blocklist
 
@@ -261,9 +287,6 @@ Harness modes (`tools/run-sandbox-test.py`):
 
 ## Future work
 
-- **Windows broker plumbing.** Inherit the named-pipe handle via
-  Chromium's `TargetPolicy::AddHandleToShare`. Currently a TODO in
-  `sandbox_win.cpp`.
 - **WebRTC support via forked libjuice.** Patch
   `libdatachannel/deps/libjuice/src/udp.c` to use Godot's `NetSocket`.
   Mirrors the existing ENet integration pattern.

@@ -60,7 +60,9 @@ protected:
 	Ref<NetworkBroker> network_broker;
 
 	// Helpers for platform implementations of spawn_target / kill_target.
-	void start_broker(int p_launcher_fd, void *p_target_handle = nullptr);
+	// p_launcher_handle is an intptr_t so it round-trips both POSIX FDs
+	// (small ints) and Windows HANDLEs (pointer-sized) losslessly.
+	void start_broker(intptr_t p_launcher_handle, void *p_target_handle = nullptr);
 	void stop_broker();
 
 	// Per-platform synchronous verify. Called from a worker thread by

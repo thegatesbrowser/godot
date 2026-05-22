@@ -39,7 +39,10 @@
 class NetworkBroker : public RefCounted {
 	GDCLASS(NetworkBroker, RefCounted);
 
-	int peer_fd = -1;
+	// intptr_t to losslessly hold either a POSIX FD or a Windows HANDLE.
+	// Sentinel for "not started" is -1 (POSIX) / INVALID_HANDLE_VALUE on
+	// Windows fits in intptr_t — we use -1 as the sentinel everywhere.
+	intptr_t peer_handle = -1;
 	void *target_process_handle = nullptr;
 	Thread service_thread;
 	std::atomic<bool> shutdown_requested{ false };
@@ -56,13 +59,15 @@ class NetworkBroker : public RefCounted {
 
 public:
 	// Windows only: the renderer-process HANDLE passed to WSADuplicateSocket
-	// so the FD lands in the right address space. Ignored on POSIX.
-	void set_target_process_handle(void *p_handle) { target_process_handle = p_handle; }
+	// so the FD lands in the right address space. The broker duplicates the
+	// handle so its lifetime is independent of the caller's copy; the
+	// duplicate is closed in `shutdown`. Ignored on POSIX.
+	void set_target_process_handle(void *p_handle);
 
-	// Starts the service thread on a pre-bound peer FD (launcher side of the
-	// socketpair / pipe pair). The broker owns the FD from this point on
-	// and closes it during shutdown.
-	Error start(int p_peer_fd);
+	// Starts the service thread on a pre-bound peer handle (launcher side of
+	// the socketpair / pipe pair). The broker owns the handle from this
+	// point on and closes it during shutdown.
+	Error start(intptr_t p_peer_handle);
 
 	// Signals the broker thread to exit; joins. Idempotent.
 	void shutdown();

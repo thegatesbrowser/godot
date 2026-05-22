@@ -32,6 +32,9 @@
 
 #include "../sandbox.h"
 #include "handle_scope.h"
+#include "win_acl.h"
+
+#include "core/templates/vector.h"
 
 namespace sandbox {
 class BrokerServices;
@@ -47,6 +50,13 @@ class SandboxWin : public Sandbox {
 	HandleScope target_process;
 	HandleScope target_thread;
 	int64_t target_pid = 0;
+	// Renderer-bound IPC files the launcher cleans on kill_target. Populated
+	// from policy.renderer_bound_files at spawn_target time.
+	PackedStringArray bound_files_to_clean;
+	// ACL helper. Cache of already-stamped paths is process-wide static
+	// (see WinACL), so multi-cycle respawn skips redundant SetSecurityInfo
+	// calls — the launcher field is just an accessor.
+	WinACL win_acl;
 
 protected:
 	Error _verify_binary_impl(const String &p_path) override;

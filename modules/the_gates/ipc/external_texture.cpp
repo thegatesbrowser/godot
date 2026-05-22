@@ -104,7 +104,12 @@ bool TGExternalTexture::send_filehandle(const String &p_path) {
 bool TGExternalTexture::recv_filehandle(const String &p_path) {
 #ifdef WINDOWS_ENABLED
 	zmq::socket_t sock(tg_zmq_context(), zmq::socket_type::pair);
-	sock.bind(tg_resolve_ipc_address(p_path).utf8().get_data());
+	const String resolved = tg_resolve_ipc_address(p_path);
+	sock.bind(resolved.utf8().get_data());
+	// Cleanup of stale renderer-bound files is the launcher's job (pre-spawn
+	// sweep in SandboxWin::spawn_target reads policy.renderer_bound_files).
+	// No renderer-side ACL stamp needed here — the IPC parent dir already
+	// grants All Application Packages and the file inherits.
 
 	zmq::message_t msg;
 	if (!sock.recv(msg)) { // WARNING: BLOCKING COMMAND

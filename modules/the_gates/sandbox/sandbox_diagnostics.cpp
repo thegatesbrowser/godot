@@ -358,9 +358,12 @@ Dictionary run_canaries(const String &p_pack_path) {
 			return r;
 		};
 
-		// All three targets — the USER_LIMITED token denies socket(AF_INET)
-		// outright, so the destination address doesn't matter; we keep the
-		// per-destination canaries to match the Linux/macOS shape.
+		// AppContainer (no INTERNET_CLIENT capability) makes WFP block all
+		// AF_INET connect() attempts at the ALE_AUTH_CONNECT layer. We probe
+		// public, private, and loopback — all four must be blocked for the
+		// threat model to hold. Inherited broker sockets still work because
+		// AFD captured the launcher's security context at socket creation.
+		out["canary_raw_socket_denied"] = try_connect(htonl(0x01010101u), htons(443));
 		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80));
 		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22));
 		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443));

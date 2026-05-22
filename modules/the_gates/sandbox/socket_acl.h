@@ -32,24 +32,20 @@
 
 #include "core/string/ustring.h"
 
-// On Windows, stamps a path with a security descriptor permissive enough
-// for a Chromium-sandboxed renderer (USER_LIMITED token, UNTRUSTED
-// integrity level) to access it.
+// Stamps `p_path` (file or directory) with our baseline security descriptor:
 //
-// What it sets:
-//   DACL: GENERIC_ALL grant to "Everyone" (S-1-1-0).
-//   SACL: SYSTEM_MANDATORY_LABEL_ACE with NO_WRITE_UP at integrity SID
-//         S-1-16-0 (UNTRUSTED).
-//   Both ACEs carry OBJECT_INHERIT + CONTAINER_INHERIT flags so new
-//   children inherit them.
+//   DACL: Everyone GENERIC_ALL + All Application Packages GENERIC_ALL.
+//   SACL: SYSTEM_MANDATORY_LABEL_ACE NO_WRITE_UP at UNTRUSTED (S-1-16-0).
 //
-// If the path is a directory, the function walks it recursively and
-// re-stamps every existing file and subdir — necessary so files created
-// before the ACL stamp existed (older sessions, pre-fix saves) still
-// open for write inside the sandbox.
+//   Both ACEs carry OBJECT_INHERIT + CONTAINER_INHERIT so children inherit
+//   them. On a directory the function walks the tree once on the first call
+//   (skipped on subsequent calls when the label is already present).
 //
-// `p_path` accepts either a raw filesystem path or a zmq-style
-// "ipc://<path>" string — the "ipc://" prefix is stripped.
+// Used by launcher-side IPC bind sites (`command_sync.cpp`, `input_sync.cpp`)
+// so the renderer's AppContainer process can connect. The cached spawn-time
+// variant used by SandboxWin lives in `windows/win_acl.h` as
+// `WinACL::stamp_untrusted_label`.
 //
-// No-op on non-Windows. Logs (doesn't fail) on errors.
+// `p_path` accepts a raw filesystem path or a zmq-style "ipc://<path>" string;
+// the "ipc://" prefix is stripped. No-op on non-Windows.
 void tg_apply_untrusted_acl(const String &p_path);

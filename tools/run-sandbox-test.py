@@ -502,12 +502,16 @@ examples:
         emit_fail(f"canary_pck_read_blocked value={canary_pck} (gate cannot load resources from .pck post-lockdown)", results_dir)
 
     # Raw-socket canaries. The primary network-isolation enforcement is the
-    # FD-passing broker; raw socket() denial is defense-in-depth on top.
+    # FD-passing broker on all platforms; the OS denies direct AF_INET as
+    # defense-in-depth on top.
     #   Linux:   seccomp denies __NR_socket.
-    #   Windows: USER_LIMITED token denies AF_INET socket creation.
     #   macOS:   Seatbelt denies SYS_socket via (deny syscall-unix
     #            (syscall-number 97)) — inherited FDs from SCM_RIGHTS survive.
-    # All three platforms enforce equally.
+    #   Windows: AppContainer profile with no networking capabilities; WFP
+    #            blocks every direct AF_INET connect() at ALE_AUTH_CONNECT.
+    #            socket() itself still succeeds (USER_LIMITED + AFD DACL),
+    #            so the canary measures connect() blocked rather than
+    #            socket() denied — same observable outcome.
     canary_raw = canary_status("canary_raw_socket_denied")
     canary_priv = canary_status("canary_private_ip_blocked")
     canary_loop = canary_status("canary_localhost_blocked")

@@ -34,6 +34,8 @@
 
 #include <windows.h>
 
+#include <shlobj.h>
+
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
@@ -95,9 +97,30 @@ std::string CommandLine::GetSwitchValueASCII(std::string_view /*sw*/) const {
 
 void CommandLine::AppendSwitchASCII(std::string_view, std::string_view) {}
 
-// ----- PathService — fail every lookup; we never use it -----
-bool PathService::Get(int /*key*/, FilePath * /*path*/) {
-	return false;
+// ----- PathService — chromium's AppContainerBase::CreateProfile needs
+// DIR_LOCAL_APP_DATA to find the per-user packages directory. SHGetKnownFolderPath
+// with FOLDERID_LocalAppData gives us that without dragging chromium's full
+// PathService machinery. Other keys aren't called by code we link.
+bool PathService::Get(int key, FilePath *path) {
+	// base/base_paths_win.h: PATH_WIN_START = 100, then enum increments by 1
+	// for each subsequent entry. DIR_LOCAL_APP_DATA is the 12th after
+	// PATH_WIN_START (101=DIR_WINDOWS, ..., 112=DIR_LOCAL_APP_DATA). Hard-coded
+	// to avoid pulling base_paths_win.h into the stub.
+	constexpr int kDirLocalAppData = 100 + 12;
+	if (key != kDirLocalAppData || path == nullptr) {
+		return false;
+	}
+	PWSTR raw = nullptr;
+	const HRESULT hr = ::SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &raw);
+	if (FAILED(hr) || raw == nullptr) {
+		if (raw != nullptr) {
+			::CoTaskMemFree(raw);
+		}
+		return false;
+	}
+	*path = FilePath(raw);
+	::CoTaskMemFree(raw);
+	return true;
 }
 
 // ----- HangWatcher — sandbox never trips it; no-op -----
