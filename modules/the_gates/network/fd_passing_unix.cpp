@@ -88,8 +88,9 @@ uint32_t decode_length(const uint8_t *p_in) {
 // sendmsg that carries (at least the start of) the message. SOCK_STREAM
 // coalesces, so receivers split the stream into messages purely by the
 // length prefix.
-Error TGFDPassing::send_msg(int p_control_fd, int p_payload_fd,
+Error TGFDPassing::send_msg(intptr_t p_control_handle, int p_payload_fd,
 		void * /*p_target_handle*/, const uint8_t *p_payload, int p_payload_len) {
+	const int p_control_fd = (int)p_control_handle;
 	if (p_control_fd < 0 || p_payload_len < 0) {
 		return ERR_INVALID_PARAMETER;
 	}
@@ -164,8 +165,9 @@ Error TGFDPassing::send_msg(int p_control_fd, int p_payload_fd,
 	}
 }
 
-Error TGFDPassing::recv_msg(int p_control_fd, int *r_received_fd,
+Error TGFDPassing::recv_msg(intptr_t p_control_handle, int *r_received_fd,
 		uint8_t *r_payload_buf, int p_payload_buf_capacity, int *r_payload_len) {
+	const int p_control_fd = (int)p_control_handle;
 	if (p_control_fd < 0 || r_received_fd == nullptr || r_payload_len == nullptr) {
 		return ERR_INVALID_PARAMETER;
 	}

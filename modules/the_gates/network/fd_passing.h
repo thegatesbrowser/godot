@@ -43,9 +43,11 @@ public:
 
 	// Send one framed message on the control channel. If `p_payload_fd >= 0`,
 	// the kernel FD is transferred to the peer alongside the payload bytes.
-	// `p_target_handle` is the Windows renderer-process HANDLE used by
-	// WSADuplicateSocket; ignored on POSIX. Pass `nullptr` if unused.
-	static Error send_msg(int p_control_fd, int p_payload_fd,
+	// `p_control_handle` is an intptr_t to round-trip both POSIX FDs (small
+	// ints) and Windows HANDLEs (pointer-sized). `p_target_handle` is the
+	// Windows renderer-process HANDLE used by WSADuplicateSocket; ignored on
+	// POSIX. Pass `nullptr` if unused.
+	static Error send_msg(intptr_t p_control_handle, int p_payload_fd,
 			void *p_target_handle,
 			const uint8_t *p_payload, int p_payload_len);
 
@@ -56,7 +58,7 @@ public:
 	// `r_payload_buf` must be at least as large as the expected user payload;
 	// `*r_payload_len` is set to the number of user payload bytes written.
 	// `ERR_OUT_OF_MEMORY` is returned if the message exceeds the buffer.
-	static Error recv_msg(int p_control_fd,
+	static Error recv_msg(intptr_t p_control_handle,
 			int *r_received_fd,
 			uint8_t *r_payload_buf, int p_payload_buf_capacity,
 			int *r_payload_len);

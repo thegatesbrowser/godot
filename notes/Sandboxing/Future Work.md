@@ -81,6 +81,8 @@ Each of these is real engineering. They take what's already a strong sandbox and
 
 - ~~**Brokered network IPC.**~~ Shipped on all three platforms. See [[Network Isolation]].
 
+- ~~**Windows raw-`socket()` denial — defense-in-depth backstop.**~~ Shipped via the per-gate AppContainer profile + WFP `ALE_AUTH_CONNECT` block. Linux closes the same gap with seccomp, macOS with Seatbelt. **LPAC migration** is the natural next step — tighter than AppContainer (denies almost everything except what's explicitly granted) and would let the renderer drop the alternate-desktop dependency. Out of scope until we have a concrete reason to tighten further.
+
 - **`WIN32K_DISABLE` mitigation.** Eliminates the entire `win32k.sys` kernel attack surface from the renderer. Historically responsible for over half of all Windows kernel CVEs. Two paths:
   - **Split the renderer into two processes**: a "game logic + scripts" process at UNTRUSTED with `WIN32K_DISABLE` on, and a "GPU + windowing" process at LOW integrity that handles Vulkan and win32k calls. Mirrors Chrome's renderer ↔ GPU process split. Our existing Vulkan-texture-sharing IPC is the right primitive — the GPU process owns the swapchain, the logic process draws into a shared texture. Cleaner architecture; bigger change.
   - **GDI brokering inline**: launcher creates the actual window, manages fonts, accepts input; renderer is purely a drawing engine into a shared texture. Smaller code change, tighter coupling.

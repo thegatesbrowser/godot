@@ -20,10 +20,11 @@
 
 namespace {
 
-// One control FD and one mutex serialize every request (socket-open + DNS)
+// One control handle and one mutex serialize every request (socket-open + DNS)
 // against the launcher-side broker thread. The broker is single-peer so we
-// don't need per-call correlation IDs — replies arrive in order.
-int s_control_fd = -1;
+// don't need per-call correlation IDs — replies arrive in order. intptr_t
+// holds either a POSIX FD or a Windows HANDLE losslessly.
+intptr_t s_control_handle = -1;
 Mutex s_mutex;
 
 Error send_request(const BrokerProtocol::Request &p_req,
@@ -33,45 +34,45 @@ Error send_request(const BrokerProtocol::Request &p_req,
 
 	MutexLock lock(s_mutex);
 
-	const Error r = TGFDPassing::send_msg(s_control_fd, -1, nullptr, req_buf, req_len);
+	const Error r = TGFDPassing::send_msg(s_control_handle, -1, nullptr, req_buf, req_len);
 	if (r != OK) {
 		return r;
 	}
-	return TGFDPassing::recv_msg(s_control_fd, r_received_fd, r_resp, p_resp_capacity, r_resp_len);
+	return TGFDPassing::recv_msg(s_control_handle, r_received_fd, r_resp, p_resp_capacity, r_resp_len);
 }
 
 } // namespace
 
-Error RendererNetClient::install(int p_fd) {
-	if (p_fd < 0) {
+Error RendererNetClient::install(intptr_t p_handle) {
+	if (p_handle < 0) {
 		return ERR_UNCONFIGURED;
 	}
-	if (s_control_fd >= 0) {
-		if (s_control_fd == p_fd) {
+	if (s_control_handle >= 0) {
+		if (s_control_handle == p_handle) {
 			return OK;
 		}
-		// Different FD on a re-install — refuse and let the caller close it.
-		// Silently dropping would leak the FD; replacing it would break the
-		// in-flight broker thread on the other end.
+		// Different handle on a re-install — refuse so the caller can't
+		// silently leak it; replacing in place would break the in-flight
+		// broker thread on the other end.
 		return ERR_ALREADY_EXISTS;
 	}
-	s_control_fd = p_fd;
+	s_control_handle = p_handle;
 	return OK;
 }
 
 void RendererNetClient::shutdown() {
-	if (s_control_fd >= 0) {
+	if (s_control_handle >= 0) {
 #ifdef WINDOWS_ENABLED
-		::CloseHandle((HANDLE)(intptr_t)s_control_fd);
+		::CloseHandle((HANDLE)s_control_handle);
 #else
-		::close(s_control_fd);
+		::close((int)s_control_handle);
 #endif
-		s_control_fd = -1;
+		s_control_handle = -1;
 	}
 }
 
 bool RendererNetClient::is_installed() {
-	return s_control_fd >= 0;
+	return s_control_handle >= 0;
 }
 
 Error RendererNetClient::open_socket(BrokerProtocol::Opcode p_opcode, const IPAddress &p_ip, uint16_t p_port,
@@ -80,7 +81,7 @@ Error RendererNetClient::open_socket(BrokerProtocol::Opcode p_opcode, const IPAd
 		return ERR_INVALID_PARAMETER;
 	}
 	*r_fd = -1;
-	if (s_control_fd < 0) {
+	if (s_control_handle < 0) {
 		return ERR_UNCONFIGURED;
 	}
 
@@ -120,7 +121,7 @@ Error RendererNetClient::open_socket(BrokerProtocol::Opcode p_opcode, const IPAd
 
 bool RendererNetClient::resolve_hostname(const String &p_hostname, IP::Type /*p_type*/,
 		List<IPAddress> &r_addresses) {
-	if (s_control_fd < 0) {
+	if (s_control_handle < 0) {
 		return false;
 	}
 

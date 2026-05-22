@@ -18,6 +18,7 @@
 #else
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -81,11 +82,35 @@ bool connect_is_fatal(int p_err) {
 
 } // namespace
 
-Error NetworkBroker::start(int p_peer_fd) {
-	if (p_peer_fd < 0) {
+void NetworkBroker::set_target_process_handle(void *p_handle) {
+#ifdef WINDOWS_ENABLED
+	if (target_process_handle != nullptr) {
+		::CloseHandle((HANDLE)target_process_handle);
+		target_process_handle = nullptr;
+	}
+	if (p_handle == nullptr) {
+		return;
+	}
+	HANDLE dup = nullptr;
+	const HANDLE self = ::GetCurrentProcess();
+	if (!::DuplicateHandle(self, (HANDLE)p_handle, self, &dup,
+				PROCESS_DUP_HANDLE | PROCESS_QUERY_LIMITED_INFORMATION,
+				FALSE, 0)) {
+		ERR_PRINT(vformat("NetworkBroker: DuplicateHandle(target) failed (win=%d)",
+				(int)::GetLastError()));
+		return;
+	}
+	target_process_handle = dup;
+#else
+	target_process_handle = p_handle;
+#endif
+}
+
+Error NetworkBroker::start(intptr_t p_peer_handle) {
+	if (p_peer_handle < 0) {
 		return ERR_INVALID_PARAMETER;
 	}
-	peer_fd = p_peer_fd;
+	peer_handle = p_peer_handle;
 	shutdown_requested.store(false);
 	service_thread.start(&NetworkBroker::_service_thread_func, this);
 	return OK;
@@ -93,14 +118,15 @@ Error NetworkBroker::start(int p_peer_fd) {
 
 void NetworkBroker::request_shutdown() {
 	shutdown_requested.store(true);
-	if (peer_fd >= 0) {
+	if (peer_handle >= 0) {
 #ifdef WINDOWS_ENABLED
-		::CloseHandle((HANDLE)(intptr_t)peer_fd);
+		::CloseHandle((HANDLE)peer_handle);
 #else
-		::shutdown(peer_fd, SHUT_RDWR);
-		::close(peer_fd);
+		const int fd = (int)peer_handle;
+		::shutdown(fd, SHUT_RDWR);
+		::close(fd);
 #endif
-		peer_fd = -1;
+		peer_handle = -1;
 	}
 }
 
@@ -123,7 +149,7 @@ void NetworkBroker::_serve() {
 		uint8_t req_buf[Request::MAX_SIZE];
 		int req_len = 0;
 		int stray_fd = -1;
-		const Error r = TGFDPassing::recv_msg(peer_fd, &stray_fd, req_buf, (int)sizeof(req_buf), &req_len);
+		const Error r = TGFDPassing::recv_msg(peer_handle, &stray_fd, req_buf, (int)sizeof(req_buf), &req_len);
 		if (stray_fd >= 0) {
 			close_native_socket(stray_fd);
 		}
@@ -133,7 +159,7 @@ void NetworkBroker::_serve() {
 
 		Request req;
 		if (!req.parse(req_buf, req_len)) {
-			send_status(peer_fd, target_process_handle, ST_BAD_REQUEST);
+			send_status(peer_handle, target_process_handle, ST_BAD_REQUEST);
 			stats.requests_denied.fetch_add(1);
 			continue;
 		}
@@ -146,7 +172,7 @@ void NetworkBroker::_serve() {
 			stats.dns_resolutions.fetch_add(1);
 			const PackedStringArray ips = IP::get_singleton()->resolve_hostname_addresses(req.hostname);
 			if (ips.is_empty()) {
-				send_status(peer_fd, target_process_handle, ST_DNS_FAILED);
+				send_status(peer_handle, target_process_handle, ST_DNS_FAILED);
 				stats.requests_denied.fetch_add(1);
 				continue;
 			}
@@ -162,13 +188,13 @@ void NetworkBroker::_serve() {
 				count++;
 			}
 			resp[1] = (uint8_t)count;
-			TGFDPassing::send_msg(peer_fd, -1, target_process_handle, resp, 2 + count * 16);
+			TGFDPassing::send_msg(peer_handle, -1, target_process_handle, resp, 2 + count * 16);
 			stats.requests_allowed.fetch_add(1);
 			continue;
 		}
 
 		if (req.opcode != OP_OPEN_TCP && req.opcode != OP_OPEN_UDP) {
-			send_status(peer_fd, target_process_handle, ST_BAD_REQUEST);
+			send_status(peer_handle, target_process_handle, ST_BAD_REQUEST);
 			stats.requests_denied.fetch_add(1);
 			continue;
 		}
@@ -179,7 +205,7 @@ void NetworkBroker::_serve() {
 			stats.dns_resolutions.fetch_add(1);
 			dest = IP::get_singleton()->resolve_hostname(req.hostname);
 			if (!dest.is_valid()) {
-				send_status(peer_fd, target_process_handle, ST_DNS_FAILED);
+				send_status(peer_handle, target_process_handle, ST_DNS_FAILED);
 				stats.requests_denied.fetch_add(1);
 				continue;
 			}
@@ -190,7 +216,7 @@ void NetworkBroker::_serve() {
 		if (!CIDRPolicy::is_allowed(dest)) {
 			const String why = CIDRPolicy::describe_block(dest);
 			print_line(vformat("[NETWORK-BROKER] DENY %s: %s", String(dest), why));
-			send_status(peer_fd, target_process_handle,
+			send_status(peer_handle, target_process_handle,
 					CIDRPolicy::force_fail_active() ? ST_DENIED_FORCE_FAIL : ST_DENIED_POLICY);
 			stats.requests_denied.fetch_add(1);
 			continue;
@@ -200,7 +226,7 @@ void NetworkBroker::_serve() {
 		const bool is_stream = (req.opcode == OP_OPEN_TCP);
 		const int sock = create_native_socket(AF_INET6, is_stream);
 		if (sock == TG_INVALID_NATIVE_SOCK) {
-			send_status(peer_fd, target_process_handle, ST_SOCKET_ERROR, last_socket_error());
+			send_status(peer_handle, target_process_handle, ST_SOCKET_ERROR, last_socket_error());
 			stats.requests_denied.fetch_add(1);
 			continue;
 		}
@@ -214,6 +240,21 @@ void NetworkBroker::_serve() {
 		::setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
 #endif
 
+		// Non-blocking connect: the broker initiates the handshake but does
+		// not wait for it. The kernel binds the destination at ::connect()
+		// time regardless of blocking mode, so CIDR enforcement holds. The
+		// renderer's BrokeredNetSocket::poll() detects connect completion
+		// via SO_ERROR like upstream Godot's NetSocketPosix. Without this,
+		// N parallel renderer requests serialize through the broker for
+		// N×handshake_rtt wall time.
+#ifdef WINDOWS_ENABLED
+		u_long non_blocking = 1;
+		::ioctlsocket((SOCKET)sock, FIONBIO, &non_blocking);
+#else
+		const int flags = ::fcntl(sock, F_GETFL, 0);
+		::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+#endif
+
 		struct sockaddr_in6 addr = {};
 		addr.sin6_family = AF_INET6;
 		addr.sin6_port = htons(req.port);
@@ -222,14 +263,14 @@ void NetworkBroker::_serve() {
 			const int e = last_socket_error();
 			if (connect_is_fatal(e)) {
 				close_native_socket(sock);
-				send_status(peer_fd, target_process_handle, ST_SOCKET_ERROR, e);
+				send_status(peer_handle, target_process_handle, ST_SOCKET_ERROR, e);
 				stats.requests_denied.fetch_add(1);
 				continue;
 			}
 		}
 
 		uint8_t resp[3] = { ST_OK, 0, 0 };
-		const Error sent = TGFDPassing::send_msg(peer_fd, sock, target_process_handle, resp, sizeof(resp));
+		const Error sent = TGFDPassing::send_msg(peer_handle, sock, target_process_handle, resp, sizeof(resp));
 		close_native_socket(sock);
 		if (sent != OK) {
 			break;
@@ -246,10 +287,16 @@ Dictionary NetworkBroker::state() const {
 	out["requests_allowed"] = (int64_t)stats.requests_allowed.load();
 	out["requests_denied"] = (int64_t)stats.requests_denied.load();
 	out["dns_resolutions"] = (int64_t)stats.dns_resolutions.load();
-	out["status"] = (peer_fd >= 0) ? "running" : "stopped";
+	out["status"] = (peer_handle >= 0) ? "running" : "stopped";
 	return out;
 }
 
 NetworkBroker::~NetworkBroker() {
 	shutdown();
+#ifdef WINDOWS_ENABLED
+	if (target_process_handle != nullptr) {
+		::CloseHandle((HANDLE)target_process_handle);
+		target_process_handle = nullptr;
+	}
+#endif
 }

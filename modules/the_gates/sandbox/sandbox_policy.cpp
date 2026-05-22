@@ -35,6 +35,7 @@ Dictionary SandboxPolicy::to_dict() const {
 	out["rw_dir"] = rw_dir;
 	out["rw_files"] = rw_files;
 	out["ro_files"] = ro_files;
+	out["renderer_bound_files"] = renderer_bound_files;
 	out["child_stdout_log_path"] = child_stdout_log_path;
 	out["allow_audio"] = allow_audio;
 	out["allow_microphone"] = allow_microphone;
@@ -53,6 +54,10 @@ void SandboxPolicy::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_ro_file", "path"), &SandboxPolicy::add_ro_file);
 	ClassDB::bind_method(D_METHOD("get_ro_files"), &SandboxPolicy::get_ro_files);
 	ClassDB::bind_method(D_METHOD("set_ro_files", "files"), &SandboxPolicy::set_ro_files);
+
+	ClassDB::bind_method(D_METHOD("add_renderer_bound_file", "path"), &SandboxPolicy::add_renderer_bound_file);
+	ClassDB::bind_method(D_METHOD("get_renderer_bound_files"), &SandboxPolicy::get_renderer_bound_files);
+	ClassDB::bind_method(D_METHOD("set_renderer_bound_files", "files"), &SandboxPolicy::set_renderer_bound_files);
 
 	ClassDB::bind_method(D_METHOD("set_child_stdout_log_path", "path"), &SandboxPolicy::set_child_stdout_log_path);
 	ClassDB::bind_method(D_METHOD("get_child_stdout_log_path"), &SandboxPolicy::get_child_stdout_log_path);

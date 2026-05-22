@@ -6,11 +6,11 @@ Three platforms, one architecture:
 
 | Platform | Filesystem | Capabilities / token | Network |
 |---|---|---|---|
-| Windows | Chromium broker (per-gate ACL + UNTRUSTED IL) | `USER_LIMITED` token, alternate desktop | USER_LIMITED denies AF_INET socket creation |
+| Windows | Chromium broker (per-gate ACL + UNTRUSTED IL) | `USER_LIMITED` token, alternate desktop, per-gate AppContainer profile | In-process broker (named-pipe pair via `TargetPolicy::AddHandleToShare`); the AppContainer profile carries no networking capabilities so WFP blocks every direct AF_INET `connect()` at `ALE_AUTH_CONNECT`, see [[Network Isolation]] |
 | Linux   | landlock (path allow-list) | `capset` to empty | seccomp removes `__NR_socket` + bind / listen / connect / socketpair |
 | macOS   | Seatbelt SBPL (Firefox content profile + addend) | n/a — Seatbelt is monolithic | `(deny syscall-unix (syscall-number …))` for 12 BSD syscalls: 6 that create network FDs + 6 that retarget existing ones (connect / bind / listen / accept + `_nocancel` pair) |
 
-All three end with the same canary expectations: `integrity=untrusted`, `canary_user_dir=allowed`, `canary_sibling=blocked`, `canary_pck=allowed`, `canary_raw_socket_denied=blocked`, plus `broker_xcheck=ok` cross-checked between launcher and renderer.
+All three end with the same canary expectations: `integrity=untrusted`, `canary_user_dir=allowed`, `canary_sibling=blocked`, `canary_pck=allowed`, `canary_raw_socket_denied=blocked`, plus `broker_xcheck=ok` cross-checked between launcher and renderer. Linux denies `socket()` via seccomp, macOS via Seatbelt's `(deny syscall-unix (syscall-number 97))`, Windows via AppContainer + WFP blocking the `connect()` rather than the `socket()` itself — same observable outcome. See [[Network Isolation]].
 
 Network traffic from the renderer is mediated by an **in-process broker** in the launcher (see [[Network Isolation]]). The control channel between launcher and renderer is an inherited `AF_UNIX SOCK_STREAM` socketpair (POSIX) handed across `posix_spawn` via `posix_spawn_file_actions_adddup2`; no filesystem rendezvous. The broker opens kernel sockets on the renderer's behalf, validates CIDR policy, and hands FDs via SCM_RIGHTS (POSIX) or `WSADuplicateSocket` (Windows). No installers, system extensions, or setuid helpers required.
 
