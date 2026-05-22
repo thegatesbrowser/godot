@@ -96,14 +96,14 @@ void Sandbox::_verify_done() {
 	emit_signal(SNAME("verify_finished"), (int)err);
 }
 
-void Sandbox::start_broker(int p_launcher_fd, void *p_target_handle) {
+void Sandbox::start_broker(intptr_t p_launcher_handle, void *p_target_handle) {
 	if (network_broker.is_null()) {
 		network_broker = Ref<NetworkBroker>(memnew(NetworkBroker));
 	}
 	if (p_target_handle != nullptr) {
 		network_broker->set_target_process_handle(p_target_handle);
 	}
-	const Error e = network_broker->start(p_launcher_fd);
+	const Error e = network_broker->start(p_launcher_handle);
 	if (e != OK) {
 		network_broker = Ref<NetworkBroker>();
 	}

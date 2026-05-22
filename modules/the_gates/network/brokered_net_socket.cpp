@@ -129,7 +129,65 @@ void BrokeredNetSocket::close() {
 }
 
 Error BrokeredNetSocket::connect_to_host(IPAddress p_host, uint16_t p_port) {
-	return _ensure_connected(p_host, p_port);
+	const Error e = _ensure_connected(p_host, p_port);
+	if (e != OK) {
+		return e;
+	}
+	if (_requested_type != TYPE_TCP) {
+		// UDP "connect" is just destination binding; instant, no handshake.
+		return OK;
+	}
+	// StreamPeerTCP::poll re-calls connect_to_host every tick while
+	// STATUS_CONNECTING and expects OK when done, ERR_BUSY while in flight,
+	// other on error. We can't re-call ::connect here — Linux seccomp blocks
+	// __NR_connect — so probe via select() + SO_ERROR.
+	return _check_connect_complete();
+}
+
+Error BrokeredNetSocket::_check_connect_complete() const {
+	if (_sock == TG_INVALID_SOCK) {
+		return FAILED;
+	}
+	fd_set wfds;
+	fd_set efds;
+	FD_ZERO(&wfds);
+	FD_ZERO(&efds);
+#ifdef WINDOWS_ENABLED
+	const SOCKET fd = (SOCKET)_sock;
+#else
+	const int fd = _sock;
+#endif
+	FD_SET(fd, &wfds);
+	FD_SET(fd, &efds);
+	struct timeval tv = {};
+#ifdef WINDOWS_ENABLED
+	const int rc = ::select(0, nullptr, &wfds, &efds, &tv);
+	if (rc == SOCKET_ERROR) {
+		return FAILED;
+	}
+#else
+	const int rc = ::select(_sock + 1, nullptr, &wfds, &efds, &tv);
+	if (rc < 0) {
+		return FAILED;
+	}
+#endif
+	if (rc == 0) {
+		return ERR_BUSY;
+	}
+	int sock_err = 0;
+#ifdef WINDOWS_ENABLED
+	int err_len = sizeof(sock_err);
+	if (::getsockopt(fd, SOL_SOCKET, SO_ERROR,
+				(char *)&sock_err, &err_len) != 0) {
+		return FAILED;
+	}
+#else
+	socklen_t err_len = sizeof(sock_err);
+	if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &sock_err, &err_len) != 0) {
+		return FAILED;
+	}
+#endif
+	return sock_err == 0 ? OK : FAILED;
 }
 
 Error BrokeredNetSocket::bind(IPAddress /*p_addr*/, uint16_t /*p_port*/) {

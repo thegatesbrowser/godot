@@ -26,11 +26,12 @@
 
 class RendererNetClient {
 public:
-	// Adopts the inherited control FD as the singleton's broker channel.
-	// Refuses re-installation: if a different FD is offered after one is
-	// already in place, closes the new one and returns ERR_ALREADY_EXISTS
-	// so the caller can't silently leak it.
-	static Error install(int p_fd);
+	// Adopts the inherited control handle as the singleton's broker channel.
+	// intptr_t round-trips both a POSIX FD (small int) and a Windows HANDLE
+	// (pointer-sized) without lossy casting. Refuses re-installation: if a
+	// different handle is offered after one is already in place, returns
+	// ERR_ALREADY_EXISTS so the caller can't silently leak it.
+	static Error install(intptr_t p_handle);
 	static void shutdown();
 	static bool is_installed();
 

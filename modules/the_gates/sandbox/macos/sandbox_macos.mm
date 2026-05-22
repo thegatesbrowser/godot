@@ -116,7 +116,8 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	// Network isolation is enforced by the in-process NetworkBroker (see
 	// modules/the_gates/network/) plus the Seatbelt addend's deny rules on
 	// the BSD socket-creation syscalls. The control channel is a socketpair
-	// inherited at FD TG_BROKER_FD_NUM; the launcher half stays here.
+	// inherited at FD 3 (dup'd via posix_spawn_file_actions); renderer reads
+	// the FD number from --tg-broker-fd on argv.
 
 	if (target_kq >= 0) {
 		::close(target_kq);
@@ -140,6 +141,9 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	for (int i = 0; i < p_arguments.size(); ++i) {
 		arg_storage.push_back(p_arguments[i].utf8());
 	}
+	// Renderer reads broker FD from argv (consistent with Windows). The FD
+	// itself is dup'd into fixed slot 3 via posix_spawn_file_actions below.
+	arg_storage.push_back(vformat("--tg-broker-fd=%d", CHILD_BROKER_FD_NUM).utf8());
 	Vector<char *> argv;
 	for (int i = 0; i < arg_storage.size(); ++i) {
 		argv.push_back(const_cast<char *>(arg_storage[i].get_data()));
@@ -162,7 +166,6 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	env_owned.push_back(("TG_SANDBOX_APP_PATH=" + p_executable).utf8());
 	env_owned.push_back(String(p_policy->is_audio_allowed() ? "TG_SANDBOX_ALLOW_AUDIO=1" : "TG_SANDBOX_ALLOW_AUDIO=0").utf8());
 	env_owned.push_back(String(p_policy->is_microphone_allowed() ? "TG_SANDBOX_ALLOW_MICROPHONE=1" : "TG_SANDBOX_ALLOW_MICROPHONE=0").utf8());
-	env_owned.push_back(vformat("TG_BROKER_FD=%d", CHILD_BROKER_FD_NUM).utf8());
 
 	int env_count = 0;
 	for (char **e = environ; *e != nullptr; ++e) {

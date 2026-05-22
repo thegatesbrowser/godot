@@ -129,12 +129,16 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	ERR_FAIL_COND_V_MSG(is_target(), result,
 			"SandboxLinux::spawn_target called from a sandbox target process");
 
+	const int CHILD_BROKER_FD_NUM = 3;
 	const CharString exe_cs = p_executable.utf8();
 	Vector<CharString> arg_storage;
 	arg_storage.push_back(exe_cs);
 	for (int i = 0; i < p_arguments.size(); ++i) {
 		arg_storage.push_back(p_arguments[i].utf8());
 	}
+	// Renderer reads broker FD from argv (consistent with Windows). The FD
+	// itself is dup'd into fixed slot 3 by child_exec_after_log_dup.
+	arg_storage.push_back(vformat("--tg-broker-fd=%d", CHILD_BROKER_FD_NUM).utf8());
 	Vector<char *> argv;
 	for (int i = 0; i < arg_storage.size(); ++i) {
 		argv.push_back(const_cast<char *>(arg_storage[i].get_data()));
@@ -155,8 +159,6 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	if (ro_files.size() > 0) {
 		env_owned.push_back(("TG_SANDBOX_RO_FILES=" + String("|").join(ro_files)).utf8());
 	}
-	const int CHILD_BROKER_FD_NUM = 3;
-	env_owned.push_back(vformat("TG_BROKER_FD=%d", CHILD_BROKER_FD_NUM).utf8());
 
 	int env_count = 0;
 	for (char **e = environ; *e != nullptr; ++e) {
@@ -187,7 +189,8 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	// Network isolation is enforced by the in-process NetworkBroker (see
 	// modules/the_gates/network/) plus the seccomp filter denying socket()
 	// in tg_apply_lockdown. The control channel is a socketpair the child
-	// inherits at TG_BROKER_FD; renderer reads the FD number from env.
+	// inherits at FD 3 (dup'd via posix_spawn_file_actions); renderer reads
+	// the FD number from --tg-broker-fd on argv.
 	int broker_sv[2] = { -1, -1 };
 	if (::socketpair(AF_UNIX, SOCK_STREAM, 0, broker_sv) != 0) {
 		ERR_FAIL_V_MSG(result, vformat(

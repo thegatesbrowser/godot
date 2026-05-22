@@ -63,6 +63,11 @@ private:
 	Error _ensure_connected(const IPAddress &p_ip, uint16_t p_port);
 	void _apply_pending_options();
 
+	// Probes whether a non-blocking connect has finished on `_sock`.
+	// Returns OK on success, ERR_BUSY while the handshake is in flight,
+	// FAILED on connect error or select/getsockopt error.
+	Error _check_connect_complete() const;
+
 protected:
 	static NetSocket *_create_func();
 
