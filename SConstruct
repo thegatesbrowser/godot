@@ -898,7 +898,7 @@ if env.dev_build:
     suffix += ".dev"
 
 if env.tg_renderer:
-    suffix += ".renderer"
+    suffix += ".renderer.4.3"
 
 if env["precision"] == "double":
     suffix += ".double"
