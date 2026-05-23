@@ -36,7 +36,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, NoReturn, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 GODOT_DIR = SCRIPT_DIR.parent
@@ -81,6 +81,12 @@ FAIL_CATALOG: dict[str, int] = {
     "negative_network_filter_not_aborted": 41,
     "canary_raw_socket_allowed": 42,
     "negative_broker_not_denied": 43,
+    "canary_socketpair_allowed": 44,
+    "canary_netlink_allowed": 45,
+    "canary_userfaultfd_allowed": 46,
+    "canary_proc_net_readable": 47,
+    "canary_brokered_connect_denied": 48,
+    "canary_brokered_connect_unblocked_in_force_fail": 49,
 }
 
 MAX_TICK_GAP_MS = 500
@@ -128,14 +134,14 @@ def user_data_root() -> Path:
     return Path.home() / ".local" / "share" / "godot" / "app_userdata" / "TheGates"
 
 
-def emit_fail(reason: str, results_dir: Path) -> None:
+def emit_fail(reason: str, results_dir: Path) -> NoReturn:
     code = FAIL_CATALOG.get(reason.split(" ", 1)[0], 1)
     print(f"[VERIFY-FAIL] {reason}")
     print(f"  results={results_dir}")
     sys.exit(code)
 
 
-def emit_pass(summary: str, results_dir: Path) -> None:
+def emit_pass(summary: str, results_dir: Path) -> NoReturn:
     print(f"[VERIFY-OK] {summary}")
     print(f"  results={results_dir}")
     sys.exit(0)
@@ -152,7 +158,9 @@ def kill_stale_processes() -> None:
         ):
             subprocess.run(
                 ["taskkill", "/F", "/IM", image],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
             )
         return
 
@@ -163,7 +171,9 @@ def kill_stale_processes() -> None:
     ):
         subprocess.run(
             ["pkill", "-f", pattern],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
         )
 
 
@@ -175,20 +185,28 @@ def run_build(no_sandbox: bool, build_log: Path, results_dir: Path) -> None:
         with build_log.open("a") as f:
             proc = subprocess.run(
                 [sys.executable, str(SCRIPT_DIR / "build.py"), profile, *extra],
-                stdout=f, stderr=subprocess.STDOUT, check=False,
+                stdout=f,
+                stderr=subprocess.STDOUT,
+                check=False,
             )
         if proc.returncode != 0:
             emit_fail(fail_reason, results_dir)
 
 
 def launch_with_timeout(
-    launcher_bin: Path, args: list[str], stdout_path: Path, stderr_path: Path,
-    timeout_sec: int, results_dir: Path,
+    launcher_bin: Path,
+    args: list[str],
+    stdout_path: Path,
+    stderr_path: Path,
+    timeout_sec: int,
+    results_dir: Path,
 ) -> int:
     """Spawn launcher, redirect stdout/stderr, wait until exit or timeout."""
     with stdout_path.open("w") as out, stderr_path.open("w") as err:
         proc = subprocess.Popen(
-            [str(launcher_bin), *args], stdout=out, stderr=err,
+            [str(launcher_bin), *args],
+            stdout=out,
+            stderr=err,
             cwd=str(GODOT_DIR),
         )
 
@@ -242,7 +260,7 @@ def gate_url_to_folder(url: str) -> str:
     return cleaned.replace(":", "_")
 
 
-def parse_diag_block(renderer_text: str, start_line: int) -> Optional[dict]:
+def parse_diag_block(renderer_text: str, start_line: int) -> Optional[dict[str, Any]]:
     """Extract the last SANDBOX-DIAG-BEGIN/END JSON block after start_line."""
     lines = renderer_text.splitlines()
     begin = end = None
@@ -253,9 +271,10 @@ def parse_diag_block(renderer_text: str, start_line: int) -> Optional[dict]:
             end = i
     if begin is None or end is None or end <= begin:
         return None
-    body = "\n".join(lines[begin:end - 1])
+    body = "\n".join(lines[begin : end - 1])
     try:
-        return json.loads(body)
+        parsed: dict[str, Any] = json.loads(body)
+        return parsed
     except json.JSONDecodeError:
         return None
 
@@ -276,26 +295,23 @@ examples:
 """,
     )
     parser.add_argument(
-        "mode", nargs="?", default="default",
-        choices=["default", "negative-fail-closed", "negative-signature",
-                 "negative-broker", "negative-network-filter"],
-        help="harness mode (default: default); negative-network-filter is a "
-             "legacy alias for negative-broker",
+        "mode",
+        nargs="?",
+        default="default",
+        choices=["default", "negative-fail-closed", "negative-signature", "negative-broker", "negative-network-filter"],
+        help="harness mode (default: default); negative-network-filter is a legacy alias for negative-broker",
     )
     parser.add_argument("--gate-url", default="https://thegates.io/worlds/tutorial.gate")
-    parser.add_argument("--timeout", type=int, default=25,
-                        help="seconds the launcher runs before self-quit")
-    parser.add_argument("--build", action="store_true",
-                        help="rebuild launcher + renderer first")
-    parser.add_argument("--no-sandbox", action="store_true",
-                        help="combined with --build: pass tg_sandbox=no")
+    parser.add_argument("--timeout", type=int, default=25, help="seconds the launcher runs before self-quit")
+    parser.add_argument("--build", action="store_true", help="rebuild launcher + renderer first")
+    parser.add_argument("--no-sandbox", action="store_true", help="combined with --build: pass tg_sandbox=no")
     parser.add_argument("--launcher-bin", default="")
     parser.add_argument("--renderer-bin", default="")
-    parser.add_argument("--verbose", action="store_true",
-                        help="pass --verbose to launcher (drastic log growth)")
+    parser.add_argument("--verbose", action="store_true", help="pass --verbose to launcher (drastic log growth)")
     parser.add_argument("--results-dir", default="")
-    parser.add_argument("--cycles", type=int, default=0,
-                        help="re-opens after the initial gate (cycles=2 means 3 spawns)")
+    parser.add_argument(
+        "--cycles", type=int, default=0, help="re-opens after the initial gate (cycles=2 means 3 spawns)"
+    )
     parser.add_argument("--cycle-delay", type=float, default=5.0)
     args = parser.parse_args()
 
@@ -340,13 +356,17 @@ examples:
     launch_start = time.time()
 
     launcher_args = [
-        "--path", str(APP_DIR), "--",
-        "--autotest", "--gate-url", args.gate_url,
-        "--autotest-timeout", str(args.timeout),
+        "--path",
+        str(APP_DIR),
+        "--",
+        "--autotest",
+        "--gate-url",
+        args.gate_url,
+        "--autotest-timeout",
+        str(args.timeout),
     ]
     if args.cycles > 0:
-        launcher_args += ["--autotest-cycles", str(args.cycles),
-                          "--autotest-cycle-delay", str(args.cycle_delay)]
+        launcher_args += ["--autotest-cycles", str(args.cycles), "--autotest-cycle-delay", str(args.cycle_delay)]
     if args.verbose:
         launcher_args.append("--verbose")
 
@@ -355,8 +375,12 @@ examples:
     # in-flight HTTP on shutdown; 25s grace covers that on slow networks.
     wait_budget = args.timeout + 25
     launcher_exit = launch_with_timeout(
-        launcher_bin, launcher_args, launcher_log, launcher_err,
-        wait_budget, results_dir,
+        launcher_bin,
+        launcher_args,
+        launcher_log,
+        launcher_err,
+        wait_budget,
+        results_dir,
     )
 
     # negative-signature: broker must refuse to spawn -> no fresh renderer log
@@ -368,7 +392,9 @@ examples:
         launcher_text = launcher_log.read_text(encoding="utf-8", errors="replace") if launcher_log.exists() else ""
         if "[AUTOTEST-GATE-ERROR]" not in launcher_text:
             emit_fail("negative_signature_no_gate_error launcher_did_not_surface_refusal", results_dir)
-        emit_pass("negative-signature: broker refused to spawn and launcher surfaced gate_error as expected", results_dir)
+        emit_pass(
+            "negative-signature: broker refused to spawn and launcher surfaced gate_error as expected", results_dir
+        )
 
     # negative-broker: TG_NETWORK_BROKER_FORCE_FAIL makes CIDRPolicy::is_allowed
     # return false unconditionally. Renderer launches (broker is in-process so
@@ -379,7 +405,10 @@ examples:
         launcher_text = launcher_log.read_text(encoding="utf-8", errors="replace") if launcher_log.exists() else ""
         if "[NETWORK-BROKER] DENY" not in launcher_text:
             emit_fail("negative_broker_not_denied no broker DENY line in launcher log", results_dir)
-        emit_pass("negative-broker: broker denied socket requests with TG_NETWORK_BROKER_FORCE_FAIL=1 as expected", results_dir)
+        emit_pass(
+            "negative-broker: broker denied socket requests with TG_NETWORK_BROKER_FORCE_FAIL=1 as expected",
+            results_dir,
+        )
 
     renderer_log_file = find_renderer_log_for_run(logs_root, launch_start)
     if not renderer_log_file or not renderer_log_file.is_file():
@@ -399,7 +428,10 @@ examples:
         attempt_line = last_line_match(renderer_text, r"\[LOCKDOWN-ATTEMPT\]")
         if attempt_line is None or attempt_line < start_line:
             emit_fail("negative_fail_closed_no_attempt renderer_aborted_before_reaching_lower_token", results_dir)
-        emit_pass("negative-fail-closed: renderer reached lockdown attempt then aborted on forced lower_token failure as expected", results_dir)
+        emit_pass(
+            "negative-fail-closed: renderer reached lockdown attempt then aborted on forced lower_token failure as expected",
+            results_dir,
+        )
 
     if ready_line is None or ready_line < start_line:
         emit_fail("renderer_no_ready", results_dir)
@@ -421,15 +453,18 @@ examples:
 
     first_frame_count = len(re.findall(r"\[AUTOTEST-FIRST-FRAME\]", launcher_text))
     if first_frame_count < expected_entered:
-        emit_fail(f"gate_no_first_frame expected={expected_entered} entered={gate_entered} first_frame={first_frame_count}", results_dir)
+        emit_fail(
+            f"gate_no_first_frame expected={expected_entered} entered={gate_entered} first_frame={first_frame_count}",
+            results_dir,
+        )
 
     if "[AUTOTEST-NOT-RESPONDING]" in launcher_text:
-        nr_first = next(l for l in launcher_text.splitlines() if "[AUTOTEST-NOT-RESPONDING]" in l)
+        nr_first = next(line for line in launcher_text.splitlines() if "[AUTOTEST-NOT-RESPONDING]" in line)
         nr_count = launcher_text.count("[AUTOTEST-NOT-RESPONDING]")
         emit_fail(f"gate_not_responding count={nr_count} first={nr_first[:140]}", results_dir)
 
     if "[AUTOTEST-GATE-ERROR]" in launcher_text:
-        ge_first = next(l for l in launcher_text.splitlines() if "[AUTOTEST-GATE-ERROR]" in l)
+        ge_first = next(line for line in launcher_text.splitlines() if "[AUTOTEST-GATE-ERROR]" in line)
         ge_count = launcher_text.count("[AUTOTEST-GATE-ERROR]")
         emit_fail(f"gate_error count={ge_count} first={ge_first[:140]}", results_dir)
 
@@ -443,7 +478,6 @@ examples:
         m = re.search(r"max_tick_gap=(\d+)", line)
         if m and int(m.group(1)) > MAX_TICK_GAP_MS:
             emit_fail(f"main_thread_frozen max_ms={MAX_TICK_GAP_MS} line={line[:140]}", results_dir)
-            break
 
     ext_line = last_line_match(renderer_text, r"TGExternalTexture")
     if ext_line is None or ext_line < start_line:
@@ -492,14 +526,22 @@ examples:
         if per_gate_files < 1:
             emit_fail(f"per_gate_dir_empty path={per_gate_dir} (renderer wrote nothing under its user://)", results_dir)
     else:
-        emit_fail(f"per_gate_dir_missing path={per_gate_dir} (launcher never created the per-gate user dir)", results_dir)
+        emit_fail(
+            f"per_gate_dir_missing path={per_gate_dir} (launcher never created the per-gate user dir)", results_dir
+        )
 
     if canary_user != "allowed":
-        emit_fail(f"canary_user_dir_blocked value={canary_user} (sandbox blocks FileAccess.WRITE at root of user://)", results_dir)
+        emit_fail(
+            f"canary_user_dir_blocked value={canary_user} (sandbox blocks FileAccess.WRITE at root of user://)",
+            results_dir,
+        )
     if canary_sibling != "blocked":
         emit_fail(f"canary_sibling_gate_allowed value={canary_sibling} (cross-gate isolation broken)", results_dir)
     if canary_pck not in ("allowed", "skipped_no_main_scene", "skipped_no_pck_path"):
-        emit_fail(f"canary_pck_read_blocked value={canary_pck} (gate cannot load resources from .pck post-lockdown)", results_dir)
+        emit_fail(
+            f"canary_pck_read_blocked value={canary_pck} (gate cannot load resources from .pck post-lockdown)",
+            results_dir,
+        )
 
     # Raw-socket canaries. The primary network-isolation enforcement is the
     # FD-passing broker on all platforms; the OS denies direct AF_INET as
@@ -519,17 +561,71 @@ examples:
     network_canaries_present = "?" not in (canary_raw, canary_priv, canary_loop, canary_pub)
     if network_canaries_present:
         if canary_raw != "blocked":
-            emit_fail(f"canary_raw_socket_allowed value={canary_raw} "
-                      "(renderer can still open AF_INET sockets; sandbox not denying)", results_dir)
+            emit_fail(
+                f"canary_raw_socket_allowed value={canary_raw} "
+                "(renderer can still open AF_INET sockets; sandbox not denying)",
+                results_dir,
+            )
         if canary_priv != "blocked":
-            emit_fail(f"canary_private_ip_reachable value={canary_priv} "
-                      "(raw socket to RFC 1918 succeeded; broker bypass)", results_dir)
+            emit_fail(
+                f"canary_private_ip_reachable value={canary_priv} (raw socket to RFC 1918 succeeded; broker bypass)",
+                results_dir,
+            )
         if canary_loop != "blocked":
-            emit_fail(f"canary_localhost_reachable value={canary_loop} "
-                      "(raw socket to 127.0.0.1 succeeded; broker bypass)", results_dir)
+            emit_fail(
+                f"canary_localhost_reachable value={canary_loop} (raw socket to 127.0.0.1 succeeded; broker bypass)",
+                results_dir,
+            )
         if canary_pub != "blocked":
-            emit_fail(f"canary_public_ip_unreachable value={canary_pub} "
-                      "(raw socket to 1.1.1.1 succeeded; sandbox not denying socket())", results_dir)
+            emit_fail(
+                f"canary_public_ip_unreachable value={canary_pub} "
+                "(raw socket to 1.1.1.1 succeeded; sandbox not denying socket())",
+                results_dir,
+            )
+
+    # Linux-only loophole canaries: socketpair, AF_NETLINK, userfaultfd,
+    # /proc/self/net. All must be "blocked" in default mode. Other platforms
+    # report "?" so the block is a no-op there.
+    canary_sp = canary_status("canary_socketpair_denied")
+    canary_nl = canary_status("canary_netlink_denied")
+    canary_uffd = canary_status("canary_userfaultfd_denied")
+    canary_procnet = canary_status("canary_proc_net_blocked")
+    if canary_sp != "?" and canary_sp != "blocked":
+        emit_fail(
+            f"canary_socketpair_allowed value={canary_sp} "
+            "(renderer can create AF_UNIX socketpair; seccomp not denying __NR_socketpair)",
+            results_dir,
+        )
+    if canary_nl != "?" and canary_nl != "blocked":
+        emit_fail(
+            f"canary_netlink_allowed value={canary_nl} "
+            "(renderer can open AF_NETLINK socket; seccomp not denying __NR_socket)",
+            results_dir,
+        )
+    if canary_uffd != "?" and canary_uffd != "blocked":
+        emit_fail(
+            f"canary_userfaultfd_allowed value={canary_uffd} "
+            "(renderer can call __NR_userfaultfd; remove from seccomp allowlist)",
+            results_dir,
+        )
+    if canary_procnet != "?" and canary_procnet != "blocked":
+        emit_fail(
+            f"canary_proc_net_readable value={canary_procnet} "
+            "(renderer can read /proc/self/net/tcp; landlock granting /proc/self as a tree)",
+            results_dir,
+        )
+
+    # Brokered-connect canary: in default mode the broker honors the request
+    # and returns a connected FD ("allowed"). The negative-broker branch
+    # above already exited before this point, so reaching here means default
+    # mode and the canary must succeed.
+    canary_broker = canary_status("canary_brokered_connect")
+    if canary_broker != "?" and canary_broker != "allowed":
+        emit_fail(
+            f"canary_brokered_connect_denied value={canary_broker} "
+            "(broker refused a public-IP request in default mode; check broker FD inheritance)",
+            results_dir,
+        )
 
     # Broker / renderer cross-check via broker_policy.json (Windows writes it;
     # other platforms skip silently).
@@ -543,7 +639,9 @@ examples:
             emit_fail(f"broker_policy_parse_failed see={broker_policy_path}", results_dir)
         broker_integrity = str(broker_policy.get("integrity_target", "")).lower()
         if broker_integrity and diag_integrity != "?" and broker_integrity != diag_integrity:
-            emit_fail(f"broker_renderer_integrity_mismatch broker={broker_integrity} renderer={diag_integrity}", results_dir)
+            emit_fail(
+                f"broker_renderer_integrity_mismatch broker={broker_integrity} renderer={diag_integrity}", results_dir
+            )
         if broker_policy.get("token_lockdown") == "USER_LOCKDOWN":
             emit_fail("broker_token_lockdown_regression value=USER_LOCKDOWN", results_dir)
         broker_xcheck = "ok"

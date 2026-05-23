@@ -104,7 +104,6 @@ ResultExpr TheGatesRendererPolicy::EvaluateSyscall(int sysno) const {
 		case __NR_msync:
 		case __NR_membarrier:
 		case __NR_memfd_create:
-		case __NR_userfaultfd:
 		case __NR_pkey_alloc:
 		case __NR_pkey_free:
 		case __NR_pkey_mprotect:

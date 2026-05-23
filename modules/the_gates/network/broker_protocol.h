@@ -5,21 +5,43 @@
 /*                             GODOT ENGINE                               */
 /*                        https://godotengine.org                         */
 /**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
-/*  Single source of truth for the wire protocol between the launcher-    */
-/*  side NetworkBroker and the renderer-side RendererNetClient. Owning    */
-/*  both ends of the protocol in one header keeps the opcodes, status     */
-/*  codes, and request layout in lockstep — if one drifts, the wire       */
-/*  silently breaks.                                                      */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
 #pragma once
 
 #include "core/io/ip_address.h"
 #include "core/string/ustring.h"
+#include "core/templates/list.h"
+#include "core/variant/variant.h"
 
 #include <stdint.h>
-#include <string.h>
+
+// Single source of truth for the wire protocol between the launcher-side
+// NetworkBroker and the renderer-side RendererNetClient. Both Request and
+// Response are length-prefixed framed messages on the inherited AF_UNIX
+// control channel (POSIX) or named pipe (Windows). FDs ride alongside on
+// SCM_RIGHTS / WSADuplicateSocket; framing is handled by TGFDPassing.
 
 namespace BrokerProtocol {
 
@@ -38,68 +60,58 @@ enum Status : uint8_t {
 	ST_BAD_REQUEST = 5,
 };
 
-// Wire layout of one request, after the framing length prefix:
-//   [opcode:1][ip6:16][port:2 little-endian][hostname_len:1][hostname:N]
+// Renderer -> broker. Wire layout after the framing length prefix:
+//   [opcode:1][ip6:16][port:2 LE][hostname_len:1][hostname:N]
 struct Request {
-	static constexpr int MAX_SIZE = 1 + 16 + 2 + 1 + 255;
 	static constexpr int HEADER_SIZE = 20;
 	static constexpr int MAX_HOSTNAME = 255;
+	static constexpr int MAX_SIZE = HEADER_SIZE + MAX_HOSTNAME;
 
 	uint8_t opcode = 0;
 	uint8_t ipv6[16] = {};
 	uint16_t port = 0;
 	String hostname;
 
-	// Serialize into p_buf (must hold MAX_SIZE bytes). Returns total bytes written.
-	int serialize(uint8_t *p_buf) const {
-		memset(p_buf, 0, HEADER_SIZE);
-		p_buf[0] = opcode;
-		memcpy(p_buf + 1, ipv6, 16);
-		p_buf[17] = (uint8_t)(port & 0xFF);
-		p_buf[18] = (uint8_t)((port >> 8) & 0xFF);
-		const CharString cs = hostname.utf8();
-		const int name_len = (cs.length() > MAX_HOSTNAME) ? MAX_HOSTNAME : cs.length();
-		p_buf[19] = (uint8_t)name_len;
-		if (name_len > 0) {
-			memcpy(p_buf + HEADER_SIZE, cs.get_data(), (size_t)name_len);
-		}
-		return HEADER_SIZE + name_len;
-	}
+	int serialize(uint8_t *p_buf) const;
+	bool parse(const uint8_t *p_buf, int p_len);
 
-	// Parse from a received buffer. Returns true on success, false if the
-	// buffer is too short or the hostname length overflows.
-	bool parse(const uint8_t *p_buf, int p_len) {
-		if (p_len < HEADER_SIZE) {
-			return false;
-		}
-		opcode = p_buf[0];
-		memcpy(ipv6, p_buf + 1, 16);
-		port = (uint16_t)p_buf[17] | ((uint16_t)p_buf[18] << 8);
-		const uint8_t name_len = p_buf[19];
-		if (p_len < HEADER_SIZE + name_len) {
-			return false;
-		}
-		if (name_len > 0) {
-			hostname = String::utf8((const char *)(p_buf + HEADER_SIZE), (int)name_len);
-		} else {
-			hostname = String();
-		}
-		return true;
-	}
+	IPAddress get_ip() const;
+	void set_ip(const IPAddress &p_ip);
+};
 
-	IPAddress get_ip() const {
-		IPAddress ip;
-		ip.set_ipv6(ipv6);
-		return ip;
-	}
+// Broker -> renderer. Wire layout after the framing length prefix:
+//   [status:1][errno_lo:1][errno_hi:1][payload...]
+//
+// Payload depends on opcode + status:
+//   OP_OPEN_TCP/UDP, ST_OK         : no payload (FD rides on SCM_RIGHTS)
+//   OP_RESOLVE_HOSTNAME, ST_OK     : [count:1][ip0:16]..[ip(count-1):16]
+//   any error status               : no payload; errno carries OS-level info
+//
+// The `errno_*` slots are reserved on every response so the renderer can
+// always read 3 bytes and decide. For status != ST_SOCKET_ERROR the errno
+// slot is zero.
+struct Response {
+	static constexpr int HEADER_SIZE = 3;
+	static constexpr int MAX_RESOLVE_IPS = 8;
+	static constexpr int RESOLVE_PAYLOAD_SIZE = 1 + 16 * MAX_RESOLVE_IPS;
+	static constexpr int MAX_SIZE = HEADER_SIZE + RESOLVE_PAYLOAD_SIZE;
 
-	void set_ip(const IPAddress &p_ip) {
-		if (p_ip.is_valid()) {
-			memcpy(ipv6, p_ip.get_ipv6(), 16);
-		} else {
-			memset(ipv6, 0, 16);
-		}
-	}
+	uint8_t status = ST_OK;
+	uint16_t errno_value = 0;
+	int payload_len = 0;
+	uint8_t payload[RESOLVE_PAYLOAD_SIZE] = {};
+
+	static Response make_status(Status p_status, int p_errno = 0);
+
+	int serialize(uint8_t *p_buf) const;
+	bool parse(const uint8_t *p_buf, int p_len);
+
+	// Helper for OP_RESOLVE_HOSTNAME: pack up to MAX_RESOLVE_IPS IPv6 addresses
+	// into the payload. Returns the number of IPs actually stored.
+	int set_resolved_ips(const PackedStringArray &p_ips);
+
+	// Inverse of set_resolved_ips, used by the renderer.
+	void get_resolved_ips(List<IPAddress> &r_addresses) const;
 };
 
 } // namespace BrokerProtocol

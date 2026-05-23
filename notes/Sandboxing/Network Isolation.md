@@ -72,7 +72,7 @@ Broker side (network_broker.cpp::_serve):
 - **One renderer-side owner.** `RendererNetClient` holds the broker FD and
   the request mutex. Both `BrokeredNetSocket` (socket creation) and the
   `tg_renderer_resolve_hostname` hook (DNS) pull from it. No friend-exposed
-  statics duplicated across files.
+  statistics duplicated across files.
 
 - **Identical wire on all platforms.** Every request and reply is one
   length-prefixed message via `TGFDPassing::send_msg` / `recv_msg`. On
@@ -98,7 +98,7 @@ to connect via the broker. Works transparently.
 
 ENet server mode (`bind()` to a local port) is denied. Renderers do not
 host network services. Mesh / P2P via ENet is also unsupported — it needs
-STUN/TURN signalling we don't ship, and Godot's official answer for
+STUN/TURN signaling we don't ship, and Godot's official answer for
 real-world P2P is WebRTC (separately out of scope; see Future Work).
 
 ## Per-platform sandbox tightening
@@ -152,7 +152,13 @@ defense-in-depth gap against malicious GDExtensions that try to call
   because the kernel syscall hook fires only at creation.
 
 All three platforms verified by `canary_raw_socket_denied=blocked` in
-`tools/run-sandbox-test.py`.
+`tools/run-sandbox-test.py`. Linux additionally asserts
+`canary_socketpair_denied`, `canary_netlink_denied`,
+`canary_userfaultfd_denied`, and `canary_proc_net_blocked` (the
+`/proc/net -> self/net` info-disclosure path that landlock now closes).
+All platforms also assert `canary_brokered_connect=allowed` in default
+mode and `=blocked` under `TG_NETWORK_BROKER_FORCE_FAIL=1`, exercising
+the broker end-to-end without grepping launcher stdout.
 
 ## Honest threat-model notes
 

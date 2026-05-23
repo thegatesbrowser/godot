@@ -38,9 +38,14 @@
 
 // Order: PR_SET_NO_NEW_PRIVS → landlock → capset → seccomp. Fail-closed at
 // each step. Called from Sandbox::lower_token once IPC + Vulkan are up.
+// p_allow_audio / p_allow_microphone gate the runtime-dir audio sockets;
+// Linux can't separate mic from output at the socket layer, so passing
+// false for either denies all audio.
 Error tg_apply_lockdown(const String &p_rw_dir,
 		const Vector<String> &p_rw_files,
-		const Vector<String> &p_ro_files);
+		const Vector<String> &p_ro_files,
+		bool p_allow_audio,
+		bool p_allow_microphone);
 
 // Engaged landlock ABI captured at lockdown time. Returns 0 if the lockdown
 // hasn't run or the kernel rejected landlock_create_ruleset. Reading

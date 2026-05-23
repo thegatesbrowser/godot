@@ -1,6 +1,32 @@
 /**************************************************************************/
 /*  network_broker.cpp                                                    */
 /**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "network_broker.h"
 
@@ -12,9 +38,9 @@
 #include "core/string/print_string.h"
 
 #ifdef WINDOWS_ENABLED
+#include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <windows.h>
 #else
 #include <arpa/inet.h>
 #include <errno.h>
@@ -26,7 +52,9 @@
 
 namespace {
 
+using BrokerProtocol::Opcode;
 using BrokerProtocol::Request;
+using BrokerProtocol::Response;
 using BrokerProtocol::Status;
 
 #ifdef WINDOWS_ENABLED
@@ -35,24 +63,24 @@ constexpr int TG_INVALID_NATIVE_SOCK = (int)INVALID_SOCKET;
 constexpr int TG_INVALID_NATIVE_SOCK = -1;
 #endif
 
-int create_native_socket(int family, bool stream) {
+int create_native_socket(int p_family, bool p_stream) {
 #ifdef WINDOWS_ENABLED
-	return (int)::WSASocketW(family, stream ? SOCK_STREAM : SOCK_DGRAM,
-			stream ? IPPROTO_TCP : IPPROTO_UDP, nullptr, 0, WSA_FLAG_OVERLAPPED);
+	return (int)::WSASocketW(p_family, p_stream ? SOCK_STREAM : SOCK_DGRAM,
+			p_stream ? IPPROTO_TCP : IPPROTO_UDP, nullptr, 0, WSA_FLAG_OVERLAPPED);
 #else
-	return ::socket(family, stream ? SOCK_STREAM : SOCK_DGRAM,
-			stream ? IPPROTO_TCP : IPPROTO_UDP);
+	return ::socket(p_family, p_stream ? SOCK_STREAM : SOCK_DGRAM,
+			p_stream ? IPPROTO_TCP : IPPROTO_UDP);
 #endif
 }
 
-void close_native_socket(int fd) {
-	if (fd < 0) {
+void close_native_socket(int p_fd) {
+	if (p_fd < 0) {
 		return;
 	}
 #ifdef WINDOWS_ENABLED
-	::closesocket((SOCKET)fd);
+	::closesocket((SOCKET)p_fd);
 #else
-	::close(fd);
+	::close(p_fd);
 #endif
 }
 
@@ -64,20 +92,43 @@ int last_socket_error() {
 #endif
 }
 
-void send_status(int p_control_fd, void *p_target_handle, Status p_status, int p_errno = 0) {
-	uint8_t resp[3];
-	resp[0] = (uint8_t)p_status;
-	resp[1] = (uint8_t)(p_errno & 0xFF);
-	resp[2] = (uint8_t)((p_errno >> 8) & 0xFF);
-	TGFDPassing::send_msg(p_control_fd, -1, p_target_handle, resp, sizeof(resp));
-}
-
 bool connect_is_fatal(int p_err) {
 #ifdef WINDOWS_ENABLED
 	return p_err != WSAEWOULDBLOCK && p_err != WSAEINPROGRESS;
 #else
 	return p_err != EINPROGRESS;
 #endif
+}
+
+void set_socket_non_blocking(int p_fd) {
+#ifdef WINDOWS_ENABLED
+	u_long non_blocking = 1;
+	::ioctlsocket((SOCKET)p_fd, FIONBIO, &non_blocking);
+#else
+	const int flags = ::fcntl(p_fd, F_GETFL, 0);
+	::fcntl(p_fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+}
+
+void disable_ipv6_only(int p_fd) {
+	const int v6only = 0;
+#ifdef WINDOWS_ENABLED
+	::setsockopt((SOCKET)p_fd, IPPROTO_IPV6, IPV6_V6ONLY,
+			(const char *)&v6only, sizeof(v6only));
+#else
+	::setsockopt(p_fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+#endif
+}
+
+// Resolve a Request's destination. If hostname is set, the broker resolves
+// via getaddrinfo (which is allowed in the launcher process). Otherwise the
+// request carries pre-resolved IP bytes from the renderer (rare).
+IPAddress resolve_destination(const Request &p_req, bool *r_dns_used) {
+	*r_dns_used = !p_req.hostname.is_empty();
+	if (*r_dns_used) {
+		return IP::get_singleton()->resolve_hostname(p_req.hostname);
+	}
+	return p_req.get_ip();
 }
 
 } // namespace
@@ -138,147 +189,139 @@ void NetworkBroker::shutdown() {
 }
 
 void NetworkBroker::_service_thread_func(void *p_userdata) {
-	NetworkBroker *self = static_cast<NetworkBroker *>(p_userdata);
-	self->_serve();
+	static_cast<NetworkBroker *>(p_userdata)->_serve();
 }
 
 void NetworkBroker::_serve() {
 	using namespace BrokerProtocol;
 
 	while (!shutdown_requested.load()) {
-		uint8_t req_buf[Request::MAX_SIZE];
-		int req_len = 0;
-		int stray_fd = -1;
-		const Error r = TGFDPassing::recv_msg(peer_handle, &stray_fd, req_buf, (int)sizeof(req_buf), &req_len);
-		if (stray_fd >= 0) {
-			close_native_socket(stray_fd);
-		}
-		if (r != OK) {
+		Request req;
+		if (!_recv_request(req)) {
 			break;
 		}
-
-		Request req;
-		if (!req.parse(req_buf, req_len)) {
-			send_status(peer_handle, target_process_handle, ST_BAD_REQUEST);
-			stats.requests_denied.fetch_add(1);
-			continue;
-		}
-
 		stats.requests_total.fetch_add(1);
 
-		// Pure-DNS query — no socket created. Response:
-		//   [ST_OK][count:1][ip0:16]..[ipN:16]  (cap N at 8)
-		if (req.opcode == OP_RESOLVE_HOSTNAME) {
-			stats.dns_resolutions.fetch_add(1);
-			const PackedStringArray ips = IP::get_singleton()->resolve_hostname_addresses(req.hostname);
-			if (ips.is_empty()) {
-				send_status(peer_handle, target_process_handle, ST_DNS_FAILED);
-				stats.requests_denied.fetch_add(1);
-				continue;
-			}
-			uint8_t resp[2 + 16 * 8] = {};
-			resp[0] = ST_OK;
-			int count = 0;
-			for (int i = 0; i < ips.size() && count < 8; ++i) {
-				IPAddress ip(ips[i]);
-				if (!ip.is_valid()) {
-					continue;
-				}
-				memcpy(resp + 2 + count * 16, ip.get_ipv6(), 16);
-				count++;
-			}
-			resp[1] = (uint8_t)count;
-			TGFDPassing::send_msg(peer_handle, -1, target_process_handle, resp, 2 + count * 16);
+		int payload_fd = -1;
+		Response resp;
+		switch ((Opcode)req.opcode) {
+			case OP_RESOLVE_HOSTNAME:
+				resp = _handle_resolve(req);
+				break;
+			case OP_OPEN_TCP:
+			case OP_OPEN_UDP:
+				resp = _handle_open_socket(req, &payload_fd);
+				break;
+			default:
+				resp = Response::make_status(ST_BAD_REQUEST);
+				break;
+		}
+
+		if (resp.status == ST_OK) {
 			stats.requests_allowed.fetch_add(1);
-			continue;
-		}
-
-		if (req.opcode != OP_OPEN_TCP && req.opcode != OP_OPEN_UDP) {
-			send_status(peer_handle, target_process_handle, ST_BAD_REQUEST);
-			stats.requests_denied.fetch_add(1);
-			continue;
-		}
-
-		// Resolve hostname if present; otherwise use the IP bytes from request.
-		IPAddress dest;
-		if (!req.hostname.is_empty()) {
-			stats.dns_resolutions.fetch_add(1);
-			dest = IP::get_singleton()->resolve_hostname(req.hostname);
-			if (!dest.is_valid()) {
-				send_status(peer_handle, target_process_handle, ST_DNS_FAILED);
-				stats.requests_denied.fetch_add(1);
-				continue;
-			}
 		} else {
-			dest = req.get_ip();
-		}
-
-		if (!CIDRPolicy::is_allowed(dest)) {
-			const String why = CIDRPolicy::describe_block(dest);
-			print_line(vformat("[NETWORK-BROKER] DENY %s: %s", String(dest), why));
-			send_status(peer_handle, target_process_handle,
-					CIDRPolicy::force_fail_active() ? ST_DENIED_FORCE_FAIL : ST_DENIED_POLICY);
 			stats.requests_denied.fetch_add(1);
-			continue;
 		}
 
-		// AF_INET6 dual-stack handles both v4 (via IPv4-mapped) and v6.
-		const bool is_stream = (req.opcode == OP_OPEN_TCP);
-		const int sock = create_native_socket(AF_INET6, is_stream);
-		if (sock == TG_INVALID_NATIVE_SOCK) {
-			send_status(peer_handle, target_process_handle, ST_SOCKET_ERROR, last_socket_error());
-			stats.requests_denied.fetch_add(1);
-			continue;
+		const Error sent = _send_response(resp, payload_fd);
+		if (payload_fd >= 0) {
+			close_native_socket(payload_fd);
 		}
-		// Force dual-stack regardless of the system's net.inet6.ip6.v6only
-		// sysctl — we connect to IPv4-mapped addresses for v4 destinations.
-		const int v6only = 0;
-#ifdef WINDOWS_ENABLED
-		::setsockopt((SOCKET)sock, IPPROTO_IPV6, IPV6_V6ONLY,
-				(const char *)&v6only, sizeof(v6only));
-#else
-		::setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
-#endif
-
-		// Non-blocking connect: the broker initiates the handshake but does
-		// not wait for it. The kernel binds the destination at ::connect()
-		// time regardless of blocking mode, so CIDR enforcement holds. The
-		// renderer's BrokeredNetSocket::poll() detects connect completion
-		// via SO_ERROR like upstream Godot's NetSocketPosix. Without this,
-		// N parallel renderer requests serialize through the broker for
-		// N×handshake_rtt wall time.
-#ifdef WINDOWS_ENABLED
-		u_long non_blocking = 1;
-		::ioctlsocket((SOCKET)sock, FIONBIO, &non_blocking);
-#else
-		const int flags = ::fcntl(sock, F_GETFL, 0);
-		::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-#endif
-
-		struct sockaddr_in6 addr = {};
-		addr.sin6_family = AF_INET6;
-		addr.sin6_port = htons(req.port);
-		memcpy(&addr.sin6_addr, dest.get_ipv6(), 16);
-		if (::connect(sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-			const int e = last_socket_error();
-			if (connect_is_fatal(e)) {
-				close_native_socket(sock);
-				send_status(peer_handle, target_process_handle, ST_SOCKET_ERROR, e);
-				stats.requests_denied.fetch_add(1);
-				continue;
-			}
-		}
-
-		uint8_t resp[3] = { ST_OK, 0, 0 };
-		const Error sent = TGFDPassing::send_msg(peer_handle, sock, target_process_handle, resp, sizeof(resp));
-		close_native_socket(sock);
 		if (sent != OK) {
 			break;
 		}
-		stats.requests_allowed.fetch_add(1);
-		print_line(vformat("[NETWORK-BROKER] ALLOW %s %s:%d",
-				String::utf8(is_stream ? "tcp" : "udp"), String(dest), (int)req.port));
 	}
+}
+
+bool NetworkBroker::_recv_request(BrokerProtocol::Request &r_req) {
+	uint8_t buf[Request::MAX_SIZE];
+	int len = 0;
+	int stray_fd = -1;
+	const Error r = TGFDPassing::recv_msg(peer_handle, &stray_fd, buf, (int)sizeof(buf), &len);
+	if (stray_fd >= 0) {
+		close_native_socket(stray_fd);
+	}
+	if (r != OK) {
+		return false;
+	}
+	if (!r_req.parse(buf, len)) {
+		// Reply with ST_BAD_REQUEST and continue serving. Returning false here
+		// would tear down the channel for a single malformed request, which
+		// punishes the gate code for a recoverable error.
+		Response bad = Response::make_status(BrokerProtocol::ST_BAD_REQUEST);
+		_send_response(bad, -1);
+		stats.requests_denied.fetch_add(1);
+		return _recv_request(r_req);
+	}
+	return true;
+}
+
+Error NetworkBroker::_send_response(const BrokerProtocol::Response &p_resp, int p_fd) {
+	uint8_t buf[Response::MAX_SIZE];
+	const int len = p_resp.serialize(buf);
+	return TGFDPassing::send_msg(peer_handle, p_fd, target_process_handle, buf, len);
+}
+
+BrokerProtocol::Response NetworkBroker::_handle_resolve(const BrokerProtocol::Request &p_req) {
+	stats.dns_resolutions.fetch_add(1);
+	const PackedStringArray ips = IP::get_singleton()->resolve_hostname_addresses(p_req.hostname);
+	if (ips.is_empty()) {
+		return Response::make_status(BrokerProtocol::ST_DNS_FAILED);
+	}
+	Response resp;
+	resp.status = BrokerProtocol::ST_OK;
+	resp.set_resolved_ips(ips);
+	return resp;
+}
+
+BrokerProtocol::Response NetworkBroker::_handle_open_socket(const BrokerProtocol::Request &p_req, int *r_fd) {
+	*r_fd = -1;
+
+	bool dns_used = false;
+	const IPAddress dest = resolve_destination(p_req, &dns_used);
+	if (dns_used) {
+		stats.dns_resolutions.fetch_add(1);
+		if (!dest.is_valid()) {
+			return Response::make_status(BrokerProtocol::ST_DNS_FAILED);
+		}
+	}
+
+	if (!CIDRPolicy::is_allowed(dest)) {
+		const String why = CIDRPolicy::describe_block(dest);
+		print_line(vformat("[NETWORK-BROKER] DENY %s: %s", String(dest), why));
+		return Response::make_status(CIDRPolicy::force_fail_active()
+						? BrokerProtocol::ST_DENIED_FORCE_FAIL
+						: BrokerProtocol::ST_DENIED_POLICY);
+	}
+
+	const bool is_stream = (p_req.opcode == BrokerProtocol::OP_OPEN_TCP);
+	const int sock = create_native_socket(AF_INET6, is_stream);
+	if (sock == TG_INVALID_NATIVE_SOCK) {
+		return Response::make_status(BrokerProtocol::ST_SOCKET_ERROR, last_socket_error());
+	}
+	disable_ipv6_only(sock);
+	set_socket_non_blocking(sock);
+
+	struct sockaddr_in6 addr = {};
+	addr.sin6_family = AF_INET6;
+	addr.sin6_port = htons(p_req.port);
+	memcpy(&addr.sin6_addr, dest.get_ipv6(), 16);
+	// Non-blocking connect: kernel binds the destination at connect() time
+	// regardless of blocking mode, so CIDR enforcement holds. The renderer's
+	// BrokeredNetSocket::poll detects completion via SO_ERROR.
+	if (::connect(sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		const int e = last_socket_error();
+		if (connect_is_fatal(e)) {
+			close_native_socket(sock);
+			return Response::make_status(BrokerProtocol::ST_SOCKET_ERROR, e);
+		}
+	}
+
+	print_line(vformat("[NETWORK-BROKER] ALLOW %s %s:%d",
+			String::utf8(is_stream ? "tcp" : "udp"), String(dest), (int)p_req.port));
+
+	*r_fd = sock;
+	return Response::make_status(BrokerProtocol::ST_OK);
 }
 
 Dictionary NetworkBroker::state() const {

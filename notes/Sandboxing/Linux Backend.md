@@ -72,7 +72,16 @@ Policy crosses processes through env vars the broker injects:
 | `TG_SANDBOX_RW_DIR`      | per-gate folder; landlock grants rw rights here      |
 | `TG_SANDBOX_RW_FILES`    | `|`-joined list of socket paths the renderer binds   |
 | `TG_SANDBOX_RO_FILES`    | `|`-joined list (just the `.pck` today)              |
+| `TG_SANDBOX_ALLOW_AUDIO` | `1` / `0` — gates landlock on `$XDG_RUNTIME_DIR/{pulse,pipewire-0}` |
+| `TG_SANDBOX_ALLOW_MICROPHONE` | `1` / `0` — same gate; Linux can't separate mic from output at the socket layer so passing `0` for either flag denies all audio |
 | `TG_BROKER_FD`           | fd number the renderer half of the network-broker socketpair is dup'd to (in-child `dup2` between fork and execve) — typically `3` |
+
+The launcher's full `environ` is **not** forwarded. `SandboxLinux::spawn_target`
+filters with an exact-name + prefix allowlist (HOME, USER, LANG, LC_*,
+XDG_*, DISPLAY, WAYLAND_DISPLAY, PATH, TG_*, VK_*, MESA_*, LIBGL_*, __GL_*,
+NV_*, RADV_*, AMD_*, DXVK_*). Everything else — `SSH_AUTH_SOCK`,
+`DBUS_SESSION_BUS_ADDRESS`, `AWS_*`, `GITHUB_TOKEN`,
+`CLAUDE_CODE_*`, terminal/shell vars — is dropped before `execve`.
 
 `Sandbox::is_target()` is compile-time on Linux: `TG_RENDERER` is defined for
 the renderer binary and not for the launcher, so the per-process role is a
@@ -111,8 +120,14 @@ What we grant in `lockdown.cpp`:
 | `ro_files` (the gate's `.pck`)        | ro     | resource loader re-opens it      |
 | `/usr/lib`, `/usr/lib64`, `/lib`, `/usr/share` | ro | shared libs, fonts        |
 | `/etc/ld.so.cache`, `/etc/fonts`, `/etc/resolv.conf`, … | ro | loader, networking lookup |
-| `/proc/self`, `/proc/cpuinfo`, `/proc/meminfo`, `/proc/sys/kernel` | ro | what userland reads at startup |
-| `/sys/devices`, `/sys/class/drm`      | ro     | Vulkan driver enumeration        |
+| `/proc/cpuinfo`, `/proc/meminfo`, `/proc/sys/kernel`, `/proc/asound` | ro | what userland reads at startup |
+| `/proc/self/{maps,auxv,status,cmdline,comm,exe,cwd,stat,statm,limits,cgroup,setgroups,mountinfo,fd,fdinfo,task}` | ro | enumerated, not a tree — keeps `/proc/self/net` (i.e. the host's TCP/UDP socket tables via the `/proc/net -> self/net` symlink) unreachable |
+| `/sys/dev/char`                       | ro     | DRM device-node lookup           |
+| `/sys/class/{drm,input,sound,dma_heap,iommu,devfreq,hidraw}` | ro | enumerated, not a tree — `/sys/class/dmi` (board / system serial) and `/sys/class/net` (NIC MAC addresses) skipped |
+| `/sys/devices/{pci0000:00,system/cpu,system/node,platform}` + `/sys/devices/virtual/{drm,input,dma_heap,sound}` | ro | canonical paths of the same; `/sys/devices/virtual/dmi` and `/sys/devices/virtual/net` skipped |
+| `$XDG_RUNTIME_DIR/wayland-{0..3}`     | rw     | Wayland display socket           |
+| `$XDG_RUNTIME_DIR/{pulse,pipewire-0}` | rw     | only when both `allow_audio` and `allow_microphone` are true. `$XDG_RUNTIME_DIR/{bus,gcr,keyring,systemd}` stay unreachable regardless |
+| `/tmp/.X11-unix`                      | ro     | X11 socket directory (FD opened pre-lockdown) |
 | `/dev/dri`                            | rw     | GPU command submission           |
 | `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom` | rw/ro | trivia          |
 | `/tmp`                                | rw     | shared-memory + posix_spawn      |
@@ -148,7 +163,7 @@ The allowlist is built with Chromium's bpf_dsl in `seccomp_policy.cpp` — about
 
 **Socket-creating syscalls are NOT in the allow list.** `__NR_socket`, `__NR_socketpair`, `__NR_connect`, `__NR_bind`, `__NR_listen` fall through to `Error(EPERM)`. The renderer cannot create new network sockets; every TCP / UDP / DTLS / HTTPS / WebSocket / ENet flow goes through the in-process broker in the launcher — see [[Network Isolation]]. The broker opens kernel sockets and passes FDs via SCM_RIGHTS; `sendmsg`/`recvmsg`/`sendto`/`recvfrom` on inherited FDs are allowed and operate directly on the kernel socket.
 
-Anything else — `mount`, `ptrace`, `kexec_load`, `bpf`, `init_module`, `pivot_root`, `setns`, `io_uring_*` — returns `EPERM`. io_uring is deliberately blocked: it's been a recurring sandbox-escape vector and both Chromium and Firefox deny it.
+Anything else — `mount`, `ptrace`, `kexec_load`, `bpf`, `init_module`, `pivot_root`, `setns`, `unshare`, `io_uring_*`, `userfaultfd`, `splice`/`vmsplice`/`tee`, `keyctl`, `process_vm_readv`/`process_vm_writev`, `name_to_handle_at` — returns `EPERM`. `io_uring` and `userfaultfd` are deliberately blocked: both have been recurring sandbox-escape vectors and both Chromium and Firefox deny them.
 
 The filter installs through:
 

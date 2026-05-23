@@ -752,7 +752,7 @@ Error Main::test_setup() {
 	// From `Main::setup2()`.
 	register_early_core_singletons();
 	initialize_modules(MODULE_INITIALIZATION_LEVEL_CORE);
-	register_core_extensions();
+	register_core_extensions(String()); // Empty libs dir: tests don't load gate GDExtensions.
 
 	register_core_singletons();
 
