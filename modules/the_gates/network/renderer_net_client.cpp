@@ -186,3 +186,14 @@ bool RendererNetClient::resolve_hostname(const String &p_hostname, IP::Type /*p_
 	resp.get_resolved_ips(r_addresses);
 	return !r_addresses.is_empty();
 }
+
+// Hook called from core/io/ip.cpp under #ifdef TG_RENDERER. Returns true when
+// the broker filled r_addresses; false on broker error so the engine's default
+// path runs (which then fails closed because the sandbox denies socket()).
+bool tg_renderer_resolve_hostname(const String &p_hostname, IP::Type p_type,
+		List<IPAddress> &r_addresses) {
+	if (!RendererNetClient::is_installed()) {
+		return false;
+	}
+	return RendererNetClient::resolve_hostname(p_hostname, p_type, r_addresses);
+}

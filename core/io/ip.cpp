@@ -40,7 +40,7 @@
 // The renderer's sandbox denies socket() so getaddrinfo would fail; the
 // launcher's NetworkBroker resolves on the renderer's behalf via the AF_UNIX
 // control channel established before lower_token.
-extern "C" bool tg_renderer_resolve_hostname(const String &p_hostname, IP::Type p_type, List<IPAddress> &r_addresses);
+bool tg_renderer_resolve_hostname(const String &p_hostname, IP::Type p_type, List<IPAddress> &r_addresses);
 #endif
 
 /************* RESOLVER ******************/
