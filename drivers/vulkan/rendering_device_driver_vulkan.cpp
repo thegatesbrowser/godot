@@ -1535,6 +1535,7 @@ RDD::TextureID RenderingDeviceDriverVulkan::external_texture_create(const Textur
 
 	VmaAllocationCreateInfo alloc_create_info = {};
 	alloc_create_info.flags = (p_format.usage_bits & TEXTURE_USAGE_CPU_READ_BIT) ? VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT : 0;
+	alloc_create_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
 	alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
 #ifndef MACOS_ENABLED
@@ -1745,6 +1746,7 @@ RDD::TextureID RenderingDeviceDriverVulkan::external_texture_import(const Textur
 
 	VmaAllocationCreateInfo alloc_create_info = {};
 	alloc_create_info.flags = (p_format.usage_bits & TEXTURE_USAGE_CPU_READ_BIT) ? VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT : 0;
+	alloc_create_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
 	alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
 #ifndef MACOS_ENABLED

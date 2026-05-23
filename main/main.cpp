@@ -2734,7 +2734,10 @@ Error Main::setup2(bool p_show_boot_logo) {
 		OS::get_singleton()->benchmark_begin_measure("Servers", "Input");
 
 		input = memnew(Input);
+#ifndef TG_RENDERER
+		// Renderer receives joypad events forwarded by the launcher's InputSync.
 		OS::get_singleton()->initialize_joypads();
+#endif
 
 		OS::get_singleton()->benchmark_end_measure("Servers", "Input");
 	}
