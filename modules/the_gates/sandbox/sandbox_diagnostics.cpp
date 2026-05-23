@@ -52,9 +52,12 @@
 #ifdef LINUXBSD_ENABLED
 #include "linux/lockdown.h"
 
+#include "core/io/net_socket.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/landlock.h>
+#include <linux/netlink.h>
 #include <linux/seccomp.h>
 #include <netinet/in.h>
 #include <sys/prctl.h>
@@ -345,9 +348,7 @@ Dictionary run_canaries(const String &p_pack_path) {
 			}
 			int so_error = 0;
 			int so_error_len = sizeof(so_error);
-			if (FD_ISSET(sock, &efds) || (FD_ISSET(sock, &wfds) &&
-					getsockopt(sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&so_error), &so_error_len) == 0 &&
-					so_error != 0)) {
+			if (FD_ISSET(sock, &efds) || (FD_ISSET(sock, &wfds) && getsockopt(sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&so_error), &so_error_len) == 0 && so_error != 0)) {
 				closesocket(sock);
 				r["status"] = "blocked";
 				r["error"] = so_error != 0 ? so_error : (int)WSAGetLastError();
@@ -561,6 +562,91 @@ Dictionary run_canaries_linux(const String &p_pack_path) {
 		out["canary_private_ip_blocked"] = try_connect(htonl(0xC0A80101u), htons(80));
 		out["canary_localhost_blocked"] = try_connect(htonl(0x7F000001u), htons(22));
 		out["canary_public_ip_allowed"] = try_connect(htonl(0x01010101u), htons(443));
+	}
+
+	// socketpair canary: seccomp denies __NR_socketpair (different syscall
+	// from __NR_socket on x86_64). Existing FDs inherited from the launcher
+	// survive; new ones cannot be created.
+	{
+		int sv[2] = { -1, -1 };
+		const int rc = ::socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+		if (rc == 0) {
+			out["canary_socketpair_denied"] = make_canary("allowed");
+			::close(sv[0]);
+			::close(sv[1]);
+		} else {
+			out["canary_socketpair_denied"] = make_canary("blocked", (int)errno);
+		}
+	}
+
+	// AF_NETLINK canary: covered transitively by socket() denial, but worth
+	// asserting explicitly because netlink would leak interface + route info
+	// even without ever sending a packet.
+	{
+		const int fd = ::socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+		if (fd >= 0) {
+			out["canary_netlink_denied"] = make_canary("allowed");
+			::close(fd);
+		} else {
+			out["canary_netlink_denied"] = make_canary("blocked", (int)errno);
+		}
+	}
+
+	// userfaultfd canary: recurring sandbox-escape vector, denied by both
+	// Chromium and Firefox. We remove __NR_userfaultfd from the allowlist
+	// so the syscall returns EPERM.
+	{
+		const long fd = ::syscall(__NR_userfaultfd, O_CLOEXEC);
+		if (fd >= 0) {
+			out["canary_userfaultfd_denied"] = make_canary("allowed");
+			::close((int)fd);
+		} else {
+			out["canary_userfaultfd_denied"] = make_canary("blocked", (int)errno);
+		}
+	}
+
+	// /proc/self/net canary: the symlinked /proc/net subtree exposes the
+	// host's TCP/UDP socket tables. Landlock now skips /proc/self as a tree,
+	// allowing only the specific /proc/self/<file> paths the renderer needs.
+	{
+		const int fd = ::open("/proc/self/net/tcp", O_RDONLY | O_CLOEXEC);
+		if (fd >= 0) {
+			out["canary_proc_net_blocked"] = make_canary("allowed");
+			::close(fd);
+		} else {
+			out["canary_proc_net_blocked"] = make_canary("blocked", (int)errno);
+		}
+	}
+
+	// Brokered-connect canary: NetSocket::create() is BrokeredNetSocket here
+	// (engage_network_broker installed it pre-lockdown). The canary exercises
+	// the broker round-trip end-to-end. Default mode: broker connects to a
+	// public IP and returns a connected FD -> "allowed". negative-broker mode
+	// (TG_NETWORK_BROKER_FORCE_FAIL=1): broker denies the request, returns
+	// ST_DENIED_FORCE_FAIL -> ERR_UNAUTHORIZED -> "blocked".
+	{
+		NetSocket *raw = NetSocket::create();
+		if (raw == nullptr) {
+			out["canary_brokered_connect"] = make_canary("skipped_no_factory");
+		} else {
+			Ref<NetSocket> sock(raw);
+			IP::Type ip_type = IP::TYPE_IPV6;
+			const Error open_err = sock->open(NetSocket::TYPE_TCP, ip_type);
+			if (open_err != OK) {
+				out["canary_brokered_connect"] = make_canary("skipped_open_failed", (int)open_err);
+			} else {
+				IPAddress dest("1.1.1.1");
+				const Error e = sock->connect_to_host(dest, 443);
+				if (e == OK || e == ERR_BUSY) {
+					out["canary_brokered_connect"] = make_canary("allowed");
+				} else if (e == ERR_UNAUTHORIZED) {
+					out["canary_brokered_connect"] = make_canary("blocked", (int)e);
+				} else {
+					out["canary_brokered_connect"] = make_canary("blocked", (int)e);
+				}
+				sock->close();
+			}
+		}
 	}
 
 	// .pck read canary: load() re-opens the pack on every resource fetch.

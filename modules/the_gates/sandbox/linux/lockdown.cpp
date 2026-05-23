@@ -167,8 +167,142 @@ Error add_path_rule(int ruleset_fd, const String &p_path, uint64_t access) {
 	return OK;
 }
 
+// Read-side system roots the SandboxPolicy doesn't enumerate: shared libs,
+// fonts, /etc system config (loader cache, nsswitch, hosts, Vulkan + GLVND
+// ICD JSON, ALSA), /proc + /sys for hardware enumeration. /tmp/.X11-unix
+// is ro so the inherited X11 FD's auth cookie can be re-read on draw.
+constexpr const char *kSystemReadPaths[] = {
+	"/usr",
+	"/lib",
+	"/lib64",
+	"/etc",
+	"/proc/cpuinfo",
+	"/proc/meminfo",
+	"/proc/sys/kernel",
+	"/proc/asound",
+	"/sys/dev/char",
+	"/tmp/.X11-unix",
+};
+
+// /sys/class and /sys/devices enumerated, not granted as trees, so the
+// hardware-fingerprint paths (/sys/class/dmi -> .../devices/virtual/dmi/id
+// for board serial + product UUID, /sys/class/net -> .../net/<iface> for
+// the persistent NIC MAC) stay unreachable.
+constexpr const char *kSysReadPaths[] = {
+	"/sys/class/drm",
+	"/sys/class/input",
+	"/sys/class/sound",
+	"/sys/class/dma_heap",
+	"/sys/class/iommu",
+	"/sys/class/devfreq",
+	"/sys/class/hidraw",
+	"/sys/devices/pci0000:00",
+	"/sys/devices/system/cpu",
+	"/sys/devices/system/node",
+	"/sys/devices/virtual/drm",
+	"/sys/devices/virtual/input",
+	"/sys/devices/virtual/dma_heap",
+	"/sys/devices/virtual/sound",
+	"/sys/devices/platform",
+};
+
+// /proc/self enumerated file-by-file, not granted as a tree, so /proc/self/net
+// (i.e. the host's TCP/UDP socket tables via the /proc/net -> self/net
+// symlink) stays unreachable.
+constexpr const char *kProcSelfReadPaths[] = {
+	"/proc/self/maps",
+	"/proc/self/auxv",
+	"/proc/self/status",
+	"/proc/self/cmdline",
+	"/proc/self/comm",
+	"/proc/self/exe",
+	"/proc/self/cwd",
+	"/proc/self/stat",
+	"/proc/self/statm",
+	"/proc/self/limits",
+	"/proc/self/cgroup",
+	"/proc/self/setgroups",
+	"/proc/self/mountinfo",
+	"/proc/self/fd",
+	"/proc/self/fdinfo",
+	"/proc/self/task",
+};
+
+constexpr const char *kDevRwPaths[] = {
+	"/dev/dri",
+	"/dev/snd",
+	"/dev/shm",
+	"/tmp",
+	"/dev/null",
+};
+
+constexpr const char *kDevReadPaths[] = {
+	"/dev/zero",
+	"/dev/urandom",
+	"/dev/random",
+};
+
+Error add_static_paths(int p_ruleset_fd, const char *const *p_paths, size_t p_count, uint64_t p_rights) {
+	for (size_t i = 0; i < p_count; ++i) {
+		const Error err = add_path_rule(p_ruleset_fd, String::utf8(p_paths[i]), p_rights);
+		if (err != OK) {
+			return err;
+		}
+	}
+	return OK;
+}
+
+// $XDG_RUNTIME_DIR carries Wayland, X11, PulseAudio, PipeWire — and a pile
+// of secrets the renderer must not touch (SSH agent, session D-Bus, GNOME
+// Keyring, systemd journal). Enumerate the specific graphics + audio
+// sockets instead of granting the whole tree.
+//
+// Audio gated on policy. Linux can't separate mic from output at the socket
+// layer, so passing false for either allow_audio or allow_microphone
+// denies all audio.
+void add_runtime_dir_paths(int p_ruleset_fd, uint64_t p_rw_rights, bool p_allow_audio, bool p_allow_microphone) {
+	const char *xdg = ::getenv("XDG_RUNTIME_DIR");
+	const String runtime_dir = (xdg != nullptr && xdg[0] != '\0')
+			? String::utf8(xdg)
+			: vformat("/run/user/%d", (int)::getuid());
+
+	for (int i = 0; i < 4; ++i) {
+		add_path_rule(p_ruleset_fd, vformat("%s/wayland-%d", runtime_dir, i), p_rw_rights);
+		add_path_rule(p_ruleset_fd, vformat("%s/wayland-%d.lock", runtime_dir, i), p_rw_rights);
+	}
+	if (p_allow_audio && p_allow_microphone) {
+		add_path_rule(p_ruleset_fd, runtime_dir + "/pulse", p_rw_rights);
+		add_path_rule(p_ruleset_fd, runtime_dir + "/pipewire-0", p_rw_rights);
+		add_path_rule(p_ruleset_fd, runtime_dir + "/pipewire-0.lock", p_rw_rights);
+	}
+}
+
+Error add_policy_paths(int p_ruleset_fd, const String &p_rw_dir,
+		const Vector<String> &p_rw_files, const Vector<String> &p_ro_files,
+		uint64_t p_rw_rights, uint64_t p_ro_rights) {
+	if (!p_rw_dir.is_empty()) {
+		const Error err = add_path_rule(p_ruleset_fd, p_rw_dir, p_rw_rights);
+		if (err != OK) {
+			return err;
+		}
+	}
+	for (int i = 0; i < p_rw_files.size(); ++i) {
+		const Error err = add_path_rule(p_ruleset_fd, p_rw_files[i], p_rw_rights);
+		if (err != OK) {
+			return err;
+		}
+	}
+	for (int i = 0; i < p_ro_files.size(); ++i) {
+		const Error err = add_path_rule(p_ruleset_fd, p_ro_files[i], p_ro_rights);
+		if (err != OK) {
+			return err;
+		}
+	}
+	return OK;
+}
+
 Error apply_landlock(const String &p_rw_dir, const Vector<String> &p_rw_files,
-		const Vector<String> &p_ro_files) {
+		const Vector<String> &p_ro_files, bool p_allow_audio, bool p_allow_microphone) {
 	// Pre-5.13 kernels return -ENOSYS; skip landlock, seccomp + cap drop still apply.
 	const int abi = landlock_create_ruleset(nullptr, 0, LANDLOCK_CREATE_RULESET_VERSION);
 	if (abi < 0) {
@@ -188,69 +322,33 @@ Error apply_landlock(const String &p_rw_dir, const Vector<String> &p_rw_files,
 	const uint64_t rw_rights = fs_rights;
 	const uint64_t ro_rights = fs_rights & kAllReadRights;
 
-	if (!p_rw_dir.is_empty()) {
-		const Error err = add_path_rule(ruleset_fd, p_rw_dir, rw_rights);
-		if (err != OK) {
-			::close(ruleset_fd);
-			return err;
-		}
+	Error err = add_policy_paths(ruleset_fd, p_rw_dir, p_rw_files, p_ro_files, rw_rights, ro_rights);
+	if (err == OK) {
+		err = add_static_paths(ruleset_fd, kSystemReadPaths,
+				sizeof(kSystemReadPaths) / sizeof(*kSystemReadPaths), ro_rights);
 	}
-	for (int i = 0; i < p_rw_files.size(); ++i) {
-		const Error err = add_path_rule(ruleset_fd, p_rw_files[i], rw_rights);
-		if (err != OK) {
-			::close(ruleset_fd);
-			return err;
-		}
+	if (err == OK) {
+		err = add_static_paths(ruleset_fd, kSysReadPaths,
+				sizeof(kSysReadPaths) / sizeof(*kSysReadPaths), ro_rights);
 	}
-	for (int i = 0; i < p_ro_files.size(); ++i) {
-		const Error err = add_path_rule(ruleset_fd, p_ro_files[i], ro_rights);
-		if (err != OK) {
-			::close(ruleset_fd);
-			return err;
-		}
+	if (err == OK) {
+		err = add_static_paths(ruleset_fd, kProcSelfReadPaths,
+				sizeof(kProcSelfReadPaths) / sizeof(*kProcSelfReadPaths), ro_rights);
 	}
-
-	// Read-side system roots the SandboxPolicy doesn't enumerate: shared libs,
-	// fonts, /etc system config (loader cache, nsswitch, hosts, Vulkan + GLVND
-	// ICD JSON, ALSA/Pulse), /proc + /sys for hardware enumeration.
-	static const char *kSystemReadRoots[] = {
-		"/usr",
-		"/lib",
-		"/lib64",
-		"/etc",
-		"/proc/self",
-		"/proc/cpuinfo",
-		"/proc/meminfo",
-		"/proc/sys/kernel",
-		"/proc/asound",
-		"/sys/devices",
-		"/sys/class",
-		"/sys/dev/char",
-	};
-	for (const char *p : kSystemReadRoots) {
-		add_path_rule(ruleset_fd, String::utf8(p), ro_rights);
+	if (err == OK) {
+		err = add_static_paths(ruleset_fd, kDevRwPaths,
+				sizeof(kDevRwPaths) / sizeof(*kDevRwPaths), rw_rights);
+	}
+	if (err == OK) {
+		err = add_static_paths(ruleset_fd, kDevReadPaths,
+				sizeof(kDevReadPaths) / sizeof(*kDevReadPaths), ro_rights);
+	}
+	if (err != OK) {
+		::close(ruleset_fd);
+		return err;
 	}
 
-	add_path_rule(ruleset_fd, "/dev/dri", rw_rights);
-	add_path_rule(ruleset_fd, "/dev/snd", rw_rights);
-	add_path_rule(ruleset_fd, "/dev/shm", rw_rights);
-	add_path_rule(ruleset_fd, "/tmp", rw_rights);
-	add_path_rule(ruleset_fd, "/dev/null", rw_rights);
-	add_path_rule(ruleset_fd, "/dev/zero", ro_rights);
-	add_path_rule(ruleset_fd, "/dev/urandom", ro_rights);
-	add_path_rule(ruleset_fd, "/dev/random", ro_rights);
-
-	// PulseAudio's socket lives at $XDG_RUNTIME_DIR/pulse/, typically
-	// /run/user/$UID/pulse/. Allow the runtime-dir tree so the renderer
-	// can open the socket and read the auth cookie.
-	{
-		const char *xdg = ::getenv("XDG_RUNTIME_DIR");
-		if (xdg != nullptr && xdg[0] != '\0') {
-			add_path_rule(ruleset_fd, String::utf8(xdg), rw_rights);
-		} else {
-			add_path_rule(ruleset_fd, vformat("/run/user/%d", (int)::getuid()), rw_rights);
-		}
-	}
+	add_runtime_dir_paths(ruleset_fd, rw_rights, p_allow_audio, p_allow_microphone);
 
 	if (landlock_restrict_self(ruleset_fd, 0) != 0) {
 		const int saved_errno = errno;
@@ -337,14 +435,16 @@ int tg_lockdown_landlock_abi() {
 
 Error tg_apply_lockdown(const String &p_rw_dir,
 		const Vector<String> &p_rw_files,
-		const Vector<String> &p_ro_files) {
+		const Vector<String> &p_ro_files,
+		bool p_allow_audio,
+		bool p_allow_microphone) {
 	if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
 		ERR_FAIL_V_MSG(FAILED, vformat("SandboxLinux: PR_SET_NO_NEW_PRIVS failed errno=%d", (int)errno));
 	}
 
 	apply_speculation_ctrl();
 
-	const Error landlock_err = apply_landlock(p_rw_dir, p_rw_files, p_ro_files);
+	const Error landlock_err = apply_landlock(p_rw_dir, p_rw_files, p_ro_files, p_allow_audio, p_allow_microphone);
 	if (landlock_err != OK) {
 		return landlock_err;
 	}

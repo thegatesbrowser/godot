@@ -5,6 +5,8 @@ One source of truth for the flag combinations used by VSCode tasks,
 the autonomous test loop, agent instructions, and the README.
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import shutil
@@ -30,6 +32,7 @@ PROFILES: dict[str, list[str]] = {
     "launcher": [
         "dev_build=yes",
         "tg_renderer=no",
+        "tests=yes",
         "compiledb=yes",
         "use_llvm=yes",
         "linker=lld",
