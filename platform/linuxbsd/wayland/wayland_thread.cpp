@@ -3214,6 +3214,12 @@ void WaylandThread::window_create(DisplayServer::WindowID p_window_id, int p_wid
 		}
 	}
 
+#ifdef TG_RENDERER
+	print_verbose("window_create: skip xdg-shell. Renderer mode");
+	window_state_update_size(&ws, ws.rect.size.width, ws.rect.size.height);
+	return;
+#endif
+
 	bool decorated = false;
 
 #ifdef LIBDECOR_ENABLED

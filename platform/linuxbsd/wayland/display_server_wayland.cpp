@@ -906,6 +906,11 @@ bool DisplayServerWayland::can_any_window_draw() const {
 void DisplayServerWayland::window_set_ime_active(const bool p_active, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
+#ifdef TG_RENDERER
+	print_verbose("window_set_ime_active: return. Renderer mode");
+	return;
+#endif
+
 	wayland_thread.window_set_ime_active(p_active, MAIN_WINDOW_ID);
 }
 
