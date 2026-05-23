@@ -399,11 +399,12 @@ void DisplayServerWayland::_mouse_update_mode() {
 
 	NO_RENDERER(wayland_thread.pointer_set_constraint(constraint);)
 
-	if (wanted_mouse_mode == DisplayServer::MOUSE_MODE_CAPTURED) {
-		WindowData *pointed_win = windows.getptr(wayland_thread.pointer_get_pointed_window_id());
-		ERR_FAIL_NULL(pointed_win);
-		wayland_thread.pointer_set_hint(pointed_win->rect.size / 2);
-	}
+	NO_RENDERER(
+			if (wanted_mouse_mode == DisplayServer::MOUSE_MODE_CAPTURED) {
+				WindowData *pointed_win = windows.getptr(wayland_thread.pointer_get_pointed_window_id());
+				ERR_FAIL_NULL(pointed_win);
+				wayland_thread.pointer_set_hint(pointed_win->rect.size / 2);
+			})
 
 	mouse_mode = wanted_mouse_mode;
 }
@@ -741,11 +742,6 @@ DisplayServer::WindowID DisplayServerWayland::create_sub_window(WindowMode p_mod
 
 void DisplayServerWayland::show_window(WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
-
-#ifdef TG_RENDERER
-	print_verbose("show_window: return. Renderer mode");
-	return;
-#endif
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
 
