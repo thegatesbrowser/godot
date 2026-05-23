@@ -1117,6 +1117,10 @@ Key DisplayServerWayland::keyboard_get_keycode_from_physical(Key p_keycode) cons
 }
 
 void DisplayServerWayland::try_suspend() {
+#ifdef TG_RENDERER
+	return;
+#endif
+
 	// Due to various reasons, we manually handle display synchronization by
 	// waiting for a frame event (request to draw) or, if available, the actual
 	// window's suspend status. When a window is suspended, we can avoid drawing
