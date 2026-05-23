@@ -1520,7 +1520,7 @@ bool DisplayServerWindows::_is_always_on_top_recursive(WindowID p_window) const 
 }
 
 void DisplayServerWindows::show_window(WindowID p_id) {
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("show_window: return. Sandbox mode");
 	return;
 #endif
@@ -2140,7 +2140,7 @@ void DisplayServerWindows::_update_window_style(WindowID p_window, bool p_repain
 void DisplayServerWindows::window_set_mode(WindowMode p_mode, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("window_set_mode: return. Sandbox mode");
 	return;
 #endif
@@ -2267,7 +2267,7 @@ bool DisplayServerWindows::window_is_maximize_allowed(WindowID p_window) const {
 void DisplayServerWindows::window_set_flag(WindowFlags p_flag, bool p_enabled, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("window_set_flag: return. Sandbox mode");
 	return;
 #endif
@@ -5602,7 +5602,7 @@ DisplayServer::WindowID DisplayServerWindows::_create_window(WindowMode p_mode, 
 
 		WindowData &wd = windows[id];
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 		dwStyle = dwStyle & ~WS_VISIBLE; // Exclude visible flag
 		print_verbose("CreateWindowExW(..., NOT WS_VISIBLE, ...) Sandbox mode");
 #endif

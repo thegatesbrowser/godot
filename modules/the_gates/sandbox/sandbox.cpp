@@ -152,6 +152,8 @@ void Sandbox::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("verify_finished", PropertyInfo(Variant::INT, "err")));
 }
 
+Sandbox::Sandbox() = default;
+
 Sandbox::~Sandbox() {
 	if (verify_thread.is_started()) {
 		verify_thread.wait_to_finish();

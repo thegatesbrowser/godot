@@ -956,7 +956,10 @@ void OS_LinuxBSD::run() {
 
 	while (true) {
 		DisplayServer::get_singleton()->process_events(); // get rid of pending events
-#ifdef JOYDEV_ENABLED
+#if defined(JOYDEV_ENABLED) && !defined(TG_RENDERER)
+		// Renderer skips initialize_joypads (input is forwarded by launcher via
+		// InputSync), so joypad is nullptr here — calling process_joypads() would
+		// segfault inside its mutex lock.
 		joypad->process_joypads();
 #endif
 		if (Main::iteration()) {

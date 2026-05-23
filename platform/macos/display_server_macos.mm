@@ -1753,7 +1753,7 @@ DisplayServer::WindowID DisplayServerMacOS::create_sub_window(WindowMode p_mode,
 }
 
 void DisplayServerMacOS::show_window(WindowID p_id) {
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("show_window: return. Sandbox mode");
 	return;
 #endif
@@ -2206,7 +2206,7 @@ Size2i DisplayServerMacOS::window_get_size_with_decorations(WindowID p_window) c
 void DisplayServerMacOS::window_set_mode(WindowMode p_mode, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("window_set_mode: return. Sandbox mode");
 	return;
 #endif
@@ -2413,7 +2413,7 @@ void DisplayServerMacOS::window_set_custom_window_buttons(WindowData &p_wd, bool
 void DisplayServerMacOS::window_set_flag(WindowFlags p_flag, bool p_enabled, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-#ifdef THE_GATES_SANDBOX
+#ifdef TG_RENDERER
 	print_verbose("window_set_mode: return. Sandbox mode");
 	return;
 #endif

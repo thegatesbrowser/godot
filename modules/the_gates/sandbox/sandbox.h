@@ -96,6 +96,6 @@ public:
 	// and the --network-diagnostic GDScript path.
 	Dictionary network_state() const;
 
-	Sandbox() = default;
+	Sandbox();
 	virtual ~Sandbox();
 };

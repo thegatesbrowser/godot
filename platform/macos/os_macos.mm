@@ -829,7 +829,7 @@ OS_MacOS::OS_MacOS() {
 	// Implicitly create shared NSApplication instance.
 	[GodotApplication sharedApplication];
 
-#ifndef THE_GATES_SANDBOX
+#ifndef TG_RENDERER
 	// In case we are unbundled, make us a proper UI application.
 	[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 #endif

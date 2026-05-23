@@ -94,7 +94,7 @@
 }
 
 - (void)forceUnbundledWindowActivationHackStep1 {
-	#ifdef THE_GATES_SANDBOX
+	#ifdef TG_RENDERER
 		print_verbose("forceUnbundledWindowActivationHackStep1: return. Sandbox mode");
 		return;
 	#endif

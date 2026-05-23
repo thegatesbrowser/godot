@@ -1968,6 +1968,13 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	}
 
 	Logger::set_flush_stdout_on_print(GLOBAL_GET("application/run/flush_stdout_on_print"));
+#ifdef TG_RENDERER
+	// Renderer stdout/stderr is dup2'd to a log file by the launcher (broker).
+	// File descriptors that aren't a TTY make glibc's stdout fully buffered, so
+	// release builds silently swallow every print_line until SIGKILL — including
+	// the [RENDERER-START] / [LOCKDOWN-ATTEMPT] markers the harness keys on.
+	Logger::set_flush_stdout_on_print(true);
+#endif
 
 	OS::get_singleton()->set_cmdline(execpath, main_args, user_args);
 
