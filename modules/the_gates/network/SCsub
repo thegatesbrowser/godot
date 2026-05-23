@@ -9,6 +9,7 @@ Import("env_tg")
 # common files, then conditionally add the platform-matched FD-passing impl.
 network_obj = []
 common_sources = [
+    "broker_protocol.cpp",
     "cidr_policy.cpp",
     "network_broker.cpp",
     "renderer_net_client.cpp",

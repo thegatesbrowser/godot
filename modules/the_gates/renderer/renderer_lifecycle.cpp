@@ -97,6 +97,26 @@ bool import_external_texture(DisplayServer *p_display_server) {
 	return ext_texture->import(format, view) == OK;
 }
 
+// Returns the integer value of --tg-broker-fd=<n>, or -1 if the flag is
+// missing or malformed. Reports the failure mode in r_error for the caller.
+intptr_t parse_broker_fd_from_argv(String &r_error) {
+	const List<String> args = OS::get_singleton()->get_cmdline_args();
+	const String prefix = "--tg-broker-fd=";
+	for (const String &arg : args) {
+		if (!arg.begins_with(prefix)) {
+			continue;
+		}
+		const String value = arg.substr(prefix.length());
+		if (!value.is_valid_int()) {
+			r_error = "--tg-broker-fd has non-integer value";
+			return -1;
+		}
+		return (intptr_t)value.to_int();
+	}
+	r_error = "--tg-broker-fd missing from argv";
+	return -1;
+}
+
 // Adopts the broker control FD/HANDLE inherited from the launcher:
 //   POSIX: socketpair half dup'd via posix_spawn_file_actions
 //   Windows: named-pipe HANDLE inherited via Chromium TargetPolicy::AddHandleToShare
@@ -104,22 +124,11 @@ bool import_external_texture(DisplayServer *p_display_server) {
 // as the engine NetSocket factory and the DNS hook — both pull from
 // RendererNetClient. Must run pre-lockdown; afterwards no new FDs can be created.
 void engage_network_broker() {
-	const List<String> args = OS::get_singleton()->get_cmdline_args();
-	const String prefix = "--tg-broker-fd=";
-	String value;
-	for (const String &arg : args) {
-		if (arg.begins_with(prefix)) {
-			value = arg.substr(prefix.length());
-			break;
-		}
+	String error;
+	const intptr_t broker_handle = parse_broker_fd_from_argv(error);
+	if (broker_handle < 0) {
+		CRASH_NOW_MSG(vformat("Renderer cannot establish network broker: %s (launcher contract violated).", error));
 	}
-	if (value.is_empty()) {
-		CRASH_NOW_MSG("--tg-broker-fd missing; renderer cannot establish network broker (launcher contract violated).");
-	}
-	if (!value.is_valid_int()) {
-		CRASH_NOW_MSG("--tg-broker-fd invalid; renderer cannot establish network broker.");
-	}
-	const intptr_t broker_handle = (intptr_t)value.to_int();
 	if (RendererNetClient::install(broker_handle) != OK) {
 		CRASH_NOW_MSG("RendererNetClient::install failed; refusing to lower token without network broker.");
 	}
@@ -156,7 +165,6 @@ void tg_renderer_phase(const char *p_label) {
 	print_line(vformat("[PHASE] %s  t=%dms  delta=%dms", String::utf8(p_label), (int64_t)since_start, (int64_t)since_prev));
 	t_prev = now;
 }
-
 
 bool tg_renderer_engage(DisplayServer *p_display_server, const String &p_pack_path) {
 	print_line("[RENDERER-START]");

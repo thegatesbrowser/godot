@@ -1,6 +1,32 @@
 /**************************************************************************/
 /*  renderer_net_client.cpp                                               */
 /**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "renderer_net_client.h"
 
@@ -10,8 +36,8 @@
 #include "core/os/mutex.h"
 
 #ifdef WINDOWS_ENABLED
-#include <winsock2.h>
 #include <windows.h>
+#include <winsock2.h>
 #define TG_CLOSE_NATIVE(fd) ::closesocket((SOCKET)(fd))
 #else
 #include <unistd.h>
@@ -27,18 +53,49 @@ namespace {
 intptr_t s_control_handle = -1;
 Mutex s_mutex;
 
-Error send_request(const BrokerProtocol::Request &p_req,
-		int *r_received_fd, uint8_t *r_resp, int p_resp_capacity, int *r_resp_len) {
+void close_native_fd(int p_fd) {
+	if (p_fd < 0) {
+		return;
+	}
+	TG_CLOSE_NATIVE(p_fd);
+}
+
+// Locked send/receive round-trip. The returned Response covers status, errno,
+// and any payload (resolved IPs or none). The kernel FD, if any, lands in
+// r_received_fd.
+Error round_trip(const BrokerProtocol::Request &p_req,
+		BrokerProtocol::Response &r_resp, int *r_received_fd) {
+	*r_received_fd = -1;
+
 	uint8_t req_buf[BrokerProtocol::Request::MAX_SIZE];
 	const int req_len = p_req.serialize(req_buf);
 
 	MutexLock lock(s_mutex);
 
-	const Error r = TGFDPassing::send_msg(s_control_handle, -1, nullptr, req_buf, req_len);
-	if (r != OK) {
-		return r;
+	const Error sent = TGFDPassing::send_msg(s_control_handle, -1, nullptr, req_buf, req_len);
+	if (sent != OK) {
+		return sent;
 	}
-	return TGFDPassing::recv_msg(s_control_handle, r_received_fd, r_resp, p_resp_capacity, r_resp_len);
+
+	uint8_t resp_buf[BrokerProtocol::Response::MAX_SIZE];
+	int resp_len = 0;
+	const Error received = TGFDPassing::recv_msg(s_control_handle, r_received_fd,
+			resp_buf, (int)sizeof(resp_buf), &resp_len);
+	if (received != OK) {
+		return received;
+	}
+	if (!r_resp.parse(resp_buf, resp_len)) {
+		return ERR_INVALID_DATA;
+	}
+	return OK;
+}
+
+Error status_to_error(uint8_t p_status) {
+	if (p_status == BrokerProtocol::ST_DENIED_POLICY ||
+			p_status == BrokerProtocol::ST_DENIED_FORCE_FAIL) {
+		return ERR_UNAUTHORIZED;
+	}
+	return FAILED;
 }
 
 } // namespace
@@ -91,26 +148,16 @@ Error RendererNetClient::open_socket(BrokerProtocol::Opcode p_opcode, const IPAd
 	req.port = p_port;
 	req.hostname = p_hostname;
 
-	uint8_t resp[16] = {};
-	int resp_len = 0;
+	BrokerProtocol::Response resp;
 	int recv_fd = -1;
-	const Error r = send_request(req, &recv_fd, resp, (int)sizeof(resp), &resp_len);
-	if (r != OK) {
-		if (recv_fd >= 0) {
-			TG_CLOSE_NATIVE(recv_fd);
-		}
-		return r;
+	const Error rc = round_trip(req, resp, &recv_fd);
+	if (rc != OK) {
+		close_native_fd(recv_fd);
+		return rc;
 	}
-	if (resp_len < 1 || resp[0] != BrokerProtocol::ST_OK) {
-		if (recv_fd >= 0) {
-			TG_CLOSE_NATIVE(recv_fd);
-		}
-		if (resp_len >= 1 &&
-				(resp[0] == BrokerProtocol::ST_DENIED_POLICY ||
-						resp[0] == BrokerProtocol::ST_DENIED_FORCE_FAIL)) {
-			return ERR_UNAUTHORIZED;
-		}
-		return FAILED;
+	if (resp.status != BrokerProtocol::ST_OK) {
+		close_native_fd(recv_fd);
+		return status_to_error(resp.status);
 	}
 	if (recv_fd < 0) {
 		return FAILED;
@@ -129,23 +176,13 @@ bool RendererNetClient::resolve_hostname(const String &p_hostname, IP::Type /*p_
 	req.opcode = (uint8_t)BrokerProtocol::OP_RESOLVE_HOSTNAME;
 	req.hostname = p_hostname;
 
-	uint8_t resp[2 + 16 * 8] = {};
-	int resp_len = 0;
+	BrokerProtocol::Response resp;
 	int unused_fd = -1;
-	const Error r = send_request(req, &unused_fd, resp, (int)sizeof(resp), &resp_len);
-	if (unused_fd >= 0) {
-		TG_CLOSE_NATIVE(unused_fd);
-	}
-	if (r != OK || resp_len < 2 || resp[0] != BrokerProtocol::ST_OK) {
+	const Error rc = round_trip(req, resp, &unused_fd);
+	close_native_fd(unused_fd);
+	if (rc != OK || resp.status != BrokerProtocol::ST_OK) {
 		return false;
 	}
-	const int count = resp[1];
-	for (int i = 0; i < count && (2 + (i + 1) * 16) <= resp_len; ++i) {
-		IPAddress ip;
-		ip.set_ipv6(resp + 2 + i * 16);
-		if (ip.is_valid()) {
-			r_addresses.push_back(ip);
-		}
-	}
+	resp.get_resolved_ips(r_addresses);
 	return !r_addresses.is_empty();
 }

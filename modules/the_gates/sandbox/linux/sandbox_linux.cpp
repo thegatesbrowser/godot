@@ -48,6 +48,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
@@ -56,6 +57,144 @@
 extern char **environ;
 
 namespace {
+
+// Inherited control-channel FD slot the renderer reads via --tg-broker-fd.
+// Fixed at 3 so it lands in a deterministic slot across the spawn boundary;
+// the child dup2s the socketpair half there before launching the renderer.
+constexpr int CHILD_BROKER_FD_NUM = 3;
+
+// Env vars passed through to the renderer. Anything not in this allowlist is
+// dropped — keeps SSH_AUTH_SOCK, DBUS_SESSION_BUS_ADDRESS, AWS_*, OPENAI_API_KEY
+// and any other launcher-process secret out of the gate's environ.
+constexpr const char *kEnvAllowExact[] = {
+	"HOME",
+	"USER",
+	"LOGNAME",
+	"LANG",
+	"LC_ALL",
+	"LC_COLLATE",
+	"LC_CTYPE",
+	"LC_MESSAGES",
+	"LC_MONETARY",
+	"LC_NUMERIC",
+	"LC_TIME",
+	"TZ",
+	"TERM",
+	"PATH",
+	"XDG_RUNTIME_DIR",
+	"XDG_DATA_HOME",
+	"XDG_CONFIG_HOME",
+	"XDG_CACHE_HOME",
+	"XDG_SESSION_TYPE",
+	"XDG_CURRENT_DESKTOP",
+	"DISPLAY",
+	"WAYLAND_DISPLAY",
+	"GDK_BACKEND",
+	"QT_QPA_PLATFORM",
+	"SDL_VIDEODRIVER",
+	"PULSE_SERVER",
+	"PIPEWIRE_RUNTIME_DIR",
+};
+
+// Prefix matches for vendor-driver env knobs. Renderer / Vulkan / Mesa /
+// DXVK / AMD / NVIDIA all use prefixed env vars to tune behavior; passing
+// them through keeps driver debug + tuning workflows alive.
+constexpr const char *kEnvAllowPrefixes[] = {
+	"TG_",
+	"VK_",
+	"MESA_",
+	"LIBGL_",
+	"__GL_",
+	"NV_",
+	"RADV_",
+	"AMD_",
+	"DXVK_",
+};
+
+bool env_var_allowed(const char *p_env) {
+	const char *eq = ::strchr(p_env, '=');
+	const size_t name_len = (eq != nullptr) ? (size_t)(eq - p_env) : ::strlen(p_env);
+	for (const char *name : kEnvAllowExact) {
+		if (::strlen(name) == name_len && ::memcmp(p_env, name, name_len) == 0) {
+			return true;
+		}
+	}
+	for (const char *prefix : kEnvAllowPrefixes) {
+		const size_t plen = ::strlen(prefix);
+		if (name_len >= plen && ::memcmp(p_env, prefix, plen) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// Parses the pipe-separated string the launcher uses to ship rw_files /
+// ro_files through environment variables back into a Vector<String>.
+Vector<String> parse_pipe_list(const char *p_env_value) {
+	Vector<String> out;
+	if (p_env_value == nullptr || p_env_value[0] == '\0') {
+		return out;
+	}
+	const PackedStringArray split = String::utf8(p_env_value).split("|", false);
+	for (int i = 0; i < split.size(); ++i) {
+		out.push_back(split[i]);
+	}
+	return out;
+}
+
+// Builds the renderer's argv: [exe, p_arguments..., --tg-broker-fd=<n>].
+// The CharString storage backs r_argv; both must outlive the exec call,
+// which means both live in the caller's stack across fork().
+void build_child_argv(const String &p_executable,
+		const Vector<String> &p_arguments,
+		Vector<CharString> &r_storage,
+		Vector<char *> &r_argv) {
+	r_storage.push_back(p_executable.utf8());
+	for (int i = 0; i < p_arguments.size(); ++i) {
+		r_storage.push_back(p_arguments[i].utf8());
+	}
+	r_storage.push_back(vformat("--tg-broker-fd=%d", CHILD_BROKER_FD_NUM).utf8());
+	for (int i = 0; i < r_storage.size(); ++i) {
+		r_argv.push_back(const_cast<char *>(r_storage[i].get_data()));
+	}
+	r_argv.push_back(nullptr);
+}
+
+// Builds envp for the renderer: launcher's filtered environ + the
+// TG_SANDBOX_* policy vars lower_token() reads back. Same lifetime rule.
+void build_child_envp(const Ref<SandboxPolicy> &p_policy,
+		Vector<CharString> &r_storage,
+		Vector<char *> &r_envp) {
+	if (!p_policy->get_rw_dir().is_empty()) {
+		r_storage.push_back(("TG_SANDBOX_RW_DIR=" + p_policy->get_rw_dir()).utf8());
+	}
+	const PackedStringArray rw_files = p_policy->get_rw_files();
+	if (rw_files.size() > 0) {
+		r_storage.push_back(("TG_SANDBOX_RW_FILES=" + String("|").join(rw_files)).utf8());
+	}
+	const PackedStringArray ro_files = p_policy->get_ro_files();
+	if (ro_files.size() > 0) {
+		r_storage.push_back(("TG_SANDBOX_RO_FILES=" + String("|").join(ro_files)).utf8());
+	}
+	r_storage.push_back(String(p_policy->is_audio_allowed()
+					? "TG_SANDBOX_ALLOW_AUDIO=1"
+					: "TG_SANDBOX_ALLOW_AUDIO=0")
+					.utf8());
+	r_storage.push_back(String(p_policy->is_microphone_allowed()
+					? "TG_SANDBOX_ALLOW_MICROPHONE=1"
+					: "TG_SANDBOX_ALLOW_MICROPHONE=0")
+					.utf8());
+
+	for (char **e = environ; *e != nullptr; ++e) {
+		if (env_var_allowed(*e)) {
+			r_envp.push_back(*e);
+		}
+	}
+	for (int i = 0; i < r_storage.size(); ++i) {
+		r_envp.push_back(const_cast<char *>(r_storage[i].get_data()));
+	}
+	r_envp.push_back(nullptr);
+}
 
 void write_broker_policy_json(const String &p_log_path, const String &p_executable, pid_t p_pid,
 		const Ref<SandboxPolicy> &p_policy) {
@@ -129,51 +268,6 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	ERR_FAIL_COND_V_MSG(is_target(), result,
 			"SandboxLinux::spawn_target called from a sandbox target process");
 
-	const int CHILD_BROKER_FD_NUM = 3;
-	const CharString exe_cs = p_executable.utf8();
-	Vector<CharString> arg_storage;
-	arg_storage.push_back(exe_cs);
-	for (int i = 0; i < p_arguments.size(); ++i) {
-		arg_storage.push_back(p_arguments[i].utf8());
-	}
-	// Renderer reads broker FD from argv (consistent with Windows). The FD
-	// itself is dup'd into fixed slot 3 by child_exec_after_log_dup.
-	arg_storage.push_back(vformat("--tg-broker-fd=%d", CHILD_BROKER_FD_NUM).utf8());
-	Vector<char *> argv;
-	for (int i = 0; i < arg_storage.size(); ++i) {
-		argv.push_back(const_cast<char *>(arg_storage[i].get_data()));
-	}
-	argv.push_back(nullptr);
-
-	// Policy crosses execve as TG_SANDBOX_* env vars; renderer's lower_token
-	// reads them back. Keep names + protocol in sync with notes/Sandboxing/Linux Backend.md.
-	Vector<CharString> env_owned;
-	if (!p_policy->get_rw_dir().is_empty()) {
-		env_owned.push_back(("TG_SANDBOX_RW_DIR=" + p_policy->get_rw_dir()).utf8());
-	}
-	const PackedStringArray rw_files = p_policy->get_rw_files();
-	if (rw_files.size() > 0) {
-		env_owned.push_back(("TG_SANDBOX_RW_FILES=" + String("|").join(rw_files)).utf8());
-	}
-	const PackedStringArray ro_files = p_policy->get_ro_files();
-	if (ro_files.size() > 0) {
-		env_owned.push_back(("TG_SANDBOX_RO_FILES=" + String("|").join(ro_files)).utf8());
-	}
-
-	int env_count = 0;
-	for (char **e = environ; *e != nullptr; ++e) {
-		env_count++;
-	}
-	Vector<char *> envp;
-	envp.resize(env_count + env_owned.size() + 1);
-	for (int i = 0; i < env_count; ++i) {
-		envp.write[i] = environ[i];
-	}
-	for (int i = 0; i < env_owned.size(); ++i) {
-		envp.write[env_count + i] = const_cast<char *>(env_owned[i].get_data());
-	}
-	envp.write[env_count + env_owned.size()] = nullptr;
-
 	ERR_FAIL_COND_V_MSG(target_pid != 0 && is_target_running(), result,
 			vformat("SandboxLinux::spawn_target: previous target pid=%d still running; call kill_target() first",
 					(int)target_pid));
@@ -183,18 +277,25 @@ Dictionary SandboxLinux::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	}
 	target_pid = 0;
 
+	Vector<CharString> arg_storage;
+	Vector<char *> argv;
+	build_child_argv(p_executable, p_arguments, arg_storage, argv);
+
+	Vector<CharString> env_storage;
+	Vector<char *> envp;
+	build_child_envp(p_policy, env_storage, envp);
+
 	const CharString log_cs = p_policy->get_child_stdout_log_path().utf8();
 	const char *log_path = log_cs.length() > 0 ? log_cs.get_data() : nullptr;
 
-	// Network isolation is enforced by the in-process NetworkBroker (see
-	// modules/the_gates/network/) plus the seccomp filter denying socket()
-	// in tg_apply_lockdown. The control channel is a socketpair the child
-	// inherits at FD 3 (dup'd via posix_spawn_file_actions); renderer reads
-	// the FD number from --tg-broker-fd on argv.
+	// Network isolation: pre-spawn socketpair gives the renderer a kernel
+	// FD the broker thread can write to without filesystem rendezvous. The
+	// renderer-side seccomp filter denies socket()/connect()/bind(), so
+	// the inherited FD is the only path to a network socket. See
+	// modules/the_gates/network/ and notes/Sandboxing/Network Isolation.md.
 	int broker_sv[2] = { -1, -1 };
 	if (::socketpair(AF_UNIX, SOCK_STREAM, 0, broker_sv) != 0) {
-		ERR_FAIL_V_MSG(result, vformat(
-				"SandboxLinux::spawn_target: socketpair failed errno=%d", (int)errno));
+		ERR_FAIL_V_MSG(result, vformat("SandboxLinux::spawn_target: socketpair failed errno=%d", (int)errno));
 	}
 	const int launcher_broker_fd = broker_sv[0];
 	const int child_broker_fd = broker_sv[1];
@@ -323,28 +424,19 @@ Error SandboxLinux::lower_token() {
 				"SandboxLinux: lower_token forced to fail by TG_SANDBOX_FORCE_FAIL=1");
 	}
 
-	const char *rw_dir = ::getenv("TG_SANDBOX_RW_DIR");
-	const String rw = (rw_dir != nullptr) ? String::utf8(rw_dir) : String();
+	const char *rw_dir_env = ::getenv("TG_SANDBOX_RW_DIR");
+	const String rw_dir = (rw_dir_env != nullptr) ? String::utf8(rw_dir_env) : String();
+	const Vector<String> rw_files = parse_pipe_list(::getenv("TG_SANDBOX_RW_FILES"));
+	const Vector<String> ro_files = parse_pipe_list(::getenv("TG_SANDBOX_RO_FILES"));
 
-	const char *ro = ::getenv("TG_SANDBOX_RO_FILES");
-	Vector<String> ro_files;
-	if (ro != nullptr) {
-		const PackedStringArray split = String::utf8(ro).split("|", false);
-		for (int i = 0; i < split.size(); ++i) {
-			ro_files.push_back(split[i]);
-		}
-	}
+	// Default deny on missing env vars: a renderer spawned without the
+	// audio flags should not silently re-open the audio sockets.
+	const char *audio_env = ::getenv("TG_SANDBOX_ALLOW_AUDIO");
+	const bool allow_audio = audio_env != nullptr && audio_env[0] == '1';
+	const char *mic_env = ::getenv("TG_SANDBOX_ALLOW_MICROPHONE");
+	const bool allow_microphone = mic_env != nullptr && mic_env[0] == '1';
 
-	const char *rw_extra = ::getenv("TG_SANDBOX_RW_FILES");
-	Vector<String> rw_files;
-	if (rw_extra != nullptr) {
-		const PackedStringArray split = String::utf8(rw_extra).split("|", false);
-		for (int i = 0; i < split.size(); ++i) {
-			rw_files.push_back(split[i]);
-		}
-	}
-
-	const Error err = tg_apply_lockdown(rw, rw_files, ro_files);
+	const Error err = tg_apply_lockdown(rw_dir, rw_files, ro_files, allow_audio, allow_microphone);
 	if (err == OK) {
 		print_line("SandboxLinux: lockdown engaged (landlock + caps + seccomp)");
 	}
@@ -361,4 +453,3 @@ bool SandboxLinux::is_target() const {
 	return false;
 #endif
 }
-
