@@ -14,7 +14,6 @@ common_sources = [
     "network_broker.cpp",
     "renderer_net_client.cpp",
     "brokered_net_socket.cpp",
-    "brokered_ip.cpp",
 ]
 env_tg.add_source_files(network_obj, common_sources)
 
