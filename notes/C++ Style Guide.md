@@ -120,6 +120,16 @@ Each class follows the upstream `GDCLASS(Foo, ParentType)` macro pattern, has a 
 
 Three-way branches like this appear in `external_texture.cpp`, `command_sync.h`, `input_sync.h`. When adding a new IPC primitive, you'll need three implementations. See [[Platform Differences]].
 
+### Fork hooks called from upstream code
+
+Functions defined in `modules/the_gates/` and called from upstream files inside a `#ifdef TG_RENDERER` block (e.g. `tg_renderer_engage`, `tg_renderer_boot`, `tg_renderer_resolve_hostname`) have two non-obvious constraints:
+
+1. **No `extern "C"` with C++ argument types.** GCC LTO mis-matches `extern "C" bool foo(const String &)` between TUs even when the signatures are textually identical, because the C linkage discards the type info LTO uses to merge symbol references. Use plain C++ linkage — the mangled name is the same in both TUs (declaration and definition see the same types), and LTO is happy. Only the upstream Godot files in the fork that already use `extern "C"` for genuine C symbols (libc, OS APIs, vendored assembly like `sha256_block_data_order_hw`) should keep it.
+
+2. **The implementation `.o` must live in a TU that's already pulled into the link.** Per-module static archives (`libmodule_the_gates.a`) are scanned in declared order. If `core/io/ip.cpp` is the only caller and `libcore.a` is scanned after `libmodule_the_gates.a`, the linker won't pull a `.o` from the_gates whose only export is the hook symbol — the archive scan already happened. Fix: put the hook in the same `.cpp` as something else the module already needs. `tg_renderer_resolve_hostname` lives in `renderer_net_client.cpp` (next to `RendererNetClient::install`, which `engage_network_broker` calls) for exactly this reason. A dedicated `.o` for the hook will link in dev builds (no LTO) and fail in release.
+
+Both traps were discovered the hard way in the 2026-05-23 session when the release renderer became unlinkable. The full investigation is in the commit message for `02f670ebfd`.
+
 ### Headers and pNext chains (Vulkan-adjacent code)
 
 When extending Godot's Vulkan driver (e.g. `external_texture_create` / `external_texture_import`), use the same `VkStructureType sType; void *pNext;` chaining pattern upstream uses, with brace-init and explicit field comments:
@@ -186,7 +196,7 @@ CloseHandle(hTargetProcess);
 if (!success) { CloseHandle(hDuplicateHandle); }
 ```
 
-Section dividers exist at multiple scopes and are all the same pattern: labelling a *group* of related lines so a reader can scan the file or function in chunks. At file scope (`sandbox_diagnostics.cpp`'s `// Integrity level` / `// DEP` / `// ASLR` over each probe block), at the function-group level, and within a long function (`external_texture.cpp`'s `// Duplicate handle` over the dup phase, `// Clean up` over the closing handles). They earn their place as long as the block they label is genuinely multi-line and represents a single phase. A 1-line label over 1 line of code is narration, delete it.
+Section dividers exist at multiple scopes and are all the same pattern: labeling a *group* of related lines so a reader can scan the file or function in chunks. At file scope (`sandbox_diagnostics.cpp`'s `// Integrity level` / `// DEP` / `// ASLR` over each probe block), at the function-group level, and within a long function (`external_texture.cpp`'s `// Duplicate handle` over the dup phase, `// Clean up` over the closing handles). They earn their place as long as the block they label is genuinely multi-line and represents a single phase. A 1-line label over 1 line of code is narration, delete it.
 
 Workarounds for known bugs follow upstream's citation form — `(GH-12345)` or `see GH-12345` — so the next reader can find the issue:
 
