@@ -742,6 +742,11 @@ DisplayServer::WindowID DisplayServerWayland::create_sub_window(WindowMode p_mod
 void DisplayServerWayland::show_window(WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
+#ifdef TG_RENDERER
+	print_verbose("show_window: return. Renderer mode");
+	return;
+#endif
+
 	ERR_FAIL_COND(!windows.has(p_window_id));
 
 	WindowData &wd = windows[p_window_id];
@@ -1323,6 +1328,11 @@ bool DisplayServerWayland::can_any_window_draw() const {
 
 void DisplayServerWayland::window_set_ime_active(const bool p_active, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
+
+#ifdef TG_RENDERER
+	print_verbose("window_set_ime_active: return. Renderer mode");
+	return;
+#endif
 
 	wayland_thread.window_set_ime_active(p_active, p_window_id);
 }
