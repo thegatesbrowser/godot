@@ -38,14 +38,14 @@
 
 #include "display/native_menu.h"
 
-// Convenience macros to omit code in sandbox builds.
-// Usage: NO_SANDBOX( some_statement_or_block );
-// In non-sandbox builds, the contents are emitted; in sandbox builds, they are omitted.
+// Convenience macros to omit code in renderer builds.
+// Usage: NO_RENDERER( some_statement_or_block );
+// In non-renderer builds, the contents are emitted; in renderer builds, they are omitted.
 #if defined(TG_RENDERER)
-#define NO_SANDBOX(...)
+#define NO_RENDERER(...)
 #define DONT_CALL_ON_SANDBOX(...)
 #else
-#define NO_SANDBOX(...) __VA_ARGS__
+#define NO_RENDERER(...) __VA_ARGS__
 #define DONT_CALL_ON_SANDBOX(...) __VA_ARGS__
 #endif
 
