@@ -223,7 +223,7 @@ bool WinACL::grant_sid_access(PSID p_sid, const String &p_path,
 		return true;
 	}
 
-	const Char16String utf16 = p_path.replace_char('/', '\\').utf16();
+	const Char16String utf16 = p_path.replace("/", "\\").utf16();
 	const wchar_t *path_w = as_wide(utf16);
 
 	PACL old_dacl = nullptr;
@@ -270,7 +270,7 @@ HashSet<String> &WinACL::stamped_() {
 }
 
 String WinACL::pergate_package_name(const String &p_rw_dir) {
-	const uint32_t h = p_rw_dir.replace_char('\\', '/').hash();
+	const uint32_t h = p_rw_dir.replace("\\", "/").hash();
 	return vformat("TheGates.Renderer.gate-%08x", (int64_t)h);
 }
 

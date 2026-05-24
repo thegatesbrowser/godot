@@ -66,7 +66,7 @@ PROFILES: dict[str, list[str]] = {
 # (see modules/the_gates/sandbox/windows/SCsub). macOS gets clang via Apple's
 # toolchain by default; Linux defaults to gcc unless explicitly overridden.
 PLATFORM_FLAGS: dict[str, list[str]] = {
-    "win32": ["use_llvm=yes", "linker=lld"],
+    "win32": ["use_llvm=yes", "linker=lld", "target_win_version=0x0A00"],
 }
 
 

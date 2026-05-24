@@ -170,7 +170,7 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	// zmq bind() hangs. Launcher has full privilege; renderer (AC) does not.
 	const PackedStringArray bound_files = p_policy->get_renderer_bound_files();
 	for (int i = 0; i < bound_files.size(); ++i) {
-		const Char16String utf16 = bound_files[i].replace_char('/', '\\').utf16();
+		const Char16String utf16 = bound_files[i].replace("/", "\\").utf16();
 		::DeleteFileW((const wchar_t *)utf16.get_data());
 	}
 
@@ -504,7 +504,7 @@ Error SandboxWin::kill_target() {
 	// from the launcher (full-privilege) side. List comes from policy via
 	// spawn_target's snapshot.
 	for (const String &p : bound_files_to_clean) {
-		const Char16String utf16 = p.replace_char('/', '\\').utf16();
+		const Char16String utf16 = p.replace("/", "\\").utf16();
 		::DeleteFileW((const wchar_t *)utf16.get_data());
 	}
 	bound_files_to_clean.clear();

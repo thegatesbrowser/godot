@@ -387,7 +387,12 @@ def configure_msvc(env: "SConsEnvironment", vcvars_msvc_config):
 
     ## Compile/link flags
 
-    env["MAXLINELENGTH"] = 8192  # Windows Vista and beyond, so always applicable.
+    env["MAXLINELENGTH"] = 4096
+
+    # In case the command line to AR is too long, use a response file.
+    env["ARCOM_ORIG"] = env["ARCOM"]
+    env["ARCOM"] = "${TEMPFILE('$ARCOM_ORIG', '$ARCOMSTR')}"
+    env["TEMPFILESUFFIX"] = ".rsp"
 
     if env["silence_msvc"] and not env.GetOption("clean"):
         from tempfile import mkstemp
