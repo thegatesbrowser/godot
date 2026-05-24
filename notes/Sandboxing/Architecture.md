@@ -1,7 +1,7 @@
 ---
 tags: [sandbox, architecture]
 status: current
-supersedes: [[Overview]], [[Implementation Status]]
+supersedes: "[[Overview]], [[Implementation Status]]"
 ---
 
 # Sandbox Architecture

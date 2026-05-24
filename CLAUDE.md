@@ -133,36 +133,42 @@ Key routing rules:
 
 ## GBrain Configuration (configured by /setup-gbrain)
 - Mode: local-stdio
-- Engine: postgres (Supabase project gabvzwvgqrpavfdwmijl, ap-southeast-2)
+- Engine: pglite (~/.gbrain/brain.pglite) — local-only; Supabase ruled out (free-tier requires IPv6 or paid IPv4 add-on; gbrain migrations bypass the pooler)
+- gbrain version: 0.40.8.1
 - Config file: ~/.gbrain/config.json (mode 0600)
 - Setup date: 2026-05-24
-- MCP registered: yes (user scope)
-- Artifacts sync: full (repo: Nordup/gstack-artifacts-nordup)
+- MCP registered: yes (user scope, /home/nordup/.bun/bin/gbrain serve)
+- Artifacts sync: full (repo: Nordup/gstack-artifacts-nordup) — works without Supabase
 - Current repo policy: read-write
-- Transcript ingest: incremental (218 historical pages bulk-ingested)
+- Transcript ingest: incremental (217 historical pages bulk-ingested)
+- Embeddings: disabled (no API key) — search is keyword-only; set VOYAGE_API_KEY or ZEROENTROPY_API_KEY to enable semantic
+- Cross-machine sync: not available with PGLite. Future: self-hosted gbrain on Hetzner via Path 4 (Remote MCP)
 
 ## GBrain Search Guidance (configured by /sync-gbrain)
 <!-- gstack-gbrain-search-guidance:start -->
 
-GBrain is set up and synced on this machine. The agent should prefer gbrain
-over Grep when the question is semantic or when you don't know the exact
-identifier yet. Two indexed corpora available via the `gbrain` CLI:
-- This repo's code (registered as `gstack-code-<repo>` source).
-- `~/.gstack/` curated memory (registered as `gstack-brain-<user>` source via
-  the existing federation pipeline).
+gbrain has two indexed corpora on this machine:
+- `default` source — 89 markdown docs (thegates + godot/notes) + 217 transcripts.
+- `gstack-code-godot-5a477157` source — 6631 godot C++/h/etc code pages.
 
-Prefer gbrain when:
-- "Where is X handled?" / semantic intent, no exact string yet:
-    `gbrain search "<terms>"` or `gbrain query "<question>"`
-- "Where is symbol Y defined?" / symbol-based code questions:
-    `gbrain code-def <symbol>` or `gbrain code-refs <symbol>`
-- "What calls Y?" / "What does Y depend on?":
-    `gbrain code-callers <symbol>` / `gbrain code-callees <symbol>`
-- "What did we decide last time?" / past plans, retros, learnings:
-    `gbrain search "<terms>" --source gstack-brain-<user>`
+**Use `gbrain search "<terms>"`** for keyword search across everything. This
+is the most reliable surface today (works without an embedding API key).
+Returns ranked snippets with file paths.
 
-Grep is still right for known exact strings, regex, multiline patterns, and
-file globs. The brain auto-syncs incrementally on every gstack skill start.
-Run `/sync-gbrain` to force-refresh, `/sync-gbrain --full` for full reindex.
+**Do NOT rely on** `gbrain code-def` / `code-refs` / `code-callers` /
+`code-callees` — symbol extraction is incomplete without an embedding
+provider. Code-def returns 0 for major types like NodePath, SceneTree.
+Use Grep for symbol navigation in godot/ until embeddings are configured.
+
+**Do NOT rely on** `gbrain query` for semantic/meaning-based matching —
+needs embeddings. Falls back to keyword which `search` already does better.
+
+To upgrade: set VOYAGE_API_KEY (or ZEROENTROPY_API_KEY / OPENAI_API_KEY) in
+your shell rc, re-init or run `gbrain embed --stale` to backfill, then
+re-run `gbrain reindex-code --source gstack-code-godot-5a477157 --yes`. After
+that, code-def / code-refs / semantic query become usable.
+
+Grep stays the right tool for: known exact strings, regex, multiline patterns,
+file globs, and ANY code symbol question until embeddings land.
 
 <!-- gstack-gbrain-search-guidance:end -->
