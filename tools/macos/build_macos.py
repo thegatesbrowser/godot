@@ -6,9 +6,15 @@ Apple Silicon) via tools/build.py, lipos the per-arch binaries into
 universal binaries, drops them into the macOS .app template, and zips
 the result for distribution.
 
+With --renderer-only, skips the launcher builds and the .app/zip assembly,
+producing just bin/Renderer-godot_v<MAJOR.MINOR>.universal. Use this on
+non-current branches (e.g. tg-4.3) to produce a renderer that the current
+launcher loads at runtime.
+
 Run from anywhere; the script resolves the godot/ submodule itself.
 """
 
+import argparse
 import os
 import re
 import shutil
@@ -44,8 +50,10 @@ def run(cmd, description):
     print(f"OK: {description}")
 
 
-def run_release_builds():
+def run_release_builds(renderer_only: bool):
     for profile, flags in RELEASE_BUILDS:
+        if renderer_only and profile != "renderer-release":
+            continue
         label = f"{profile} {' '.join(flags)}".strip()
         run([sys.executable, str(BUILD_PY), profile] + flags, f"build {label}")
 
@@ -76,12 +84,26 @@ def create_universal_binary(x86_64_path, arm64_path, universal_path, description
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Build the macOS release templates (universal launcher + renderer .app).",
+    )
+    parser.add_argument(
+        "--renderer-only",
+        action="store_true",
+        help="Build only the renderer; skip the launcher and the .app/zip assembly. "
+             "Outputs bin/Renderer-godot_v<MAJOR.MINOR>.universal. Use on non-current "
+             "branches (e.g. tg-4.3) to produce a renderer the current launcher loads.",
+    )
+    args = parser.parse_args()
+
     print("=== TheGates macOS build ===")
     print(f"godot dir: {GODOT_DIR}")
     print(f"bin dir:   {BIN_DIR}")
+    if args.renderer_only:
+        print("mode:      renderer-only")
 
     print("\n=== Building release tasks ===")
-    run_release_builds()
+    run_release_builds(args.renderer_only)
 
     print("\n=== Creating universal binaries ===")
     binaries = [
@@ -98,8 +120,26 @@ def main():
             "universal": BIN_DIR / "godot.macos.template_release.renderer.universal",
         },
     ]
+    if args.renderer_only:
+        binaries = [b for b in binaries if "renderer" in b["name"]]
     for b in binaries:
         create_universal_binary(b["x86_64"], b["arm64"], b["universal"], b["name"])
+
+    version_str = get_godot_version()
+    renderer_bin_name = f"Renderer-godot_v{version_str}.universal"
+
+    if args.renderer_only:
+        renderer_universal = BIN_DIR / "godot.macos.template_release.renderer.universal"
+        renderer_versioned = BIN_DIR / renderer_bin_name
+        if renderer_universal.exists():
+            shutil.copy2(renderer_universal, renderer_versioned)
+            print(f"\nCopied -> {renderer_versioned}")
+        else:
+            print(f"\nWarning: {renderer_universal} does not exist; skipping versioned copy")
+
+        print("\n=== Done (renderer-only) ===")
+        print(f"Renderer binary: {renderer_versioned}")
+        return
 
     print("\n=== Assembling app template ===")
     working_template = SCRIPT_DIR / "macos_template_working.app"
@@ -115,8 +155,6 @@ def main():
     working_macos.mkdir(parents=True, exist_ok=True)
     working_frameworks.mkdir(parents=True, exist_ok=True)
 
-    version_str = get_godot_version()
-    renderer_bin_name = f"Renderer-godot_v{version_str}.universal"
     payloads = [
         {
             "source": BIN_DIR / "godot.macos.template_release.universal",
