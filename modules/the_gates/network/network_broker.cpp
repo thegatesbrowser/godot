@@ -38,9 +38,9 @@
 #include "core/string/print_string.h"
 
 #ifdef WINDOWS_ENABLED
-#include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 #else
 #include <arpa/inet.h>
 #include <errno.h>

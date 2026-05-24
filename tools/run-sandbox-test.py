@@ -301,7 +301,7 @@ examples:
         choices=["default", "negative-fail-closed", "negative-signature", "negative-broker", "negative-network-filter"],
         help="harness mode (default: default); negative-network-filter is a legacy alias for negative-broker",
     )
-    parser.add_argument("--gate-url", default="https://thegates.io/worlds/tutorial.gate")
+    parser.add_argument("--gate-url", default=None)
     parser.add_argument("--timeout", type=int, default=25, help="seconds the launcher runs before self-quit")
     parser.add_argument("--build", action="store_true", help="rebuild launcher + renderer first")
     parser.add_argument("--no-sandbox", action="store_true", help="combined with --build: pass tg_sandbox=no")
@@ -314,6 +314,14 @@ examples:
     )
     parser.add_argument("--cycle-delay", type=float, default=5.0)
     args = parser.parse_args()
+
+    if args.gate_url is None:
+        # negative-broker needs a gate the renderer actually phones home from;
+        # tutorial.gate is fully cached and never triggers the broker.
+        if args.mode in ("negative-broker", "negative-network-filter"):
+            args.gate_url = "https://thegates.io/worlds/world.gate"
+        else:
+            args.gate_url = "https://thegates.io/worlds/tutorial.gate"
 
     launcher_bin = Path(args.launcher_bin) if args.launcher_bin else default_launcher_bin()
     renderer_bin = Path(args.renderer_bin) if args.renderer_bin else default_renderer_bin()
