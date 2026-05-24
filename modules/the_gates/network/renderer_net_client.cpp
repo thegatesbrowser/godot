@@ -36,8 +36,8 @@
 #include "core/os/mutex.h"
 
 #ifdef WINDOWS_ENABLED
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #define TG_CLOSE_NATIVE(fd) ::closesocket((SOCKET)(fd))
 #else
 #include <unistd.h>
