@@ -34,8 +34,6 @@ PROFILES: dict[str, list[str]] = {
         "tg_renderer=no",
         "tests=yes",
         "compiledb=yes",
-        "use_llvm=yes",
-        "linker=lld",
         "disable_exceptions=no",
     ],
     "renderer": [
@@ -43,8 +41,6 @@ PROFILES: dict[str, list[str]] = {
         "tg_renderer=yes",
         "target=template_debug",
         "compiledb=yes",
-        "use_llvm=yes",
-        "linker=lld",
         "disable_exceptions=no",
     ],
     "launcher-release": [
@@ -63,6 +59,14 @@ PROFILES: dict[str, list[str]] = {
         "tg_renderer=yes",
         "disable_exceptions=no",
     ],
+}
+
+# Toolchain flags applied per-platform on top of the profile. Windows uses
+# clang-cl + lld because the vendored chromium-sandbox tree is wired for it
+# (see modules/the_gates/sandbox/windows/SCsub). macOS gets clang via Apple's
+# toolchain by default; Linux defaults to gcc unless explicitly overridden.
+PLATFORM_FLAGS: dict[str, list[str]] = {
+    "win32": ["use_llvm=yes", "linker=lld"],
 }
 
 
@@ -185,6 +189,7 @@ def main() -> int:
 
     cmd: list[str] = [scons, f"-j{args.jobs}"]
     cmd.extend(PROFILES[args.profile])
+    cmd.extend(PLATFORM_FLAGS.get(sys.platform, []))
     if args.mac_intel:
         cmd.append("arch=x86_64")
     if args.no_sandbox:
