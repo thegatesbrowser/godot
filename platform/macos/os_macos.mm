@@ -782,7 +782,9 @@ void OS_MacOS::run() {
 				if (DisplayServer::get_singleton()) {
 					DisplayServer::get_singleton()->process_events(); // Get rid of pending events.
 				}
-				joypad_macos->start_processing();
+				if (joypad_macos) {
+					joypad_macos->start_processing();
+				}
 
 				if (Main::iteration()) {
 					quit = true;
