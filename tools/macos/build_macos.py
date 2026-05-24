@@ -105,18 +105,36 @@ def main():
     print("\n=== Building release tasks ===")
     run_release_builds(args.renderer_only)
 
+    version_str = get_godot_version()
+    renderer_bin_name = f"Renderer-godot_v{version_str}.universal"
+
+    # Older branches (e.g. tg-4.3) bake the major.minor version into the binary
+    # name via env.module_version_string, producing names like
+    # `godot.macos.template_release.4.3.arm64`. tg-4.5 leaves it empty. Probe
+    # both forms; if both exist (cross-branch leftovers in bin/) take the
+    # newer one, which is the build we just ran.
+    def resolve_arch(base: str, arch: str) -> Path:
+        bare = BIN_DIR / f"{base}.{arch}"
+        versioned = BIN_DIR / f"{base}.{version_str}.{arch}"
+        existing = [p for p in (versioned, bare) if p.exists()]
+        if not existing:
+            return bare
+        if len(existing) == 1:
+            return existing[0]
+        return max(existing, key=lambda p: p.stat().st_mtime)
+
     print("\n=== Creating universal binaries ===")
     binaries = [
         {
             "name": "godot.macos.template_release",
-            "x86_64": BIN_DIR / "godot.macos.template_release.x86_64",
-            "arm64": BIN_DIR / "godot.macos.template_release.arm64",
+            "x86_64": resolve_arch("godot.macos.template_release", "x86_64"),
+            "arm64": resolve_arch("godot.macos.template_release", "arm64"),
             "universal": BIN_DIR / "godot.macos.template_release.universal",
         },
         {
             "name": "godot.macos.template_release.renderer",
-            "x86_64": BIN_DIR / "godot.macos.template_release.renderer.x86_64",
-            "arm64": BIN_DIR / "godot.macos.template_release.renderer.arm64",
+            "x86_64": resolve_arch("godot.macos.template_release.renderer", "x86_64"),
+            "arm64": resolve_arch("godot.macos.template_release.renderer", "arm64"),
             "universal": BIN_DIR / "godot.macos.template_release.renderer.universal",
         },
     ]
@@ -124,9 +142,6 @@ def main():
         binaries = [b for b in binaries if "renderer" in b["name"]]
     for b in binaries:
         create_universal_binary(b["x86_64"], b["arm64"], b["universal"], b["name"])
-
-    version_str = get_godot_version()
-    renderer_bin_name = f"Renderer-godot_v{version_str}.universal"
 
     if args.renderer_only:
         renderer_universal = BIN_DIR / "godot.macos.template_release.renderer.universal"
