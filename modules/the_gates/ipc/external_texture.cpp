@@ -217,7 +217,7 @@ Error TGExternalTexture::_copy(RID p_texture, bool p_from) {
 }
 
 void TGExternalTexture::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("create", "format", "view"), &TGExternalTexture::_create, DEFVAL(Array()));
+	ClassDB::bind_method(D_METHOD("create", "format", "view", "data"), &TGExternalTexture::_create, DEFVAL(Array()));
 	ClassDB::bind_method(D_METHOD("send_filehandle", "path"), &TGExternalTexture::send_filehandle);
 	ClassDB::bind_method(D_METHOD("copy_to", "texture"), &TGExternalTexture::copy_to);
 	ClassDB::bind_method(D_METHOD("copy_from", "texture"), &TGExternalTexture::copy_from);
