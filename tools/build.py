@@ -61,13 +61,20 @@ PROFILES: dict[str, list[str]] = {
     ],
 }
 
-# Toolchain flags applied per-platform on top of the profile. Windows uses
-# clang-cl + lld because the vendored chromium-sandbox tree is wired for it
-# (see modules/the_gates/sandbox/windows/SCsub). macOS gets clang via Apple's
-# toolchain by default; Linux defaults to gcc unless explicitly overridden.
-PLATFORM_FLAGS: dict[str, list[str]] = {
-    "win32": ["use_llvm=yes", "linker=lld"],
-}
+# Compiler choice. The vendored chromium-sandbox needs clang. Windows uses
+# clang-cl + lld for both targets. On Linux, DEBUG builds need clang too (gcc
+# rejects chromium-sandbox's protected_memory section once DCHECK is on, which
+# is debug-only); RELEASE compiles that out and builds with gcc, matching the
+# build container. macOS gets clang from Apple's toolchain by default.
+LLVM_FLAGS = ["use_llvm=yes", "linker=lld"]
+
+
+def toolchain_flags(profile: str) -> list[str]:
+    if sys.platform == "win32":
+        return LLVM_FLAGS
+    if sys.platform == "linux" and not profile.endswith("-release"):
+        return LLVM_FLAGS
+    return []
 
 
 def default_jobs() -> int:
@@ -189,7 +196,7 @@ def main() -> int:
 
     cmd: list[str] = [scons, f"-j{args.jobs}"]
     cmd.extend(PROFILES[args.profile])
-    cmd.extend(PLATFORM_FLAGS.get(sys.platform, []))
+    cmd.extend(toolchain_flags(args.profile))
     if args.mac_intel:
         cmd.append("arch=x86_64")
     if args.no_sandbox:
