@@ -88,6 +88,7 @@ constexpr const char *kEnvAllowExact[] = {
 	"XDG_SESSION_TYPE",
 	"XDG_CURRENT_DESKTOP",
 	"DISPLAY",
+	"XAUTHORITY",
 	"WAYLAND_DISPLAY",
 	"GDK_BACKEND",
 	"QT_QPA_PLATFORM",
@@ -111,9 +112,21 @@ constexpr const char *kEnvAllowPrefixes[] = {
 	"DXVK_",
 };
 
+// Driver shader-cache paths: forced to the gate's writable dir below, never inherited.
+constexpr const char *kShaderCacheEnvVars[] = {
+	"MESA_SHADER_CACHE_DIR",
+	"MESA_GLSL_CACHE_DIR",
+	"__GL_SHADER_DISK_CACHE_PATH",
+};
+
 bool env_var_allowed(const char *p_env) {
 	const char *eq = ::strchr(p_env, '=');
 	const size_t name_len = (eq != nullptr) ? (size_t)(eq - p_env) : ::strlen(p_env);
+	for (const char *name : kShaderCacheEnvVars) {
+		if (::strlen(name) == name_len && ::memcmp(p_env, name, name_len) == 0) {
+			return false;
+		}
+	}
 	for (const char *name : kEnvAllowExact) {
 		if (::strlen(name) == name_len && ::memcmp(p_env, name, name_len) == 0) {
 			return true;
@@ -167,6 +180,11 @@ void build_child_envp(const Ref<SandboxPolicy> &p_policy,
 		Vector<char *> &r_envp) {
 	if (!p_policy->get_rw_dir().is_empty()) {
 		r_storage.push_back(("TG_SANDBOX_RW_DIR=" + p_policy->get_rw_dir()).utf8());
+		// Redirect driver caches into the writable gate dir; the default XDG path is landlock-blocked.
+		const String cache_dir = p_policy->get_rw_dir().path_join("driver_shader_cache");
+		for (const char *name : kShaderCacheEnvVars) {
+			r_storage.push_back((String(name) + "=" + cache_dir).utf8());
+		}
 	}
 	const PackedStringArray rw_files = p_policy->get_rw_files();
 	if (rw_files.size() > 0) {
