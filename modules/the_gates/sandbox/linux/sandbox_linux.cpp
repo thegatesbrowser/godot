@@ -48,6 +48,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -249,6 +250,12 @@ void child_exec_after_log_dup(const char *log_path, int broker_fd_src, int broke
 		if (log_fd != STDOUT_FILENO && log_fd != STDERR_FILENO) {
 			::close(log_fd);
 		}
+	}
+	// Raise the open-file limit to the hard ceiling; a low soft limit starves the GPU driver at swapchain creation.
+	struct rlimit nofile_limit;
+	if (::getrlimit(RLIMIT_NOFILE, &nofile_limit) == 0 && nofile_limit.rlim_cur < nofile_limit.rlim_max) {
+		nofile_limit.rlim_cur = nofile_limit.rlim_max;
+		::setrlimit(RLIMIT_NOFILE, &nofile_limit);
 	}
 	if (broker_fd_src >= 0) {
 		if (::dup2(broker_fd_src, broker_fd_dst) < 0) {
