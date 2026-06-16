@@ -1319,6 +1319,10 @@ bool DisplayServerWayland::window_can_draw(DisplayServer::WindowID p_window_id) 
 }
 
 bool DisplayServerWayland::can_any_window_draw() const {
+#ifdef TG_RENDERER
+	// The renderer never presents to its surface; it copies each frame to the shared texture.
+	return true;
+#endif
 	return suspend_state == SuspendState::NONE;
 }
 
