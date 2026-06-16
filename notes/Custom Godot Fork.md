@@ -110,6 +110,10 @@ All do the same thing: when `TG_RENDERER` is defined, suppress everything that w
 | `platform/macos/display_server_macos.mm` | `show_window`, `window_set_mode`, `window_set_flag` no-op |
 | `platform/macos/godot_application.mm` | `forceUnbundledWindowActivationHackStep1` no-op |
 | `platform/linuxbsd/x11/display_server_x11.cpp` | `show_window`, `window_set_ime_active` no-op |
+| `platform/linuxbsd/wayland/wayland_thread.cpp` | `window_create` returns early after creating the `wl_surface` + viewport, before assigning the xdg-shell role — a role-less surface stays invisible while still backing a `VkSurfaceKHR` |
+| `platform/linuxbsd/wayland/display_server_wayland.cpp` | `window_set_ime_active` no-op; `can_any_window_draw` returns `true` |
+
+**Wayland needs more than hiding the window.** The renderer's surface is role-less (no xdg-shell role), so the compositor never maps it and never sends frame callbacks. Godot's Wayland backend treats a 1-second frame-callback gap (`WAYLAND_MAX_FRAME_TIME_US`) as a suspend, and `can_any_window_draw()` returns false while suspended — which halts the render loop before the renderer can draw the 3 frames it needs to signal `first_frame` to the launcher. Hence `can_any_window_draw()` returns `true` under `TG_RENDERER`: the renderer draws off-screen and copies into the shared texture, so compositor presentation state is irrelevant. Without it, a gate whose cold-cache boot exceeds 1s hangs on Wayland (a warm cache wins the race and masks the bug). X11 has no equivalent suspend gate, which is why the renderer worked while it was accidentally on Xwayland (see commit `954ca37039`).
 
 ### `RenderingDevice` additions
 
