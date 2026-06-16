@@ -78,4 +78,10 @@ The launcher is a Godot project, not a C++ build:
 
 ## Cross-build / cross-test
 
-There is no formal cross-compile setup documented in the parent README — each platform is built natively. CI presumably handles this; the `deployment/` folder probably has more detail.
+Each platform's release binaries are built natively on that OS. macOS is the one
+exception that cross-builds *within* the host: `python tools/macos/build_macos.py`
+builds the launcher + renderer for both arm64 and Intel (the latter via `--mac-intel`
+→ `arch=x86_64`), `lipo`s each pair into a universal binary, and assembles the `.app`
+template / `bin/macos.zip`. `--renderer-only` builds just the renderer (for
+download-only branches like `tg-4.3`). The full release/upload flow and the
+`deployment/` scripts are documented in [[Release and Deployment]].
