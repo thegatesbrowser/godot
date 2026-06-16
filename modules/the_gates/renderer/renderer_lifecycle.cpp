@@ -172,15 +172,19 @@ bool tg_renderer_engage(DisplayServer *p_display_server, const String &p_pack_pa
 	command_sync = memnew(CommandSync);
 	command_sync->bind_commands();
 	command_sync->socket_connect();
+	tg_renderer_phase("command_sync_connected");
 
 	exchange_filehandle();
+	tg_renderer_phase("filehandle_exchanged");
 
 	input_sync = memnew(InputSync);
 	input_sync->socket_connect();
+	tg_renderer_phase("input_sync_connected");
 
 	if (!import_external_texture(p_display_server)) {
 		return false;
 	}
+	tg_renderer_phase("external_texture_imported");
 
 	// MUST happen before lockdown: opens AF_UNIX socket to the broker and
 	// installs NetSocket/IP factory overrides. Post-lockdown, no new
@@ -193,6 +197,14 @@ bool tg_renderer_engage(DisplayServer *p_display_server, const String &p_pack_pa
 
 void tg_renderer_boot() {
 	print_line("[RENDERER-READY]");
+
+	RenderingDevice *rd = RenderingDevice::get_singleton();
+	if (rd != nullptr) {
+		print_line(vformat("[DEVICE-MEM] used=%d MB (textures=%d buffers=%d)",
+				(int)(rd->get_memory_usage(RenderingDevice::MEMORY_TOTAL) / (1024 * 1024)),
+				(int)(rd->get_memory_usage(RenderingDevice::MEMORY_TEXTURES) / (1024 * 1024)),
+				(int)(rd->get_memory_usage(RenderingDevice::MEMORY_BUFFERS) / (1024 * 1024))));
+	}
 }
 
 void tg_renderer_loop_iterate(uint64_t p_ticks_elapsed) {
@@ -203,9 +215,12 @@ void tg_renderer_loop_iterate(uint64_t p_ticks_elapsed) {
 	if (!first_frame_sent) {
 		static int iter = 0;
 		const uint32_t drawn = Engine::get_singleton()->get_frames_drawn();
-		print_line(vformat("[ITER] %d frames_drawn=%d t=%dms",
+		RenderingDevice *rd = RenderingDevice::get_singleton();
+		const uint64_t vram_mb = rd != nullptr ? rd->get_memory_usage(RenderingDevice::MEMORY_TOTAL) / (1024 * 1024) : 0;
+		print_line(vformat("[ITER] %d frames_drawn=%d t=%dms vram=%dMB",
 				iter++, (int)drawn,
-				(int)(OS::get_singleton()->get_ticks_msec() - epoch_ms())));
+				(int)(OS::get_singleton()->get_ticks_msec() - epoch_ms()),
+				(int)vram_mb));
 		if (drawn > 2) {
 			command_sync->send_command("first_frame", Array());
 			first_frame_sent = true;
