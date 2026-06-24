@@ -19,6 +19,18 @@ Upstream Godot 4.5 plus:
 
 Anything else in this tree is upstream — see [Godot's docs](https://docs.godotengine.org/en/stable/) for it.
 
+## ⚠️ In progress — cross-platform crash visibility (finish me)
+
+A renderer that dies should leave a trace in the launcher-uploaded log (we never see the user's machine). Two diagnostics added 2026-06, both installed at the top of `tg_renderer_engage`:
+
+- **Seccomp denial logger** — `[SECCOMP] denied syscall N` for every blocked syscall, still returns EPERM (`modules/the_gates/sandbox/linux/seccomp_policy.cpp`). Relies on a vendored **libzmq patch** (`thirdparty/libzmq/src/thread.cpp`, `sigdelset(SIGSYS)`) so denials on its I/O threads log instead of force-killing — **re-apply if libzmq is re-vendored.**
+- **Crash logger** — `[RENDERER-CRASH] signal=N` + backtrace before the process dies (`modules/the_gates/sandbox/crash_logger.cpp`, `signal_safe_log.h`). The release renderer had *no* crash handler at all; that's why crashes vanished.
+
+**Done + verified on Linux** (debug + release, pre- and post-lockdown). **Still to finish:**
+
+- **macOS** — shares the POSIX path (`#if defined(LINUXBSD_ENABLED) || defined(MACOS_ENABLED)`), identical to the verified Linux code, but **build it on a Mac to confirm it compiles** (no osxcross locally).
+- **Windows** — the exception-filter path (`SetUnhandledExceptionFilter` + `CaptureStackBackTrace`) is **written but never compiled or run.** Verify on a real Windows build: (1) it **compiles**; (2) the line (`WriteFile` to `STD_ERROR_HANDLE`) actually **reaches the uploaded log** — confirm how the Windows launcher captures the renderer's stderr.
+
 ## Before you Edit or Write code: required reading by file extension
 
 **Hard rule, no exceptions.** Before your first `Edit` / `Write` / `MultiEdit` to a file matching these patterns, you must have `Read` the linked doc(s) **earlier in this same session**. Once per session is enough.
