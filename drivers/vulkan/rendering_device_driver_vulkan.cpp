@@ -1357,6 +1357,7 @@ uint64_t RenderingDeviceDriverVulkan::buffer_get_allocation_size(BufferID p_buff
 
 uint8_t *RenderingDeviceDriverVulkan::buffer_map(BufferID p_buffer) {
 	const BufferInfo *buf_info = (const BufferInfo *)p_buffer.id;
+	ERR_FAIL_NULL_V(buf_info, nullptr);
 	void *data_ptr = nullptr;
 	VkResult err = vmaMapMemory(allocator, buf_info->allocation.handle, &data_ptr);
 	ERR_FAIL_COND_V_MSG(err, nullptr, "vmaMapMemory failed with error " + itos(err) + ".");
@@ -1544,7 +1545,7 @@ RDD::TextureID RenderingDeviceDriverVulkan::external_texture_create(const Textur
 	if (ext_image_pool == VK_NULL_HANDLE) {
 		uint32_t mem_type_index = 0;
 		vmaFindMemoryTypeIndexForImageInfo(allocator, &create_info, &alloc_create_info, &mem_type_index);
-		
+
 		export_alloc_info = {
 			/*sType*/ VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
 			/*pNext*/ nullptr,
@@ -1755,7 +1756,7 @@ RDD::TextureID RenderingDeviceDriverVulkan::external_texture_import(const Textur
 	if (ext_image_pool == VK_NULL_HANDLE) {
 		uint32_t mem_type_index = 0;
 		vmaFindMemoryTypeIndexForImageInfo(allocator, &create_info, &alloc_create_info, &mem_type_index);
-		
+
 		// TODO: handle platform
 		import_memory_info = {
 			/*sType*/ VK_STRUCTURE_TYPE_IMPORT_MEMORY_X_INFO_KHR,
