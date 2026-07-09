@@ -277,6 +277,61 @@ void add_runtime_dir_paths(int p_ruleset_fd, uint64_t p_rw_rights, bool p_allow_
 	}
 }
 
+// NVIDIA's proprietary driver reopens its device nodes at allocation time,
+// not only at init, so post-lockdown vkAllocateMemory fails as
+// VK_ERROR_OUT_OF_DEVICE_MEMORY without these. Chromium's GPU sandbox
+// grants the same set.
+void add_nvidia_dev_paths(int p_ruleset_fd, uint64_t p_rw_rights, uint64_t p_ro_rights) {
+	constexpr const char *kNvidiaRwPaths[] = {
+		"/dev/nvidiactl",
+		"/dev/nvidia-modeset",
+		"/dev/nvidia-uvm",
+		"/dev/nvidia-uvm-tools",
+	};
+	for (size_t i = 0; i < sizeof(kNvidiaRwPaths) / sizeof(*kNvidiaRwPaths); ++i) {
+		add_path_rule(p_ruleset_fd, String::utf8(kNvidiaRwPaths[i]), p_rw_rights);
+	}
+	for (int i = 0; i < 16; ++i) {
+		add_path_rule(p_ruleset_fd, vformat("/dev/nvidia%d", i), p_rw_rights);
+	}
+	add_path_rule(p_ruleset_fd, "/dev/nvidia-caps", p_ro_rights);
+	add_path_rule(p_ruleset_fd, "/proc/driver/nvidia", p_ro_rights);
+}
+
+// Fontconfig roots beyond /usr and /etc: Flatpak's host-font mounts and the
+// user's own font dirs + fontconfig cache.
+void add_font_paths(int p_ruleset_fd, uint64_t p_ro_rights) {
+	constexpr const char *kHostFontPaths[] = {
+		"/run/host/fonts",
+		"/run/host/fonts-cache",
+		"/run/host/local-fonts",
+		"/run/host/user-fonts",
+		"/run/host/user-fonts-cache",
+		"/app/share/fonts",
+	};
+	for (size_t i = 0; i < sizeof(kHostFontPaths) / sizeof(*kHostFontPaths); ++i) {
+		add_path_rule(p_ruleset_fd, String::utf8(kHostFontPaths[i]), p_ro_rights);
+	}
+
+	const char *home_env = ::getenv("HOME");
+	if (home_env == nullptr || home_env[0] == '\0') {
+		return;
+	}
+	const String home = String::utf8(home_env);
+	const char *xdg_data = ::getenv("XDG_DATA_HOME");
+	const String data_home = (xdg_data != nullptr && xdg_data[0] != '\0')
+			? String::utf8(xdg_data)
+			: home + "/.local/share";
+	const char *xdg_cache = ::getenv("XDG_CACHE_HOME");
+	const String cache_home = (xdg_cache != nullptr && xdg_cache[0] != '\0')
+			? String::utf8(xdg_cache)
+			: home + "/.cache";
+
+	add_path_rule(p_ruleset_fd, home + "/.fonts", p_ro_rights);
+	add_path_rule(p_ruleset_fd, data_home + "/fonts", p_ro_rights);
+	add_path_rule(p_ruleset_fd, cache_home + "/fontconfig", p_ro_rights);
+}
+
 Error add_policy_paths(int p_ruleset_fd, const String &p_rw_dir,
 		const Vector<String> &p_rw_files, const Vector<String> &p_ro_files,
 		uint64_t p_rw_rights, uint64_t p_ro_rights) {
@@ -349,6 +404,8 @@ Error apply_landlock(const String &p_rw_dir, const Vector<String> &p_rw_files,
 	}
 
 	add_runtime_dir_paths(ruleset_fd, rw_rights, p_allow_audio, p_allow_microphone);
+	add_nvidia_dev_paths(ruleset_fd, rw_rights, ro_rights);
+	add_font_paths(ruleset_fd, ro_rights);
 
 	if (landlock_restrict_self(ruleset_fd, 0) != 0) {
 		const int saved_errno = errno;
