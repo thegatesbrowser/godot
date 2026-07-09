@@ -6124,8 +6124,8 @@ RenderingDevice::TransferWorker *RenderingDevice::_acquire_transfer_worker(uint3
 			}
 
 			uint32_t new_staging_buffer_size = next_power_of_2(expected_buffer_size);
-			transfer_worker->staging_buffer_size_allocated = new_staging_buffer_size;
 			transfer_worker->staging_buffer = driver->buffer_create(new_staging_buffer_size, RDD::BUFFER_USAGE_TRANSFER_FROM_BIT, RDD::MEMORY_ALLOCATION_TYPE_CPU);
+			transfer_worker->staging_buffer_size_allocated = transfer_worker->staging_buffer ? new_staging_buffer_size : 0;
 		}
 	}
 
