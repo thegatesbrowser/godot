@@ -21,6 +21,10 @@ Modes:
                             request through the broker returns ST_DENIED_FORCE_FAIL.
                             The renderer launches but all NetSocket open calls fail
                             cleanly (legacy 'negative-network-filter' alias retained).
+  crash-upload              Points the launcher's API at a local HTTP sink, SIGKILLs the
+                            renderer after first frame, then quits the launcher via a
+                            window close request. Asserts the crash log reaches the sink
+                            (send_logs POST with the crash header) before the app exits.
 """
 
 from __future__ import annotations
@@ -34,7 +38,9 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, NoReturn, Optional
 
@@ -87,6 +93,9 @@ FAIL_CATALOG: dict[str, int] = {
     "canary_proc_net_readable": 47,
     "canary_brokered_connect_denied": 48,
     "canary_brokered_connect_unblocked_in_force_fail": 49,
+    "crash_upload_missing": 50,
+    "crash_upload_malformed": 51,
+    "crash_upload_kill_failed": 52,
 }
 
 MAX_TICK_GAP_MS = 500
@@ -260,6 +269,68 @@ def gate_url_to_folder(url: str) -> str:
     return cleaned.replace(":", "_")
 
 
+class UploadSink:
+    """Local stand-in for the app API; records every POST body to disk."""
+
+    def __init__(self, results_dir: Path):
+        self.uploads: list[dict[str, Any]] = []
+        self.lock = threading.Lock()
+        sink = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length) if length else b""
+                with sink.lock:
+                    idx = len(sink.uploads)
+                    upload_file = results_dir / f"upload_{idx:02d}.txt"
+                    upload_file.write_bytes(body)
+                    sink.uploads.append({"path": self.path, "bytes": len(body), "file": upload_file})
+                self.send_response(200)
+                self.end_headers()
+
+            def do_GET(self) -> None:
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, fmt: str, *log_args: Any) -> None:
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def send_logs_uploads(self) -> list[dict[str, Any]]:
+        with self.lock:
+            return [u for u in self.uploads if u["path"].startswith("/api/send_logs")]
+
+
+def kill_renderer_when_rendering(launcher_log: Path, budget_sec: float, state: dict[str, Any]) -> None:
+    """Wait for the gate's first frame in the launcher log, then SIGKILL the renderer."""
+    deadline = time.monotonic() + budget_sec
+    pid = None
+    while time.monotonic() < deadline:
+        text = launcher_log.read_text(encoding="utf-8", errors="replace") if launcher_log.exists() else ""
+        if "[AUTOTEST-FIRST-FRAME]" in text:
+            pids = re.findall(r"spawned pid=(\d+)", text)
+            if pids:
+                pid = int(pids[-1])
+            break
+        time.sleep(0.5)
+    if pid is None:
+        state["error"] = "no renderer pid after first frame (or first frame never reached)"
+        return
+    try:
+        if is_windows():
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, check=False)
+        else:
+            os.kill(pid, signal.SIGKILL)
+    except OSError as e:
+        state["error"] = f"kill pid={pid} failed: {e}"
+        return
+    state["killed_pid"] = pid
+
+
 def parse_diag_block(renderer_text: str, start_line: int) -> Optional[dict[str, Any]]:
     """Extract the last SANDBOX-DIAG-BEGIN/END JSON block after start_line."""
     lines = renderer_text.splitlines()
@@ -298,11 +369,18 @@ examples:
         "mode",
         nargs="?",
         default="default",
-        choices=["default", "negative-fail-closed", "negative-signature", "negative-broker", "negative-network-filter"],
+        choices=[
+            "default",
+            "negative-fail-closed",
+            "negative-signature",
+            "negative-broker",
+            "negative-network-filter",
+            "crash-upload",
+        ],
         help="harness mode (default: default); negative-network-filter is a legacy alias for negative-broker",
     )
     parser.add_argument("--gate-url", default=None)
-    parser.add_argument("--timeout", type=int, default=25, help="seconds the launcher runs before self-quit")
+    parser.add_argument("--timeout", type=int, default=None, help="seconds the launcher runs before self-quit")
     parser.add_argument("--build", action="store_true", help="rebuild launcher + renderer first")
     parser.add_argument("--no-sandbox", action="store_true", help="combined with --build: pass tg_sandbox=no")
     parser.add_argument("--launcher-bin", default="")
@@ -322,6 +400,10 @@ examples:
             args.gate_url = "https://thegates.io/worlds/world.gate"
         else:
             args.gate_url = "https://thegates.io/worlds/tutorial.gate"
+
+    if args.timeout is None:
+        # crash-upload needs first frame + the 10s heartbeat window + upload
+        args.timeout = 40 if args.mode == "crash-upload" else 25
 
     launcher_bin = Path(args.launcher_bin) if args.launcher_bin else default_launcher_bin()
     renderer_bin = Path(args.renderer_bin) if args.renderer_bin else default_renderer_bin()
@@ -378,6 +460,17 @@ examples:
     if args.verbose:
         launcher_args.append("--verbose")
 
+    sink: Optional[UploadSink] = None
+    kill_state: dict[str, Any] = {}
+    if args.mode == "crash-upload":
+        sink = UploadSink(results_dir)
+        launcher_args += ["--api-url", f"http://127.0.0.1:{sink.port}", "--autotest-quit-close-request"]
+        threading.Thread(
+            target=kill_renderer_when_rendering,
+            args=(launcher_log, args.timeout - 12, kill_state),
+            daemon=True,
+        ).start()
+
     print(f"[RUN] {launcher_bin} {' '.join(launcher_args)}")
     # Launcher autoloads (AnalyticsEvents, HTTPClientPool, Backend) drain
     # in-flight HTTP on shutdown; 25s grace covers that on slow networks.
@@ -390,6 +483,28 @@ examples:
         wait_budget,
         results_dir,
     )
+
+    if args.mode == "crash-upload":
+        assert sink is not None
+        if "killed_pid" not in kill_state:
+            emit_fail(f"crash_upload_kill_failed {kill_state.get('error', 'unknown')}", results_dir)
+        uploads = sink.send_logs_uploads()
+        if not uploads:
+            emit_fail(
+                f"crash_upload_missing killed_pid={kill_state['killed_pid']} "
+                f"posts_seen={len(sink.uploads)} (crash log never reached the API)",
+                results_dir,
+            )
+        body = uploads[0]["file"].read_bytes()
+        if b"=== TheGates renderer crash ===" not in body or b"reason:" not in body:
+            emit_fail(f"crash_upload_malformed bytes={uploads[0]['bytes']} file={uploads[0]['file']}", results_dir)
+        reason_match = re.search(rb"reason: (\S+)", body)
+        reason = reason_match.group(1).decode() if reason_match else "?"
+        emit_pass(
+            f"crash-upload: killed_pid={kill_state['killed_pid']} uploads={len(uploads)} "
+            f"bytes={uploads[0]['bytes']} reason={reason} launcher_exit={launcher_exit}",
+            results_dir,
+        )
 
     # negative-signature: broker must refuse to spawn -> no fresh renderer log
     # AND the launcher must surface the refusal as a user-visible gate_error.
