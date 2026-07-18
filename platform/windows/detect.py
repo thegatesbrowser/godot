@@ -387,6 +387,10 @@ def configure_msvc(env: "SConsEnvironment", vcvars_msvc_config):
 
     ## Compile/link flags
 
+    if env["use_llvm"]:
+        # Pair clang-cl with LLVM's archiver; MSVC lib.exe fails (LNK1181) on long object paths.
+        env["AR"] = "llvm-lib"
+
     env["MAXLINELENGTH"] = 4096
 
     # In case the command line to AR is too long, use a response file.
