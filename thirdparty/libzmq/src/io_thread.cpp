@@ -17,7 +17,12 @@ zmq::io_thread_t::io_thread_t (ctx_t *ctx_, uint32_t tid_) :
     alloc_assert (_poller);
 
     if (_mailbox.get_fd () != retired_fd) {
+#if defined ZMQ_HAVE_WINDOWS && defined ZMQ_IOTHREAD_POLLER_USE_EPOLL
+        //  TheGates patch: Register the mailbox's native event with the Windows poller.
+        _mailbox_handle = _poller->add_event (_mailbox.get_fd (), this);
+#else
         _mailbox_handle = _poller->add_fd (_mailbox.get_fd (), this);
+#endif
         _poller->set_pollin (_mailbox_handle);
     }
 }
