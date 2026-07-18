@@ -56,7 +56,7 @@ godot/modules/the_gates/
 │   │   │                              SHA-NI asm or mbedtls fallback
 │   │   └── signature_verify.{cpp,h}   pin compare + hex on the digest
 │   │
-│   └── macos/           ── stub today; Seatbelt + Sec* APIs upcoming
+│   └── macos/           ── Seatbelt lower_token + CommonCrypto verify (functional)
 │       └── sandbox_macos.{h,mm}       SandboxMacOS : Sandbox
 │
 └── renderer/            ── renderer-process lifecycle (TG_RENDERER)
@@ -66,8 +66,10 @@ godot/modules/the_gates/
 ```
 
 `sandbox/linux/` is the production backend (see [[Sandboxing/Linux Backend]]).
-`sandbox/macos/` is still a stub — `_verify_binary_impl` and `lower_token`
-are placeholders; tracked in [[Sandboxing/Future Work]].
+`sandbox/macos/` is functional too (see [[Sandboxing/macOS Backend]]): SHA-256 +
+pin `_verify_binary_impl`, Seatbelt `lower_token` via the vendored Firefox
+`Sandbox.mm`, and inherited-FD network isolation. Remaining macOS gaps are
+tracked in [[Sandboxing/macOS Parity TODO]].
 
 ## Classes registered with GDScript
 
