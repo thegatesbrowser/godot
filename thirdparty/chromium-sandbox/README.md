@@ -80,6 +80,14 @@ include on `!BUILDFLAG(IS_CEF_SANDBOX_BUILD)`. Not strictly needed today (we
 don't compile that file — the chromium-shim's `logging.cpp` replaces it) but
 left for a future agent who tries to use chromium's logging.cc directly.
 
+- `sandbox/win/src/target_process.{h,cc}` is patched to filter the child
+  environment to a TheGates allow-list with exact names and `TG_`/`VK_`
+  prefixes; re-apply this patch if `thirdparty/chromium-sandbox` is re-vendored.
+- The filesystem and registry interception thunks hook
+  `sandbox_deny_log.h` to emit `[SANDBOX-WIN-DENY] ...` when an operation fails
+  the local policy check and is not escalated to the broker, mirroring the
+  Linux `[SECCOMP]` logger. Stray registry `wprintf` debug output is removed.
+
 ## License
 
 Chromium and abseil-cpp are BSD-licensed; Firefox's chromium-shim is MPL 2.0.

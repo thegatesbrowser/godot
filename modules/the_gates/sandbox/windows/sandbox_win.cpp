@@ -221,6 +221,8 @@ Dictionary SandboxWin::spawn_target(const Ref<SandboxPolicy> &p_policy,
 			sandbox::TokenLevel::USER_LIMITED);
 	ERR_FAIL_COND_V_MSG(r != sandbox::SBOX_ALL_OK, result, vformat("SandboxWin: SetTokenLevel failed (%d)", (int)r));
 
+	config->SetFilterEnvironment(true);
+
 	r = broker_service->CreateAlternateDesktop(sandbox::Desktop::kAlternateDesktop);
 	if (r != sandbox::SBOX_ALL_OK && r != sandbox::SBOX_ERROR_GENERIC) {
 		ERR_PRINT(vformat("SandboxWin: CreateAlternateDesktop returned %d (continuing)", (int)r));

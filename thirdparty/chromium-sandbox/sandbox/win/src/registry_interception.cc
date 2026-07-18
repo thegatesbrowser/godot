@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include "modules/the_gates/sandbox/windows/sandbox_deny_log.h"
 #include "sandbox/win/src/crosscall_client.h"
 #include "sandbox/win/src/ipc_tags.h"
 #include "sandbox/win/src/policy_params.h"
@@ -25,7 +26,6 @@ NTSTATUS WINAPI TargetNtCreateKey(NtCreateKeyFunction orig_CreateKey,
                                   PUNICODE_STRING class_name,
                                   ULONG create_options,
                                   PULONG disposition) {
-  wprintf(L"TargetNtCreateKey called\n");
   // Check if the process can create it first.
   NTSTATUS status =
       orig_CreateKey(key, desired_access, object_attributes, title_index,
@@ -87,6 +87,10 @@ NTSTATUS WINAPI TargetNtCreateKey(NtCreateKeyFunction orig_CreateKey,
       }
 
       query_broker = QueryBroker(IpcTag::NTCREATEKEY, params.GetBase());
+      if (!query_broker) {
+        tg_sandbox_log_denied_registry(
+            full_name_ptr ? full_name_ptr : name_ptr, desired_access);
+      }
     }
 
     if (!query_broker)
@@ -102,14 +106,16 @@ NTSTATUS WINAPI TargetNtCreateKey(NtCreateKeyFunction orig_CreateKey,
     if (SBOX_ALL_OK != code)
       break;
 
-    if (!NT_SUCCESS(answer.nt_status))
+    if (!NT_SUCCESS(answer.nt_status)) {
       // TODO(nsylvain): We should return answer.nt_status here instead
       // of status. We can do this only after we checked the policy.
       // otherwise we will returns ACCESS_DENIED for all paths
       // that are not specified by a policy, even though your token allows
       // access to that path, and the original call had a more meaningful
       // error. Bug 4369
+      tg_sandbox_log_denied_registry(name.get(), desired_access);
       break;
+    }
 
     __try {
       *key = answer.handle;
@@ -130,7 +136,6 @@ NTSTATUS WINAPI CommonNtOpenKey(NTSTATUS status,
                                 PHANDLE key,
                                 ACCESS_MASK desired_access,
                                 POBJECT_ATTRIBUTES object_attributes) {
-  wprintf(L"CommonNtOpenKey called\n");
   // We don't trust that the IPC can work this early.
   if (!SandboxFactory::GetTargetServices()->GetState()->InitCalled())
     return status;
@@ -174,6 +179,10 @@ NTSTATUS WINAPI CommonNtOpenKey(NTSTATUS status,
       }
 
       query_broker = QueryBroker(IpcTag::NTOPENKEY, params.GetBase());
+      if (!query_broker) {
+        tg_sandbox_log_denied_registry(
+            full_name_ptr ? full_name_ptr : name_ptr, desired_access);
+      }
     }
 
     if (!query_broker)
@@ -187,14 +196,16 @@ NTSTATUS WINAPI CommonNtOpenKey(NTSTATUS status,
     if (SBOX_ALL_OK != code)
       break;
 
-    if (!NT_SUCCESS(answer.nt_status))
+    if (!NT_SUCCESS(answer.nt_status)) {
       // TODO(nsylvain): We should return answer.nt_status here instead
       // of status. We can do this only after we checked the policy.
       // otherwise we will returns ACCESS_DENIED for all paths
       // that are not specified by a policy, even though your token allows
       // access to that path, and the original call had a more meaningful
       // error. Bug 4369
+      tg_sandbox_log_denied_registry(name.get(), desired_access);
       break;
+    }
 
     __try {
       *key = answer.handle;
@@ -211,7 +222,6 @@ NTSTATUS WINAPI TargetNtOpenKey(NtOpenKeyFunction orig_OpenKey,
                                 PHANDLE key,
                                 ACCESS_MASK desired_access,
                                 POBJECT_ATTRIBUTES object_attributes) {
-  wprintf(L"TargetNtOpenKey called\n");
   // Check if the process can open it first.
   NTSTATUS status = orig_OpenKey(key, desired_access, object_attributes);
   if (NT_SUCCESS(status))
@@ -225,7 +235,6 @@ NTSTATUS WINAPI TargetNtOpenKeyEx(NtOpenKeyExFunction orig_OpenKeyEx,
                                   ACCESS_MASK desired_access,
                                   POBJECT_ATTRIBUTES object_attributes,
                                   ULONG open_options) {
-  wprintf(L"TargetNtOpenKeyEx called\n");
   // Check if the process can open it first.
   NTSTATUS status =
       orig_OpenKeyEx(key, desired_access, object_attributes, open_options);

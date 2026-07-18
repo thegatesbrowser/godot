@@ -14,6 +14,7 @@
 #include <processenv.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <wchar.h>
 
 #include <limits>
 #include <memory>
@@ -164,22 +165,14 @@ ResultCode TargetProcess::Create(
       return SBOX_ERROR_CANNOT_OBTAIN_ENVIRONMENT;
     }
 
-    // Only copy a limited list of variables to the target from the broker's
-    // environment. These are
-    //  * "Path", "SystemDrive", "SystemRoot", "TEMP", "TMP": Needed for normal
-    //    operation and tests.
-    //  * "LOCALAPPDATA": Needed for App Container processes.
-    //  * "CHROME_CRASHPAD_PIPE_NAME": Needed for crashpad.
-    static constexpr std::wstring_view to_keep[] = {
-        L"Path",
-        L"SystemDrive",
-        L"SystemRoot",
-        L"TEMP",
-        L"TMP",
-        L"LOCALAPPDATA",
-        L"CHROME_CRASHPAD_PIPE_NAME"};
-
-    new_env = FilterEnvironment(old_environment, to_keep);
+    static constexpr std::wstring_view kEnvAllowExact[] = {
+        L"Path", L"SystemDrive", L"SystemRoot", L"TEMP", L"TMP",
+        L"LOCALAPPDATA", L"APPDATA", L"USERPROFILE", L"USERNAME",
+    };
+    static constexpr std::wstring_view kEnvAllowPrefixes[] = {
+        L"TG_", L"VK_",
+    };
+    new_env = FilterEnvironment(old_environment, kEnvAllowExact, kEnvAllowPrefixes);
     ::FreeEnvironmentStringsW(old_environment);
   }
 
@@ -472,23 +465,35 @@ std::unique_ptr<TargetProcess> TargetProcess::MakeTargetProcessForTesting(
 // static
 std::wstring TargetProcess::FilterEnvironment(
     const wchar_t* env,
-    const base::span<const std::wstring_view> to_keep) {
+    const base::span<const std::wstring_view> to_keep,
+    const base::span<const std::wstring_view> prefix_keep) {
   std::wstring result;
-
-  // Iterate all of the environment strings.
   const wchar_t* ptr = env;
   while (*ptr) {
     std::wstring key;
     size_t line_length = ParseEnvLine(ptr, &key);
-
-    // Keep only values specified in the keep vector.
-    if (std::find(to_keep.begin(), to_keep.end(), key) != to_keep.end()) {
+    bool keep = false;
+    for (const auto& name : to_keep) {
+      if (name.size() == key.size() &&
+          ::_wcsnicmp(name.data(), key.data(), name.size()) == 0) {
+        keep = true;
+        break;
+      }
+    }
+    if (!keep) {
+      for (const auto& prefix : prefix_keep) {
+        if (key.size() >= prefix.size() &&
+            ::_wcsnicmp(prefix.data(), key.data(), prefix.size()) == 0) {
+          keep = true;
+          break;
+        }
+      }
+    }
+    if (keep) {
       result.append(ptr, line_length);
     }
     ptr += line_length;
   }
-
-  // Add the terminating NUL.
   result.push_back('\0');
   return result;
 }
