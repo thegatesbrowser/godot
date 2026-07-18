@@ -19,7 +19,7 @@ Upstream Godot 4.5 plus:
 
 Anything else in this tree is upstream — see [Godot's docs](https://docs.godotengine.org/en/stable/) for it.
 
-## ⚠️ In progress — cross-platform crash visibility (macOS only)
+## Cross-platform crash visibility — done on Linux, Windows, macOS
 
 A renderer that dies should leave a trace in the launcher-uploaded log (we never see the user's machine). Diagnostics installed at the top of `tg_renderer_engage`:
 
@@ -27,11 +27,9 @@ A renderer that dies should leave a trace in the launcher-uploaded log (we never
 - **Windows denial logger** — `[SANDBOX-WIN-DENY] file/registry ...` for every blocked file/registry op, emitted from the vendored chromium interception thunks via `modules/the_gates/sandbox/windows/sandbox_deny_log.{cpp,h}`. Mirrors the Linux `[SECCOMP]` logger. Registry *writes* (`RegSetValueEx`) aren't intercepted, so they don't log — known gap.
 - **Crash logger** — `[RENDERER-CRASH] signal=N` / `exception=0x...` + backtrace before the process dies (`modules/the_gates/sandbox/crash_logger.cpp`, `signal_safe_log.h`). The release renderer had *no* crash handler at all; that's why crashes vanished.
 
-**Done + verified on Linux and Windows.** Windows was verified end-to-end on a real build: a forced fault produced `[RENDERER-CRASH] exception=0x...` + backtrace in the uploaded log. Known boundary: Godot's internal `CRASH_NOW` expands to `__fastfail`, which bypasses `SetUnhandledExceptionFilter` — so only genuine faults (access violations, etc.) hit the crash handler; internal engine aborts still log their plain `_err_print_error` fatal text.
+**Done + verified on Linux, Windows, and macOS.** Windows was verified end-to-end on a real build: a forced fault produced `[RENDERER-CRASH] exception=0x...` + backtrace in the uploaded log. Known boundary: Godot's internal `CRASH_NOW` expands to `__fastfail`, which bypasses `SetUnhandledExceptionFilter` — so only genuine faults (access violations, etc.) hit the crash handler; internal engine aborts still log their plain `_err_print_error` fatal text.
 
-**Still to finish:**
-
-- **macOS** — shares the POSIX path (`#if defined(LINUXBSD_ENABLED) || defined(MACOS_ENABLED)`), identical to the verified Linux code, but **build it on a Mac to confirm it compiles** (no osxcross locally). See [[Sandboxing/macOS Parity TODO]].
+macOS (2026-07-18): the shared POSIX path compiles + links clean (universal release + debug, no `-Werror` deprecation); a forced `kill -SEGV` on the live sandboxed renderer *after* lockdown produced `[RENDERER-CRASH] signal=11` + backtrace (frame 0 = `crash_handler`). The same Mac pass also closed the environment leak — `sandbox_macos.mm` now allow-list-filters the renderer env like Linux/Windows. See [[Sandboxing/macOS Parity TODO]].
 
 ## Before you Edit or Write code: required reading by file extension
 
