@@ -71,8 +71,7 @@ godot/modules/the_gates/
 `sandbox/linux/` is the production backend (see [[Sandboxing/Linux Backend]]).
 `sandbox/macos/` is functional too (see [[Sandboxing/macOS Backend]]): SHA-256 +
 pin `_verify_binary_impl`, Seatbelt `lower_token` via the vendored Firefox
-`Sandbox.mm`, and inherited-FD network isolation. Remaining macOS gaps are
-tracked in [[Sandboxing/macOS Parity TODO]].
+`Sandbox.mm`, an allow-list-filtered renderer env, and inherited-FD network isolation.
 
 ## Classes registered with GDScript
 
