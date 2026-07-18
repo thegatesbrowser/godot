@@ -4,15 +4,15 @@ tags: [sandbox, macos, todo]
 
 # macOS Parity TODO
 
-Gaps between the macOS sandbox backend and its Linux/Windows siblings, captured during the 2026-07 Windows hardening pass. Every item was verified against `modules/the_gates/sandbox/macos/*` on `tg-4.5`, not copied from older notes. macOS work is deferred until the Windows pass lands; this is the starting point.
+Gaps between the macOS sandbox backend and its Linux/Windows siblings, captured during the 2026-07 Windows hardening pass. Every item was verified against `modules/the_gates/sandbox/macos/*` on `tg-4.5`, not copied from older notes. The Windows pass has now shipped (1.0.7, 2026-07-18) — macOS is the last platform still carrying these gaps.
 
 Ordered by severity.
 
 ## 1. Environment leak — full `environ` handed to the renderer (HIGH)
 
-Same class as the Windows leak. `SandboxMacOS::spawn_target` copies the launcher's entire `environ` into the child's `envp` with no filtering, then appends the `TG_SANDBOX_*` policy vars. Any secret exported in the launcher's environment (SSH agent socket, cloud credentials, API keys) reaches the untrusted renderer, and therefore untrusted gate code, which can exfiltrate it through the network broker. Byte-identical on `tg-4.5`, `tg-master`, `tg-4.3`.
+Same class as the **now-fixed** Windows leak — Windows closed it in the 2026-07-18 pass, so macOS is the last platform still handing the full `environ` to the renderer. `SandboxMacOS::spawn_target` copies the launcher's entire `environ` into the child's `envp` with no filtering, then appends the `TG_SANDBOX_*` policy vars. Any secret exported in the launcher's environment (SSH agent socket, cloud credentials, API keys) reaches the untrusted renderer, and therefore untrusted gate code, which can exfiltrate it through the network broker. Byte-identical on `tg-4.5`, `tg-master`, `tg-4.3`.
 
-Linux already solves this with an allow-list (`kEnvAllowExact` / `kEnvAllowPrefixes` + `env_var_allowed`) applied before building the child env.
+Linux **and Windows** already solve this with an allow-list (`kEnvAllowExact` / `kEnvAllowPrefixes` + `env_var_allowed`) applied before building the child env.
 
 **Fix.** Mirror the Linux shape in `sandbox_macos.mm`: a macOS-local allow-list (own copy — the lists diverge; macOS wants Metal/MoltenVK knobs like `MVK_*` / `MTL_*`, not Mesa/X11/Wayland), an `env_var_allowed` helper, and a filtered copy loop replacing the wholesale `environ` copy. Settle the exact allow-list in review before implementing. Keep the `TG_` prefix allowed (harness force-fail hooks read it).
 
