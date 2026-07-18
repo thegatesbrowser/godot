@@ -8,7 +8,7 @@
 
 #include "macros.hpp"
 
-#if defined ZMQ_HAVE_WINDOWS
+#if defined ZMQ_HAVE_WINDOWS && defined ZMQ_IOTHREAD_POLLER_USE_EPOLL
 #if defined _MSC_VER
 #if defined _WIN32_WCE
 #include <cmnintrin.h>
@@ -1439,7 +1439,12 @@ void zmq::socket_base_t::start_reaping (poller_t *poller_)
         _reaper_signaler->send ();
     }
 
+#if defined ZMQ_HAVE_WINDOWS
+    //  TheGates patch: Register the socket mailbox's native event with the Windows poller.
+    _handle = _poller->add_event (fd, this);
+#else
     _handle = _poller->add_fd (fd, this);
+#endif
     _poller->set_pollin (_handle);
 
     //  Initialise the termination and check whether it can be deallocated

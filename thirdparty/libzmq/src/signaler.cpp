@@ -9,7 +9,7 @@
 #include <poll.h>
 #endif
 #elif defined ZMQ_POLL_BASED_ON_SELECT
-#if defined ZMQ_HAVE_WINDOWS
+#if defined ZMQ_HAVE_WINDOWS && defined ZMQ_IOTHREAD_POLLER_USE_EPOLL
 #elif defined ZMQ_HAVE_HPUX
 #include <sys/param.h>
 #include <sys/types.h>
@@ -90,11 +90,20 @@ static int close_wait_ms (int fd_, unsigned int max_ms_ = 2000)
 
 zmq::signaler_t::signaler_t ()
 {
+#if defined ZMQ_HAVE_WINDOWS && defined ZMQ_IOTHREAD_POLLER_USE_EPOLL
+    //  TheGates patch: Use a kernel event so mailbox signaling never loads a Winsock provider.
+    const HANDLE event = CreateEventW (NULL, TRUE, FALSE, NULL);
+    if (event == NULL)
+        _r = _w = retired_fd;
+    else
+        _r = _w = reinterpret_cast<fd_t> (event);
+#else
     //  Create the socketpair for signaling.
     if (make_fdpair (&_r, &_w) == 0) {
         unblock_socket (_w);
         unblock_socket (_r);
     }
+#endif
 #ifdef HAVE_FORK
     pid = getpid ();
 #endif
@@ -109,6 +118,10 @@ zmq::signaler_t::~signaler_t ()
         return;
     int rc = close_wait_ms (_r);
     errno_assert (rc == 0);
+#elif defined ZMQ_HAVE_WINDOWS && defined ZMQ_IOTHREAD_POLLER_USE_EPOLL
+    //  TheGates patch: The Windows signaler owns one kernel event, not two sockets.
+    if (_r != retired_fd)
+        win_assert (CloseHandle (reinterpret_cast<HANDLE> (_r)) != 0);
 #elif defined ZMQ_HAVE_WINDOWS
     if (_w != retired_fd) {
         const struct linger so_linger = {1, 0};
@@ -155,6 +168,9 @@ void zmq::signaler_t::send ()
     const uint64_t inc = 1;
     ssize_t sz = write (_w, &inc, sizeof (inc));
     errno_assert (sz == sizeof (inc));
+#elif defined ZMQ_HAVE_WINDOWS && defined ZMQ_IOTHREAD_POLLER_USE_EPOLL
+    //  TheGates patch: SetEvent provides the signal without entering Winsock.
+    win_assert (SetEvent (reinterpret_cast<HANDLE> (_w)) != 0);
 #elif defined ZMQ_HAVE_WINDOWS
     const char dummy = 0;
     int nbytes;
@@ -212,7 +228,19 @@ int zmq::signaler_t::wait (int timeout_) const
     }
 #endif
 
-#ifdef ZMQ_POLL_BASED_ON_POLL
+#if defined ZMQ_HAVE_WINDOWS && defined ZMQ_IOTHREAD_POLLER_USE_EPOLL
+    //  TheGates patch: Wait directly on the native event returned by get_fd().
+    const DWORD timeout = timeout_ < 0 ? INFINITE : static_cast<DWORD> (timeout_);
+    const DWORD rc = WaitForSingleObject (reinterpret_cast<HANDLE> (_r), timeout);
+    win_assert (rc != WAIT_FAILED);
+    if (unlikely (rc == WAIT_TIMEOUT)) {
+        errno = EAGAIN;
+        return -1;
+    }
+    zmq_assert (rc == WAIT_OBJECT_0);
+    return 0;
+
+#elif defined ZMQ_POLL_BASED_ON_POLL
     struct pollfd pfd;
     pfd.fd = _r;
     pfd.events = POLLIN;
@@ -275,7 +303,13 @@ int zmq::signaler_t::wait (int timeout_) const
 void zmq::signaler_t::recv ()
 {
 //  Attempt to read a signal.
-#if defined ZMQ_HAVE_EVENTFD
+#if defined ZMQ_HAVE_WINDOWS && defined ZMQ_IOTHREAD_POLLER_USE_EPOLL
+    //  TheGates patch: Reset the manual-reset event after consuming the signal.
+    const DWORD rc = WaitForSingleObject (reinterpret_cast<HANDLE> (_r), 0);
+    win_assert (rc != WAIT_FAILED);
+    zmq_assert (rc == WAIT_OBJECT_0);
+    win_assert (ResetEvent (reinterpret_cast<HANDLE> (_r)) != 0);
+#elif defined ZMQ_HAVE_EVENTFD
     uint64_t dummy;
     ssize_t sz = read (_r, &dummy, sizeof (dummy));
     errno_assert (sz == sizeof (dummy));
@@ -311,7 +345,17 @@ void zmq::signaler_t::recv ()
 int zmq::signaler_t::recv_failable ()
 {
 //  Attempt to read a signal.
-#if defined ZMQ_HAVE_EVENTFD
+#if defined ZMQ_HAVE_WINDOWS && defined ZMQ_IOTHREAD_POLLER_USE_EPOLL
+    //  TheGates patch: Probe and reset the event without using recv().
+    const DWORD rc = WaitForSingleObject (reinterpret_cast<HANDLE> (_r), 0);
+    win_assert (rc != WAIT_FAILED);
+    if (rc == WAIT_TIMEOUT) {
+        errno = EAGAIN;
+        return -1;
+    }
+    zmq_assert (rc == WAIT_OBJECT_0);
+    win_assert (ResetEvent (reinterpret_cast<HANDLE> (_r)) != 0);
+#elif defined ZMQ_HAVE_EVENTFD
     uint64_t dummy;
     ssize_t sz = read (_r, &dummy, sizeof (dummy));
     if (sz == -1) {

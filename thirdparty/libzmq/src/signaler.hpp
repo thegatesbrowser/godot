@@ -24,6 +24,7 @@ class signaler_t
     ~signaler_t ();
 
     // Returns the socket/file descriptor
+    //  TheGates patch: On Windows wepoll builds this is a waitable event encoded as fd_t.
     // May return retired_fd if the signaler could not be initialized.
     fd_t get_fd () const;
     void send ();

@@ -1196,6 +1196,14 @@ static inline int port__feed_events(port_state_t* port_state,
   DWORD i;
 
   for (i = 0; i < iocp_event_count; i++) {
+    //  TheGates patch: Accept native signaler notifications posted to the IOCP.
+    if (iocp_events[i].lpOverlapped == NULL) {
+      struct epoll_event* ev = &epoll_events[epoll_event_count++];
+      ev->events = iocp_events[i].dwNumberOfBytesTransferred;
+      ev->data.ptr = (void*) iocp_events[i].lpCompletionKey;
+      continue;
+    }
+
     IO_STATUS_BLOCK* io_status_block =
         (IO_STATUS_BLOCK*) iocp_events[i].lpOverlapped;
     struct epoll_event* ev = &epoll_events[epoll_event_count];
