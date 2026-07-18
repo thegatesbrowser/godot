@@ -38,6 +38,10 @@ class epoll_t ZMQ_FINAL : public worker_poller_base_t
 
     //  "poller" concept.
     handle_t add_fd (fd_t fd_, zmq::i_poll_events *events_);
+#if defined ZMQ_HAVE_WINDOWS
+    //  TheGates patch: Register a waitable event without treating it as a Winsock socket.
+    handle_t add_event (fd_t event_, zmq::i_poll_events *events_);
+#endif
     void rm_fd (handle_t handle_);
     void set_pollin (handle_t handle_);
     void reset_pollin (handle_t handle_);
@@ -70,11 +74,26 @@ class epoll_t ZMQ_FINAL : public worker_poller_base_t
         fd_t fd;
         epoll_event ev;
         zmq::i_poll_events *events;
+#if defined ZMQ_HAVE_WINDOWS
+        //  TheGates patch: Track native event waits and queued IOCP posts.
+        epoll_fd_t epoll_fd;
+        HANDLE wait_handle;
+        LONG pending_posts;
+        bool native_event;
+#endif
     };
 
     //  List of retired event sources.
     typedef std::vector<poll_entry_t *> retired_t;
     retired_t _retired;
+#if defined ZMQ_HAVE_WINDOWS
+    //  TheGates patch: Keep removed events alive while an IOCP notification is queued.
+    retired_t _pending_retired;
+
+    static VOID CALLBACK event_callback (PVOID context_, BOOLEAN timed_out_);
+    static void register_event (poll_entry_t *entry_);
+    static void unregister_event (poll_entry_t *entry_);
+#endif
 
     ZMQ_NON_COPYABLE_NOR_MOVABLE (epoll_t)
 };
