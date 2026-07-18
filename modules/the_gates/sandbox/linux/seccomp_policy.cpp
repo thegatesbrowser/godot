@@ -32,14 +32,45 @@
 
 #include "seccomp_policy.h"
 
+#include "../signal_safe_log.h"
+
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
 #include "sandbox/linux/system_headers/linux_syscalls.h"
 
 #include <errno.h>
+#include <stdint.h>
 
 using sandbox::bpf_dsl::Allow;
 using sandbox::bpf_dsl::Error;
 using sandbox::bpf_dsl::ResultExpr;
+using sandbox::bpf_dsl::Trap;
+
+namespace {
+
+constexpr int DENIAL_TABLE_SIZE = 1024;
+
+// One slot per syscall number; each denied syscall is logged once so a spinning
+// renderer can't flood the uploaded log. Racy across threads but harmlessly so.
+bool g_denial_logged[DENIAL_TABLE_SIZE] = {};
+
+// SIGSYS handler: async-signal-safe only. Logs each denied syscall once and
+// returns -EPERM so the denial stays fail-soft, exactly as SECCOMP_RET_ERRNO
+// would. Resolve the number to a name offline.
+intptr_t log_denied_syscall(const struct arch_seccomp_data &p_args, void *) {
+	const int nr = p_args.nr;
+	if (nr >= 0 && nr < DENIAL_TABLE_SIZE) {
+		if (g_denial_logged[nr]) {
+			return -EPERM;
+		}
+		g_denial_logged[nr] = true;
+	}
+
+	tg_signal_safe_log("[SECCOMP] denied syscall ", nr);
+	return -EPERM;
+}
+
+} // namespace
 
 TheGatesRendererPolicy::TheGatesRendererPolicy() = default;
 TheGatesRendererPolicy::~TheGatesRendererPolicy() = default;
@@ -268,7 +299,7 @@ ResultExpr TheGatesRendererPolicy::EvaluateSyscall(int sysno) const {
 		// io_uring_* deliberately denied: recurring sandbox-escape vector
 		// (Chromium and Firefox both block it). Renderer does not use it.
 		default:
-			return Error(EPERM);
+			return Trap(log_denied_syscall, nullptr);
 	}
 }
 

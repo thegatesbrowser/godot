@@ -2146,6 +2146,11 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		ERR_PRINT("No renderers available.");
 	}
 
+#ifdef TG_RENDERER
+	rendering_driver = "vulkan";
+	print_line("Setting rendering_driver to vulkan. Renderer mode");
+#endif
+
 	if (!rendering_method.is_empty()) {
 		if (rendering_method != "forward_plus" &&
 				rendering_method != "mobile" &&

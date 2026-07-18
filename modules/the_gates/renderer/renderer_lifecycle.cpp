@@ -36,6 +36,7 @@
 #include "../ipc/zmq_runtime.h"
 #include "../network/brokered_net_socket.h"
 #include "../network/renderer_net_client.h"
+#include "../sandbox/crash_logger.h"
 #include "../sandbox/sandbox.h"
 #include "../sandbox/sandbox_diagnostics.h"
 
@@ -168,6 +169,7 @@ void tg_renderer_phase(const char *p_label) {
 
 bool tg_renderer_engage(DisplayServer *p_display_server, const String &p_pack_path) {
 	print_line("[RENDERER-START]");
+	tg_install_crash_logger();
 
 	command_sync = memnew(CommandSync);
 	command_sync->bind_commands();

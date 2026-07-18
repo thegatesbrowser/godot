@@ -220,6 +220,10 @@ static void *thread_routine (void *arg_)
     sigset_t signal_set;
     int rc = sigfillset (&signal_set);
     errno_assert (rc == 0);
+    //  TheGates patch: keep SIGSYS deliverable so the renderer's seccomp filter
+    //  can log a denied syscall made from this I/O thread instead of the kernel
+    //  force-killing the process (a blocked synchronous SIGSYS is fatal).
+    sigdelset (&signal_set, SIGSYS);
     rc = pthread_sigmask (SIG_BLOCK, &signal_set, NULL);
     posix_assert (rc);
 #endif
