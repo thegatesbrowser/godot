@@ -14,7 +14,7 @@ The two-process architecture has to bridge OS boundaries — every step of cross
 | Shared GPU image handle | Win32 `HANDLE` (OPAQUE_WIN32) | `IOSurfaceRef` (Metal interop) | file descriptor (OPAQUE_FD) |
 | Handle transport | `DuplicateHandle` into target PID, then int64 over a one-shot zmq PAIR (`ipc://`) | `IOSurfaceGetID` → uint32 over a one-shot zmq PAIR (`ipc://`) → `IOSurfaceLookup` on the other side | FD passing via `SCM_RIGHTS` over Unix socket (`flingfd` helper) |
 | IPC address | `ipc://user://<name>` resolves to `<sandbox-allowed user data dir>/<name>` (AF_UNIX socket file; needs Win10 1803+) | `ipc:///tmp/<name>` | `ipc:///tmp/<name>` |
-| Sandbox | Chromium sandbox (in-tree); see `Sandboxing/Index` | Not implemented (TODO) | seccomp syscall allowlist (~100 calls) |
+| Sandbox | Chromium sandbox (in-tree); see `Sandboxing/Index` | Seatbelt SBPL (Firefox content profile + addend) | seccomp + landlock + caps (~200-syscall allowlist) |
 | Window invisibility | Window created without `WS_VISIBLE`; `show_window` no-op | `show_window`, `window_set_mode`, `window_set_flag` no-op | `show_window`, `window_set_ime_active` no-op |
 
 ## Windows
@@ -63,8 +63,7 @@ The two-process architecture has to bridge OS boundaries — every step of cross
 - `external_texture`: raw `/tmp/<name>` Unix socket. Linux still uses `flingfd` for the FD-passing dance (zmq can't carry an FD as ancillary data), so it bypasses the zmq layer entirely for this one channel.
 
 ### Sandbox
-- The only platform with a real sandbox today. `Sandboxing::sandbox()` (in `sandboxing.cpp`) sets up a `SCMP_ACT_TRAP` seccomp filter and punches holes for ~100 syscalls observed during normal Godot operation. SIGSYS handler logs the disallowed syscall name.
-- Notably permissive (sockets, signals, threads all allowed) — there's a comment in the source about not trusting a comprehensive denylist.
+- All three platforms are sandboxed now — see [[Sandboxing/Index]]. Linux uses `SandboxLinux` (`sandbox/linux/`): `PR_SET_NO_NEW_PRIVS` → landlock filesystem ruleset → `capset()` capability drop → a ~200-syscall seccomp-bpf allowlist (`TheGatesRendererPolicy`). Denied syscalls log `[SECCOMP] denied syscall N` and return EPERM; sockets are deliberately not in the allowlist, so networking goes through the launcher's broker.
 
 ## Cross-platform code patterns to know
 

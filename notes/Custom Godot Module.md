@@ -37,13 +37,16 @@ godot/modules/the_gates/
 │   │                                  for async verify_binary
 │   ├── sandbox_policy.{cpp,h}         SandboxPolicy (RefCounted)
 │   ├── sandbox_diagnostics.{cpp,h}    target-side state reporter
-│   ├── socket_acl.{cpp,h}             tg_apply_untrusted_acl (Win) / no-op
+│   ├── crash_logger.{cpp,h}           [RENDERER-CRASH] handler (POSIX / Win)
+│   ├── signal_safe_log.h              async-signal-safe stderr log helper
 │   │
 │   ├── windows/         ── chromium broker/target (TG_SANDBOX + WIN)
 │   │   ├── SCsub                      vendored chromium-sandbox build
 │   │   ├── sandbox_win.{cpp,h}        SandboxWin : Sandbox
 │   │   ├── broker_delegate.{cpp,h}    BrokerDelegate (chromium hook)
 │   │   ├── handle_scope.h             RAII HANDLE wrapper
+│   │   ├── win_acl.{cpp,h}            tg_apply_untrusted_acl + WinACL grants
+│   │   ├── sandbox_deny_log.{cpp,h}   [SANDBOX-WIN-DENY] logger (interception hook)
 │   │   ├── signature_verify.{cpp,h}   WinVerifyTrust + thumbprint pin
 │   │   └── linker_stubs.cpp           shim for chromium symbols we don't use
 │   │

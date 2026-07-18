@@ -71,8 +71,8 @@ than chromium's full one.
 ## Fork-local patches
 
 `sandbox/win/src/` has Firefox's `08_add_back_SANDBOX_EXPORTS.patch` applied
-(cross-exe broker ↔ target). See `notes/Sandboxing/Agent Session 2026-05-14.md`
-for the exact changes and the canonical Firefox reference at
+(cross-exe broker ↔ target). See `notes/Sandboxing/Architecture.md` for the
+history and the canonical Firefox reference at
 [`08_add_back_SANDBOX_EXPORTS.patch`](https://hg.mozilla.org/mozilla-central/file/tip/security/sandbox/chromium-shim/patches/08_add_back_SANDBOX_EXPORTS.patch).
 
 `base/logging.cc` has a one-line patch to gate the `rust_logger.rs.h`

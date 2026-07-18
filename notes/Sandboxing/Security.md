@@ -20,6 +20,13 @@ under a `USER_LIMITED` token, with:
   `.pck` — the renderer cannot read or write anywhere else under the
   user's profile.
 - No registry write access.
+- The renderer's inherited environment is filtered to an explicit
+  allow-list (`Path`/`System*`/`TEMP`/`TMP`/`LOCALAPPDATA`/`APPDATA`/
+  `USERPROFILE`/`USERNAME` plus `TG_`/`VK_` prefixes) before spawn — the
+  launcher's own secrets (SSH agent, cloud/API credentials) never reach
+  the untrusted renderer. Mirrors the Linux allow-list.
+- Blocked file/registry accesses are logged (`[SANDBOX-WIN-DENY] ...`) to
+  the uploaded renderer log, mirroring the Linux `[SECCOMP]` logger.
 - No child-process creation, no access to the user's real desktop, no
   global window-message hooks.
 - No raw network sockets — `USER_LIMITED` denies AF_INET socket creation.

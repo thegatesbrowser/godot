@@ -114,13 +114,16 @@ modules/the_gates/
 │   ├── sandbox_policy.cpp/.h        SandboxPolicy struct: rw_dir, ro_files, allow_net, ...
 │   ├── sandbox_diagnostics.cpp/.h   cross-plat diagnostics: each platform fills fields it owns
 │   ├── signature_verify.h           cross-plat header; impl per platform under platform/
+│   ├── crash_logger.cpp/.h          [RENDERER-CRASH] handler (POSIX sigaction / Win SEH filter)
+│   ├── signal_safe_log.h            async-signal-safe stderr log helper for the above
 │   │
 │   ├── windows/                     ── Chromium broker/target (TG_SANDBOX && WINDOWS_ENABLED)
 │   │   ├── SCsub                    builds thirdparty/chromium-sandbox + module Win impl
 │   │   ├── sandbox_win.cpp/.h       SandboxWin : Sandbox
 │   │   ├── broker_delegate.cpp/.h   chromium BrokerServicesDelegate impl (was the long-named file)
 │   │   ├── handle_scope.h           RAII HANDLE wrappers (template, header-only)
-│   │   ├── socket_acl.cpp/.h        tg_apply_untrusted_acl() — one-shot tree walk gated on root SACL
+│   │   ├── win_acl.cpp/.h           tg_apply_untrusted_acl() + WinACL SID grants
+│   │   ├── sandbox_deny_log.cpp/.h  [SANDBOX-WIN-DENY] logger, hooked from the interception thunks
 │   │   ├── signature_verify.cpp     Authenticode via WinVerifyTrust + thumbprint pin
 │   │   └── linker_stubs.cpp         shim for chromium PolicyDiagnostic + DumpWithoutCrashing
 │   │
