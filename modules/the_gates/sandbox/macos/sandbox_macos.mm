@@ -68,6 +68,55 @@ extern "C" const char *tg_renderer_sandbox_addend = nullptr;
 
 namespace {
 
+// Env vars passed through to the renderer. The exact allowlist covers locale,
+// HOME, PATH, TMPDIR, and Apple's __CF_USER_TEXT_ENCODING. Everything else is
+// dropped — keeps SSH_AUTH_SOCK, AWS_*, API-key secrets, and DYLD_* dylib-injection
+// vectors out of the gate's environ.
+constexpr const char *kEnvAllowExact[] = {
+	"HOME",
+	"USER",
+	"LOGNAME",
+	"LANG",
+	"LC_ALL",
+	"LC_COLLATE",
+	"LC_CTYPE",
+	"LC_MESSAGES",
+	"LC_MONETARY",
+	"LC_NUMERIC",
+	"LC_TIME",
+	"TZ",
+	"TERM",
+	"PATH",
+	"TMPDIR",
+	"__CF_USER_TEXT_ENCODING",
+};
+
+// Prefix matches for TG_ harness force-fail hooks, VK_ / MVK_ Vulkan loader and
+// MoltenVK knobs, and MTL_ Metal knobs.
+constexpr const char *kEnvAllowPrefixes[] = {
+	"TG_",
+	"VK_",
+	"MVK_",
+	"MTL_",
+};
+
+bool env_var_allowed(const char *p_env) {
+	const char *eq = ::strchr(p_env, '=');
+	const size_t name_len = (eq != nullptr) ? (size_t)(eq - p_env) : ::strlen(p_env);
+	for (const char *name : kEnvAllowExact) {
+		if (::strlen(name) == name_len && ::memcmp(p_env, name, name_len) == 0) {
+			return true;
+		}
+	}
+	for (const char *prefix : kEnvAllowPrefixes) {
+		const size_t plen = ::strlen(prefix);
+		if (name_len >= plen && ::memcmp(p_env, prefix, plen) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void write_broker_policy_json(const String &p_log_path, const String &p_executable, pid_t p_pid,
 		const Ref<SandboxPolicy> &p_policy) {
 	Dictionary policy = p_policy->to_dict();
@@ -167,19 +216,16 @@ Dictionary SandboxMacOS::spawn_target(const Ref<SandboxPolicy> &p_policy,
 	env_owned.push_back(String(p_policy->is_audio_allowed() ? "TG_SANDBOX_ALLOW_AUDIO=1" : "TG_SANDBOX_ALLOW_AUDIO=0").utf8());
 	env_owned.push_back(String(p_policy->is_microphone_allowed() ? "TG_SANDBOX_ALLOW_MICROPHONE=1" : "TG_SANDBOX_ALLOW_MICROPHONE=0").utf8());
 
-	int env_count = 0;
-	for (char **e = environ; *e != nullptr; ++e) {
-		env_count++;
-	}
 	Vector<char *> envp;
-	envp.resize(env_count + env_owned.size() + 1);
-	for (int i = 0; i < env_count; ++i) {
-		envp.write[i] = environ[i];
+	for (char **e = environ; *e != nullptr; ++e) {
+		if (env_var_allowed(*e)) {
+			envp.push_back(*e);
+		}
 	}
 	for (int i = 0; i < env_owned.size(); ++i) {
-		envp.write[env_count + i] = const_cast<char *>(env_owned[i].get_data());
+		envp.push_back(const_cast<char *>(env_owned[i].get_data()));
 	}
-	envp.write[env_count + env_owned.size()] = nullptr;
+	envp.push_back(nullptr);
 
 	// Set up file_actions: redirect stdout/stderr to log, dup the broker
 	// socketpair end to a known FD number that survives the execve.
@@ -409,4 +455,3 @@ bool SandboxMacOS::is_target() const {
 	return false;
 #endif
 }
-
