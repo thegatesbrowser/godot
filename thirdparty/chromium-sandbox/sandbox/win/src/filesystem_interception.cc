@@ -12,6 +12,7 @@
 #include <ntstatus.h>
 #include <stdint.h>
 
+#include "modules/the_gates/sandbox/windows/sandbox_deny_log.h"
 #include "sandbox/win/src/crosscall_client.h"
 #include "sandbox/win/src/filesystem_policy.h"
 #include "sandbox/win/src/ipc_tags.h"
@@ -50,7 +51,11 @@ bool ShouldAskBroker(IpcTag ipc_tag,
   params[OpenFile::ACCESS] = ParamPickerMake(desired_access);
   uint32_t open_only_int = open_only;
   params[OpenFile::OPENONLY] = ParamPickerMake(open_only_int);
-  return QueryBroker(ipc_tag, params.GetBase());
+  const bool query_broker = QueryBroker(ipc_tag, params.GetBase());
+  if (!query_broker) {
+    tg_sandbox_log_denied_file(name_ptr, desired_access);
+  }
+  return query_broker;
 }
 }  // namespace
 
@@ -125,6 +130,7 @@ NTSTATUS WINAPI TargetNtCreateFile(NtCreateFileFunction orig_CreateFile,
     status = answer.nt_status;
 
     if (!NT_SUCCESS(answer.nt_status)) {
+      tg_sandbox_log_denied_file(name.get(), desired_access);
       break;
     }
 
@@ -188,8 +194,10 @@ NTSTATUS WINAPI TargetNtOpenFile(NtOpenFileFunction orig_OpenFile,
 
     status = answer.nt_status;
 
-    if (!NT_SUCCESS(answer.nt_status))
+    if (!NT_SUCCESS(answer.nt_status)) {
+      tg_sandbox_log_denied_file(name.get(), desired_access);
       break;
+    }
 
     __try {
       *file = answer.handle;

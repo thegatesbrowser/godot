@@ -105,11 +105,12 @@ class TargetProcess {
   // Verify the target process looks the same as the broker process.
   ResultCode VerifySentinels();
 
-  // Filters an environment to only include those that have an entry in
-  // `to_keep`.
+  // Filters an environment to only include names in `to_keep` or names
+  // starting with an entry in `prefix_keep`. Comparison is case-insensitive.
   static std::wstring FilterEnvironment(
       const wchar_t* env,
-      const base::span<const std::wstring_view> to_keep);
+      const base::span<const std::wstring_view> to_keep,
+      const base::span<const std::wstring_view> prefix_keep);
 
   // Details of the target process.
   base::win::ScopedProcessInformation sandbox_process_info_;

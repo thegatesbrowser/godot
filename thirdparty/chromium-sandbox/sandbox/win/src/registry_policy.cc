@@ -126,25 +126,17 @@ namespace sandbox {
 bool RegistryPolicy::GenerateRules(const wchar_t* name,
                                    RegistrySemantics semantics,
                                    LowLevelPolicy* policy) {
-  wprintf(L"GenerateRules called with name: %s\n", name ? name : L"<null>");
   std::wstring resolved_name(name);
-  wprintf(L"Resolved name (before resolution): %s\n", resolved_name.c_str());
   if (resolved_name.empty()) {
-    wprintf(L"ERROR: Resolved name is empty, returning false\n");
     return false;
   }
 
-  wprintf(L"Calling ResolveRegistryName with: %s\n", resolved_name.c_str());
   auto resolved = ResolveRegistryName(resolved_name);
   if (!resolved.has_value()) {
-    wprintf(L"ERROR: ResolveRegistryName failed, returning false\n");
     return false;
   }
-  wprintf(L"ResolveRegistryName succeeded\n");
 
   name = resolved.value().c_str();
-  wprintf(L"Registry name after resolution: %s\n", name);
-  wprintf(L"Semantics: %d\n", static_cast<int>(semantics));
   EvalResult result = ASK_BROKER;
 
   PolicyRule open(result);
@@ -152,43 +144,32 @@ bool RegistryPolicy::GenerateRules(const wchar_t* name,
 
   switch (semantics) {
     case RegistrySemantics::kAllowReadonly: {
-      wprintf(L"Processing kAllowReadonly semantics\n");
       // We consider all flags that are not known to be readonly as potentially
       // used for write. Here we also support MAXIMUM_ALLOWED, but we are going
       // to expand it to read-only before the call.
       uint32_t restricted_flags = ~(kAllowedRegFlags | MAXIMUM_ALLOWED);
       open.AddNumberMatch(IF_NOT, OpenKey::ACCESS, restricted_flags, AND);
       create.AddNumberMatch(IF_NOT, OpenKey::ACCESS, restricted_flags, AND);
-      wprintf(L"Added readonly restrictions\n");
       break;
     }
     case RegistrySemantics::kAllowAny: {
-      wprintf(L"Processing kAllowAny semantics\n");
       break;
     }
     default: {
-      wprintf(L"ERROR: Unknown semantics: %d\n", static_cast<int>(semantics));
       NOTREACHED();
     }
   }
 
-  wprintf(L"Adding create rule for name: %s\n", name);
   if (!create.AddStringMatch(IF, OpenKey::NAME, name) ||
       !policy->AddRule(IpcTag::NTCREATEKEY, &create)) {
-    wprintf(L"ERROR: Failed to add create rule, returning false\n");
     return false;
   }
-  wprintf(L"Successfully added create rule\n");
 
-  wprintf(L"Adding open rule for name: %s\n", name);
   if (!open.AddStringMatch(IF, OpenKey::NAME, name) ||
       !policy->AddRule(IpcTag::NTOPENKEY, &open)) {
-    wprintf(L"ERROR: Failed to add open rule, returning false\n");
     return false;
   }
-  wprintf(L"Successfully added open rule\n");
 
-  wprintf(L"GenerateRules completed successfully\n");
   return true;
 }
 
